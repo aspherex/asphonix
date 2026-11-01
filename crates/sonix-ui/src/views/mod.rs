@@ -1,8 +1,11 @@
+pub mod boot;
 pub mod chrome;
 pub mod dock;
 pub mod library;
 pub mod lists;
+pub mod np_lyrics;
 pub mod nowplaying;
+pub mod overlay_card;
 pub mod queue_rail;
 pub mod shell;
 pub mod tracks;

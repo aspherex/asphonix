@@ -291,6 +291,38 @@ pub trait PlayerApi {
     fn player_play_artist(&self, _req: PlayArtistRequest) -> ApiResult<()> {
         unimpl!("player_play_artist")
     }
+    /// `player_remove_from_queue`
+    fn player_remove_from_queue(&self, _index: usize) -> ApiResult<()> {
+        Ok(())
+    }
+    /// `player_reorder_queue`: move one entry (`mock.ts` splice semantics, `current` follows).
+    fn player_reorder_queue(&self, _from: usize, _to: usize) -> ApiResult<()> {
+        Ok(())
+    }
+    /// `flow_get_coverage`: how much of a Flow pool has real sequencing data.
+    fn flow_get_coverage(&self, _req: FlowCoverageRequest) -> ApiResult<FlowCoverage> {
+        Ok(FlowCoverage { total: 0, bpm: 0, key: 0, loudness: 0 })
+    }
+    /// `radio_start`: a radio queue seeded from a track, album or artist.
+    fn radio_start(&self, _req: RadioStartRequest) -> ApiResult<()> {
+        Ok(())
+    }
+    /// `updates_check`: the newer release, if any (also announced as `Event::UpdateAvailable`).
+    fn updates_check(&self) -> ApiResult<UpdateInfo> {
+        Ok(UpdateInfo { available: false, current_version: String::new(), version: None, notes: None, date: None })
+    }
+    /// `updates_install`: download + install + restart (progress as `Event::UpdateProgress`); explicit user action only.
+    fn updates_install(&self) -> ApiResult<()> {
+        Ok(())
+    }
+    /// `lyrics_get`: None = no lyrics for the track.
+    fn lyrics_get(&self, _track_id: &str) -> ApiResult<Option<Lyrics>> {
+        Ok(None)
+    }
+    /// `fullPlayer.loopCycle`: A-B loop (set A, set B, clear).
+    fn player_loop_cycle(&self) -> ApiResult<()> {
+        Ok(())
+    }
 }
 
 /// `output_*`
@@ -328,10 +360,6 @@ pub trait SettingsApi {
     /// `art_cache_status`
     fn art_cache_status(&self) -> ApiResult<ArtCacheStatus> {
         unimpl!("art_cache_status")
-    }
-    /// `updates_check`
-    fn updates_check(&self) -> ApiResult<UpdateInfo> {
-        unimpl!("updates_check")
     }
 }
 

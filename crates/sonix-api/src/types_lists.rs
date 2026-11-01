@@ -198,20 +198,6 @@ pub struct ArtCacheStatus {
     pub bytes: u64,
 }
 
-/// `UpdateInfo` (`updates_check`)
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct UpdateInfo {
-    pub available: bool,
-    pub current_version: String,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub version: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub date: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub notes: Option<String>,
-}
-
 /// One `settings_set_*` command (the TS names are `settings.setX`): the mock/backends apply it.
 #[derive(Debug, Clone, PartialEq)]
 pub enum SettingChange {

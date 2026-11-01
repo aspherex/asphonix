@@ -27,7 +27,7 @@ fn host(url: &str) -> String {
 }
 
 impl Shell {
-    pub(crate) fn title_bar(&self, window: &mut Window, _cx: &mut Context<Self>) -> impl IntoElement + use<> {
+    pub(crate) fn title_bar(&self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement + use<> {
         let th = self.th;
         let maximized = window.is_maximized();
         let ctrl = move |id: &'static str, area: WindowControlArea, name: &'static str, size: f32, danger: bool| {
@@ -78,6 +78,25 @@ impl Shell {
                     .children(mock.map(|m| div().mt(px(VERSION_DY)).px(px(tb::VERSION_PAD_X)).bg(th.high).child(txt(&th, MONO_CODE, m).color(th.accent_fg)))),
             )
             .child(div().flex_1())
+            .children(self.update.clone().filter(|u| u.available).map(|u| {
+                // `.update { margin-right: var(--space-sm); padding: 2px var(--space-sm); accent fill }`
+                pid(
+                    "titlebar.update",
+                    div()
+                        .id("update-badge")
+                        .mr(px(8.))
+                        .px(px(8.))
+                        .py(px(2.))
+                        .bg(th.accent)
+                        .cursor(CursorStyle::PointingHand)
+                        .hover(|s| s.opacity(0.85))
+                        .child(txt(&th, LABEL_CAPS, format!("Update {}", u.version.clone().unwrap_or_default())).color(th.accent_text))
+                        .on_click(cx.listener(move |this, _, _, cx| {
+                            let playing = this.player.read(cx).state.status == sonix_api::PlaybackStatus::Playing;
+                            crate::overlays::open_update(cx, u.clone(), playing);
+                        })),
+                )
+            }))
             .child(
                 div()
                     .flex()
@@ -304,12 +323,22 @@ impl Shell {
             let icon_name = if p.read_only { if p.smart { "bolt" } else { "lock" } } else { "playlist" };
             lists = lists.child(pid(
                 format!("sidebar.pl.s{i}"),
-                pl_row(SharedString::from(format!("pl-{}", p.id)), active, icon_name, p.name.clone(), p.song_count.to_string())
-                    .on_click(cx.listener(move |this, _, _, cx| this.navigate(Route::Playlist(id.clone()), cx)))
-                    .on_mouse_down(gpui::MouseButton::Right, {
-                        let pc = p.clone();
-                        cx.listener(move |this, ev: &gpui::MouseDownEvent, window, cx| this.lists_playlist_menu(&pc, ev.position, window, cx))
-                    }),
+                {
+                    let pc = p.clone();
+                    let row = pl_row(SharedString::from(format!("pl-{}", p.id)), active, icon_name, p.name.clone(), p.song_count.to_string())
+                        .relative()
+                        .on_click(cx.listener(move |this, _, _, cx| this.navigate(Route::Playlist(id.clone()), cx)))
+                        .on_mouse_down(gpui::MouseButton::Right, cx.listener(move |this, ev: &gpui::MouseDownEvent, window, cx| this.lists_playlist_menu(&pc, ev.position, window, cx)));
+                    if p.read_only {
+                        row
+                    } else {
+                        // drop target (`Sidebar.svelte onPlaylistDrop`): read-only playlists never are; the hover frame is a dashed accent outline
+                        let (pid_, pname) = (p.id.clone(), p.name.clone());
+                        row.on_drop(cx.listener(move |this, d: &crate::dnd::SonixDrag, _, cx| this.drop_on_playlist(pid_.clone(), pname.clone(), d.0.clone(), cx))).child(
+                            div().absolute().top_0().left_0().size_full().border_1().border_dashed().border_color(gpui::transparent_black()).group_drag_over::<crate::dnd::SonixDrag>("hv", move |s| s.border_color(th.accent_fg)),
+                        )
+                    }
+                },
             ));
         }
 

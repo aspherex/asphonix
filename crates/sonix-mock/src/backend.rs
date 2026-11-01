@@ -5,6 +5,7 @@
 //!
 //! Threading: one ticker thread, blocked on a condvar (zero wake-ups) unless a track
 //! is playing; spectrum frames are only produced while `player_set_spectrum_active(true)`.
+use crate::flow;
 use crate::library::{Library, track_index};
 use crate::art;
 use sonix_api::*;
@@ -41,6 +42,13 @@ struct Source {
     label: String,
     mode: SourceMode,
     remaining: VecDeque<u32>,
+    /// Flow only (`MockSource` in mock.ts): arc, the whole pool, round size, Build/Peak quota, the pool's coverage.
+    arc: FlowArc,
+    pool: Vec<u32>,
+    round_total: usize,
+    quota_known: usize,
+    quota_drawn: usize,
+    coverage: Option<FlowCoverage>,
 }
 
 struct Core {
@@ -55,6 +63,16 @@ struct Core {
     window: usize,
     rng: u64,
     output_mode: OutputMode,
+    /// Virtual seconds of playback (advances with `pos`): the waveform scan clock.
+    vt: f64,
+    wave_start: HashMap<String, f64>,
+    loop_a: Option<f64>,
+    loop_b: Option<f64>,
+    loop_track: Option<String>,
+    /// Parity harness: `Math.random()` is pinned to 0.5 on the web side, so shuffles/radio use 0.5 too.
+    det_half: bool,
+    lib: Arc<Library>,
+    feats: flow::Features,
 }
 
 struct Inner {
@@ -63,6 +81,9 @@ struct Inner {
     core: Mutex<Core>,
     cv: Condvar,
     subs: Mutex<Vec<Sender<Event>>>,
+    mock_update: AtomicBool,
+    /// Manual-clock install progress: (seconds since the last tick, bytes downloaded).
+    install: Mutex<Option<(f64, u64)>>,
     spectrum_active: AtomicBool,
     shutdown: AtomicBool,
     starred: Mutex<HashMap<String, String>>,
@@ -160,10 +181,20 @@ impl MockBackend {
                 window: QUEUE_WINDOW,
                 rng: seed.unwrap_or_else(|| 0x9e37_79b9_7f4a_7c15 ^ std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_nanos() as u64).unwrap_or(1)),
                 output_mode: OutputMode::Exclusive,
+                vt: 0.0,
+                wave_start: HashMap::new(),
+                loop_a: None,
+                loop_b: None,
+                loop_track: None,
+                det_half: manual,
+                lib: Arc::new(Library::new()),
+                feats: flow::Features::default(),
             }),
             cv: Condvar::new(),
             subs: Mutex::new(Vec::new()),
             spectrum_active: AtomicBool::new(false),
+            mock_update: AtomicBool::new(std::env::var_os("SONIX_MOCK_UPDATE").is_some()),
+            install: Mutex::new(None),
             shutdown: AtomicBool::new(false),
             starred: Mutex::new(stars),
             playlists: Mutex::new(playlists),
@@ -182,10 +213,23 @@ impl MockBackend {
     /// spectrum frame evaluated at absolute clock time `t` seconds, like mock.ts's two intervals.
     pub fn advance(&self, dt: f64, t: f64) {
         let inner = &self.inner;
+        {
+            let mut ins = inner.install.lock().unwrap();
+            if let Some((acc, got)) = ins.as_mut() {
+                *acc += dt;
+                while *acc >= 0.2 - 1e-9 && *got < 12_000_000 {
+                    *acc -= 0.2;
+                    *got = (*got + 1_500_000).min(12_000_000);
+                    inner.emit(Event::UpdateProgress(UpdateProgress { downloaded: *got, total: Some(12_000_000) }));
+                }
+            }
+        }
         let mut core = inner.core.lock().unwrap();
         let mut queue_changed = false;
         if core.status == PlaybackStatus::Playing {
             core.pos += dt;
+            core.vt += dt;
+            Inner::loop_wrap(&mut core);
             let dur = core.current.and_then(|i| core.entries.get(i)).map(|e| inner.lib.sort_fields(e.ix as usize).duration as f64).unwrap_or(0.0);
             if dur > 0.0 && core.pos >= dur {
                 if Inner::advance(&mut core) {
@@ -230,6 +274,11 @@ impl MockBackend {
     }
 
     /// Sorted, filtered permutation of all track indices; one (sort, dir, filter) is cached.
+    /// `?mockUpdate=1`: `updates_check` finds a (fake) newer release.
+    pub fn set_mock_update(&self, on: bool) {
+        self.inner.mock_update.store(on, Ordering::Relaxed);
+    }
+
     pub fn permutation(&self, sort: TrackSortField, dir: SortDir, filter: Option<&str>) -> Arc<Vec<u32>> {
         self.inner.permutation(sort, dir, filter)
     }
@@ -306,6 +355,10 @@ impl Inner {
         s.float_mix = if shared && track.is_some() { Some(true) } else { None };
         s.format_label = track.as_ref().map(|t| t.format.suffix.to_uppercase());
         s.volume = c.volume;
+        if c.loop_track.is_some() && c.loop_track == c.current.and_then(|i| c.entries.get(i)).map(|e| format!("tr_{}", e.ix)) {
+            s.loop_a = c.loop_a;
+            s.loop_b = c.loop_b;
+        }
         s.volume_db = volume_db(c.volume);
         s.bit_perfect = track.is_some() && c.status != PlaybackStatus::Stopped && !shared && c.volume >= 1.0;
         s.shuffle = c.shuffle;
@@ -321,6 +374,9 @@ impl Inner {
 
     /// Draw from the source until `window` ids are queued ahead of `current`.
     fn refill(c: &mut Core) {
+        if c.source.as_ref().is_some_and(|s| s.mode == SourceMode::Flow) {
+            return Self::flow_refill(c);
+        }
         let Some(src) = c.source.as_mut() else { return };
         let ahead = |c: &Core| c.entries.len().saturating_sub(c.current.map(|i| i + 1).unwrap_or(0));
         let _ = ahead;
@@ -339,6 +395,19 @@ impl Inner {
                 c.current = Some(cu - keep_from);
             }
         }
+    }
+
+    /// mock.ts position ticker: reaching B jumps back to A.
+    fn loop_wrap(c: &mut Core) {
+        if let (Some(a), Some(b)) = (c.loop_a, c.loop_b)
+            && c.pos >= b
+        {
+            c.pos = a;
+        }
+    }
+
+    fn current_id(&self, c: &Core) -> Option<String> {
+        c.current.and_then(|i| c.entries.get(i)).map(|e| format!("tr_{}", e.ix))
     }
 
     fn start_current(c: &mut Core) {
@@ -386,7 +455,7 @@ impl Inner {
         } else {
             c.entries = Vec::new();
         }
-        c.source = Some(Source { kind, label, mode, remaining: pool });
+        c.source = Some(Source { kind, label, mode, remaining: pool, arc: FlowArc::Steady, pool: Vec::new(), round_total: 0, quota_known: 0, quota_drawn: 0, coverage: None });
         if c.entries.is_empty()
             && let Some(first) = c.source.as_mut().and_then(|s| s.remaining.pop_front())
         {
@@ -425,6 +494,8 @@ fn ticker(weak: Weak<Inner>) {
         last = Instant::now();
         core.pos += dt;
         state_acc += dt;
+        core.vt += dt;
+        Inner::loop_wrap(&mut core);
         let dur = core.current.and_then(|i| core.entries.get(i)).map(|e| inner.lib.sort_fields(e.ix as usize).duration as f64).unwrap_or(0.0);
         let mut queue_changed = false;
         if dur > 0.0 && core.pos >= dur {
@@ -739,9 +810,6 @@ impl SettingsApi for MockBackend {
         let n = crate::library::NUM_ALBUMS as u64;
         Ok(ArtCacheStatus { cached: n, total: n, bytes: n * 35_000 })
     }
-    fn updates_check(&self) -> ApiResult<UpdateInfo> {
-        Ok(UpdateInfo { available: false, current_version: "0.6.1".into(), version: None, date: None, notes: None })
-    }
 }
 
 impl BrowseApi for MockBackend {
@@ -994,11 +1062,14 @@ impl PlayerApi for MockBackend {
         }
         c.shuffle = shuffle_all;
         let mode = if shuffle_all { SourceMode::Shuffle } else { SourceMode::InOrder };
-        let label = match req.filter.as_deref().map(str::trim) {
-            Some(f) if !f.is_empty() => format!("Tracks matching \"{f}\""),
-            _ => "All tracks".into(),
-        };
-        self.inner.set_source(&mut c, SourceKind::AllTracks, label, mode, pool, start);
+        let label = String::from("All Tracks");
+        if let Some(arc) = req.flow {
+            // `flow` wins over `shuffle`; no random opener (mock.ts: `shuffle && !req.flow`)
+            let pool: Vec<u32> = (*perm).clone();
+            Inner::flow_set_source(&mut c, SourceKind::AllTracks, label, pool, start, arc);
+        } else {
+            self.inner.set_source(&mut c, SourceKind::AllTracks, label, mode, pool, start);
+        }
         self.inner.push_state(&c);
         drop(c);
         self.inner.cv.notify_all();
@@ -1140,17 +1211,36 @@ impl PlayerApi for MockBackend {
     }
 
     fn player_get_queue(&self, req: PageRequest) -> ApiResult<QueueState> {
-        let c = self.inner.core.lock().unwrap();
+        let mut c = self.inner.core.lock().unwrap();
         let end = (req.offset + req.limit).min(c.entries.len());
-        let items = c.entries[req.offset.min(end)..end]
-            .iter()
-            .map(|e| QueueItem { track: self.inner.track(e.ix), origin: e.origin })
-            .collect();
+        let start = req.offset.min(end);
+        let flow_on = c.source.as_ref().is_some_and(|s| s.mode == SourceMode::Flow);
+        let lib = c.lib.clone();
+        let mut items = Vec::new();
+        for idx in start..end {
+            let e = c.entries[idx].clone();
+            let flow = if flow_on && e.origin == QueueItemOrigin::Source && idx > 0 {
+                let prev = c.entries[idx - 1].ix;
+                let (p, cur) = (c.feats.get(&lib, prev), c.feats.get(&lib, e.ix));
+                flow::reason(&p, &cur)
+            } else {
+                None
+            };
+            items.push(QueueItem { track: self.inner.track(e.ix), origin: e.origin, flow });
+        }
         Ok(QueueState {
             items,
             total: c.entries.len(),
             current_index: c.current.map(|i| i as i64).unwrap_or(-1),
-            source: c.source.as_ref().map(|s| QueueSourceInfo { kind: s.kind, label: s.label.clone(), id: None, mode: s.mode, remaining: s.remaining.len() }),
+            source: c.source.as_ref().map(|s| QueueSourceInfo {
+                kind: s.kind,
+                label: s.label.clone(),
+                id: None,
+                mode: s.mode,
+                remaining: s.remaining.len(),
+                arc: (s.mode == SourceMode::Flow).then_some(s.arc),
+                flow_coverage: if s.mode == SourceMode::Flow { s.coverage } else { None },
+            }),
         })
     }
 
@@ -1173,6 +1263,7 @@ impl PlayerApi for MockBackend {
         let ids: Vec<Entry> = req.track_ids.iter().filter_map(|i| track_index(i)).map(|i| Entry { ix: i as u32, origin: QueueItemOrigin::User }).collect();
         let at = match req.position {
             EnqueuePosition::Next => c.current.map(|i| i + 1).unwrap_or(0),
+            EnqueuePosition::End if c.source.is_none() => c.entries.len(),
             EnqueuePosition::End => {
                 // end of the contiguous user run after `current`, still ahead of source entries
                 let mut p = c.current.map(|i| i + 1).unwrap_or(0);
@@ -1190,9 +1281,182 @@ impl PlayerApi for MockBackend {
         Ok(())
     }
 
+    fn player_remove_from_queue(&self, index: usize) -> ApiResult<()> {
+        let mut c = self.inner.core.lock().unwrap();
+        if index >= c.entries.len() {
+            return Ok(());
+        }
+        c.entries.remove(index);
+        match c.current {
+            Some(cur) if cur == index => c.current = if c.entries.is_empty() { None } else { Some(index.min(c.entries.len() - 1)) },
+            Some(cur) if cur > index => c.current = Some(cur - 1),
+            _ => {}
+        }
+        Inner::refill(&mut c);
+        if c.current.is_none() && !c.entries.is_empty() {
+            c.current = Some(0);
+        }
+        self.inner.push_state(&c);
+        drop(c);
+        self.inner.emit(Event::QueueChanged);
+        Ok(())
+    }
+
+    fn player_reorder_queue(&self, from: usize, to: usize) -> ApiResult<()> {
+        let mut c = self.inner.core.lock().unwrap();
+        if from >= c.entries.len() {
+            return Ok(());
+        }
+        let moved = c.entries.remove(from);
+        let to = to.min(c.entries.len());
+        c.entries.insert(to, moved);
+        if let Some(cur) = c.current {
+            if cur == from {
+                c.current = Some(to);
+            } else if from < cur && cur <= to {
+                c.current = Some(cur - 1);
+            } else if to <= cur && cur < from {
+                c.current = Some(cur + 1);
+            }
+        }
+        Inner::refill(&mut c);
+        self.inner.push_state(&c);
+        drop(c);
+        self.inner.emit(Event::QueueChanged);
+        Ok(())
+    }
+
+    fn updates_check(&self) -> ApiResult<UpdateInfo> {
+        let cur = env!("CARGO_PKG_VERSION").to_string();
+        let info = if self.inner.mock_update.load(Ordering::Relaxed) {
+            UpdateInfo { available: true, current_version: cur, version: Some("9.9.9".into()), date: Some("2026-01-01".into()), notes: Some("Features
+- Example feature
+
+Fixes
+- Example fix <b>not bold</b>".into()) }
+        } else {
+            UpdateInfo { available: false, current_version: cur, version: None, notes: None, date: None }
+        };
+        if info.available {
+            self.inner.emit(Event::UpdateAvailable(info.clone()));
+        }
+        Ok(info)
+    }
+
+    fn updates_install(&self) -> ApiResult<()> {
+        let total = 12_000_000u64;
+        let mut downloaded = 0u64;
+        if self.inner.core.lock().unwrap().det_half {
+            // parity: the harness advances the clock; progress ticks come from `advance`
+            *self.inner.install.lock().unwrap() = Some((0.0, 0));
+            return Ok(());
+        }
+        while downloaded < total {
+            downloaded = (downloaded + 1_500_000).min(total);
+            self.inner.emit(Event::UpdateProgress(UpdateProgress { downloaded, total: Some(total) }));
+            std::thread::sleep(Duration::from_millis(200));
+        }
+        Ok(())
+    }
+
+    fn lyrics_get(&self, track_id: &str) -> ApiResult<Option<Lyrics>> {
+        let Some(idx) = track_index(track_id) else { return Ok(None) };
+        Ok(mock_lyrics(&self.inner.lib.track(idx), idx))
+    }
+
+    fn flow_get_coverage(&self, req: FlowCoverageRequest) -> ApiResult<FlowCoverage> {
+        let ids: Vec<u32> = match req.kind {
+            FlowPoolKind::AllTracks => (*self.inner.permutation(TrackSortField::Title, SortDir::Asc, req.filter.as_deref())).clone(),
+            FlowPoolKind::Playlist => self.inner.playlists.lock().unwrap().iter().find(|(p, _)| Some(&p.id) == req.id.as_ref()).map(|(_, ids)| ids.clone()).unwrap_or_default(),
+            FlowPoolKind::Liked => self.inner.starred.lock().unwrap().keys().filter_map(|k| track_index(k)).map(|i| i as u32).collect(),
+            _ => Vec::new(),
+        };
+        let mut c = self.inner.core.lock().unwrap();
+        let lib = c.lib.clone();
+        let mut seen = std::collections::HashSet::new();
+        let feats: Vec<_> = ids.into_iter().filter(|i| seen.insert(*i)).map(|i| c.feats.get(&lib, i)).collect();
+        Ok(flow::coverage(feats.iter().map(|f| f.as_ref())))
+    }
+
+    fn radio_start(&self, req: RadioStartRequest) -> ApiResult<()> {
+        let mut c = self.inner.core.lock().unwrap();
+        let (genre, exclude) = match req.seed.kind {
+            RadioSeedKind::Track => {
+                let ix = track_index(&req.seed.id).ok_or_else(|| ApiError::not_found("track"))?;
+                (c.lib.track(ix).genre, Some(ix as u32))
+            }
+            RadioSeedKind::Album => {
+                let ix = req.seed.id.strip_prefix("al_").and_then(|s| s.parse::<usize>().ok()).ok_or_else(|| ApiError::not_found("album"))?;
+                (c.lib.album(ix).genre, None)
+            }
+            RadioSeedKind::Artist => return Err(ApiError::not_found("radio seed")),
+        };
+        let total = c.lib.total_tracks();
+        let lib = c.lib.clone();
+        let mut out: Vec<u32> = Vec::new();
+        let mut seen = std::collections::HashSet::new();
+        let mut attempts = 0;
+        while genre.is_some() && out.len() < 50 && attempts < 50 * 60 && seen.len() < total {
+            attempts += 1;
+            let idx = (Inner::rand01(&mut c) * total as f64).floor() as usize;
+            if !seen.insert(idx) {
+                continue;
+            }
+            let t = lib.track(idx);
+            if t.genre != genre || Some(idx as u32) == exclude {
+                continue;
+            }
+            out.push(idx as u32);
+        }
+        if out.is_empty() {
+            return Err(ApiError::not_found("no similar tracks found for this radio seed"));
+        }
+        c.shuffle = false;
+        self.inner.set_source(&mut c, SourceKind::Radio, "Radio".into(), SourceMode::InOrder, out, None);
+        c.status = PlaybackStatus::Playing;
+        self.inner.push_state(&c);
+        drop(c);
+        self.inner.cv.notify_all();
+        self.inner.emit(Event::QueueChanged);
+        Ok(())
+    }
+
     fn player_get_waveform(&self, track_id: &str) -> ApiResult<Waveform> {
-        let ix = track_index(track_id).ok_or_else(|| ApiError::not_found("track"))?;
-        Ok(Waveform { track_id: track_id.into(), buckets: synth_waveform(ix), filled: WAVEFORM_BUCKETS, done: true })
+        mock_waveform(self, track_id)
+    }
+
+    fn player_loop_cycle(&self) -> ApiResult<()> {
+        let mut c = self.inner.core.lock().unwrap();
+        let Some(id) = self.inner.current_id(&c) else { return Ok(()) };
+        if c.loop_track.as_deref() != Some(id.as_str()) {
+            c.loop_a = None;
+            c.loop_b = None;
+        }
+        const MIN: f64 = 0.5;
+        let pos = c.pos;
+        match (c.loop_a, c.loop_b) {
+            (None, _) => {
+                c.loop_a = Some(pos);
+                c.loop_b = None;
+                c.loop_track = Some(id);
+            }
+            (Some(a), None) => {
+                if pos >= a + MIN {
+                    c.loop_b = Some(pos);
+                    c.loop_track = Some(id);
+                } else if pos + MIN <= a {
+                    c.loop_a = Some(pos);
+                    c.loop_b = Some(a);
+                    c.loop_track = Some(id);
+                }
+            }
+            (Some(_), Some(_)) => {
+                c.loop_a = None;
+                c.loop_b = None;
+            }
+        }
+        self.inner.push_state(&c);
+        Ok(())
     }
 
     // --- library routes port: rolling-window sources of kind genre / artist (`mock.ts: player_play_genre/artist`)
@@ -1303,6 +1567,227 @@ impl Backend for MockBackend {
     }
 }
 
+
+/// mock.ts `mockWaveform`: only the track playback holds is scanned (a stopped/other track answers
+/// "no waveform"); the scan fills in over ~1.5 s of (virtual) playback time, 240 RMS buckets.
+fn mock_waveform(b: &MockBackend, track_id: &str) -> ApiResult<Waveform> {
+    let ix = track_index(track_id).ok_or_else(|| ApiError::not_found("track"))?;
+    let mut c = b.inner.core.lock().unwrap();
+    let t0 = match c.wave_start.get(track_id) {
+        Some(t) => *t,
+        None => {
+            if b.inner.current_id(&c).as_deref() != Some(track_id) || c.status == PlaybackStatus::Stopped {
+                return Ok(Waveform { track_id: track_id.into(), buckets: vec![0; WAVEFORM_BUCKETS], filled: 0, done: true });
+            }
+            let t = c.vt;
+            c.wave_start.insert(track_id.into(), t);
+            while c.wave_start.len() > 8 {
+                let k = c.wave_start.keys().next().cloned().unwrap();
+                c.wave_start.remove(&k);
+            }
+            t
+        }
+    };
+    let filled = (((c.vt - t0) / 1.5 * WAVEFORM_BUCKETS as f64).floor().max(0.0) as usize).min(WAVEFORM_BUCKETS);
+    let seed = (ix + 1) as f64;
+    let buckets: Vec<u8> = (0..WAVEFORM_BUCKETS)
+        .map(|i| {
+            if i >= filled {
+                return 0;
+            }
+            let x = i as f64 / (WAVEFORM_BUCKETS - 1) as f64;
+            let section = 0.55 + 0.35 * (x * std::f64::consts::PI * (2.0 + ((ix + 1) % 3) as f64) + seed).sin();
+            let env = (x * 12.0).min(1.0) * ((1.0 - x) * 8.0).min(1.0);
+            let grit = 0.75 + 0.25 * (i as f64 * 2.3 + seed * 1.7).sin() * (i as f64 * 0.9 + seed).cos();
+            (255.0 * env * section * grit).round().clamp(3.0, 255.0) as u8
+        })
+        .collect();
+    Ok(Waveform { track_id: track_id.into(), buckets, filled, done: filled >= WAVEFORM_BUCKETS })
+}
+
+const MOCK_LYRIC_LINES: [&str; 14] = [
+    "Static on the wire, a signal in the dark",
+    "Counting every bit as it crosses the line",
+    "Nothing in between us but the clock",
+    "Hold the sample rate, hold the time",
+    "",
+    "Bass drops low under the floorboards",
+    "Treble climbing to the edge of the room",
+    "Every channel carries what it was given",
+    "Nothing added, nothing taken",
+    "",
+    "So let it play, let it ring out clean",
+    "The quiet part is part of the song",
+    "Zero dither, zero compromise",
+    "Right where we started, right where we belong",
+];
+
+/// mock.ts `mockLyrics`: a quarter of the tracks have none, a quarter plain text, the rest synced.
+fn mock_lyrics(track: &Track, idx: usize) -> Option<Lyrics> {
+    let kind = idx % 4;
+    if kind == 0 {
+        return None;
+    }
+    let dur = track.duration;
+    let count = ((dur / 5.0).floor() as i64).clamp(8, 48) as usize;
+    let intro = (12.0f64).min(dur * 0.06);
+    let step = (dur - intro - 8.0) / count as f64;
+    let lines = (0..count)
+        .map(|i| {
+            let text = MOCK_LYRIC_LINES[(i + idx) % MOCK_LYRIC_LINES.len()].to_string();
+            LyricLine { start_ms: if kind == 3 { None } else { Some(((intro + i as f64 * step) * 1000.0).round() as u64) }, text }
+        })
+        .collect();
+    Some(Lyrics { synced: kind != 3, lines, source: if kind == 3 { LyricsSource::Classic } else { LyricsSource::Opensubsonic } })
+}
+
+// ---------------------------------------------------------------------------------------- Flow (mock.ts `setSource` flow path)
+impl Inner {
+    /// `Math.random()`: pinned to 0.5 in the parity harness, a real xorshift draw otherwise.
+    fn rand01(c: &mut Core) -> f64 {
+        if c.det_half { 0.5 } else { (xorshift(&mut c.rng) >> 11) as f64 / (1u64 << 53) as f64 }
+    }
+
+    /// `shuffleIds`
+    fn shuffle_js(c: &mut Core, v: &mut [u32]) {
+        for i in (1..v.len()).rev() {
+            let j = (Self::rand01(c) * (i as f64 + 1.0)).floor() as usize;
+            v.swap(i, j);
+        }
+    }
+
+    fn unique(v: &[u32]) -> Vec<u32> {
+        let mut seen = std::collections::HashSet::new();
+        v.iter().copied().filter(|i| seen.insert(*i)).collect()
+    }
+
+    fn energy_known_of(c: &mut Core, ix: u32) -> bool {
+        let lib = c.lib.clone();
+        flow::energy_known(&c.feats.get(&lib, ix))
+    }
+
+    /// `pickFlow`
+    fn flow_pick(c: &mut Core) -> Option<u32> {
+        let lib = c.lib.clone();
+        let (k, total, remaining_len, arc, qk, qd) = {
+            let s = c.source.as_ref()?;
+            (s.remaining.len().min(flow::CANDIDATES), if s.round_total > 0 { s.round_total } else { s.pool.len() }, s.remaining.len(), s.arc, s.quota_known, s.quota_drawn)
+        };
+        if k == 0 {
+            return None;
+        }
+        let n = c.entries.len();
+        let recent: Vec<_> = c.entries[n.saturating_sub(flow::ARTIST_WINDOW)..].iter().rev().map(|e| e.ix).collect();
+        let recent: Vec<_> = recent.into_iter().map(|ix| c.feats.get(&lib, ix)).collect();
+        let prev_id = c.entries.last().map(|e| e.ix);
+        let prev = prev_id.map(|ix| c.feats.get(&lib, ix));
+        let ids: Vec<u32> = c.source.as_ref()?.remaining.iter().take(k).copied().collect();
+        let cands: Vec<(u32, _)> = ids.iter().map(|&ix| (ix, c.feats.get(&lib, ix))).collect();
+        let step = total.saturating_sub(remaining_len);
+        let slot = flow::Slot { prev, prev_id, recent, arc, arc_pos: flow::arc_position(step, total), lean: flow::quota_lean(qk, qd, step, total) };
+        let i = flow::pick(&cands, &slot);
+        let id = c.source.as_mut()?.remaining.remove(i)?;
+        if flow::energy_known(&cands[i].1) {
+            c.source.as_mut()?.quota_drawn += 1;
+        }
+        Some(id)
+    }
+
+    /// `regenerateRemaining` for a flow source: a fresh shuffled round of the distinct pool.
+    fn flow_regenerate(c: &mut Core, avoid_first: Option<u32>) {
+        let Some(pool) = c.source.as_ref().map(|s| s.pool.clone()) else { return };
+        let mut ids = Self::unique(&pool);
+        Self::shuffle_js(c, &mut ids);
+        if let Some(a) = avoid_first
+            && ids.len() > 1
+            && ids[0] == a
+        {
+            let j = 1 + (Self::rand01(c) * (ids.len() - 1) as f64).floor() as usize;
+            ids.swap(0, j);
+        }
+        let known = ids.iter().filter(|i| Self::energy_known_of(c, **i)).count();
+        if let Some(s) = c.source.as_mut() {
+            s.round_total = ids.len();
+            s.remaining = ids.into();
+            s.quota_known = known;
+            s.quota_drawn = 0;
+        }
+    }
+
+    /// `drawIntoWindow`
+    fn flow_draw(c: &mut Core, want: usize) {
+        let (mut drawn, mut regenerated) = (0, false);
+        while drawn < want {
+            let Some(src) = c.source.as_ref() else { break };
+            if src.remaining.is_empty() {
+                if !regenerated && c.repeat == RepeatMode::All && !src.pool.is_empty() {
+                    regenerated = true;
+                    let cur = c.current.and_then(|i| c.entries.get(i)).map(|e| e.ix);
+                    Self::flow_regenerate(c, cur);
+                } else {
+                    break;
+                }
+            }
+            let Some(id) = Self::flow_pick(c) else { break };
+            c.entries.push(Entry { ix: id, origin: QueueItemOrigin::Source });
+            drawn += 1;
+        }
+    }
+
+    /// `refillIfNeeded` (flow sources): keep `window / 2` source entries ahead, prune history behind `window`.
+    fn flow_refill(c: &mut Core) {
+        let cur = c.current.map(|i| i as i64).unwrap_or(-1);
+        let ahead = if cur < 0 { 0 } else { c.entries.iter().enumerate().filter(|(i, e)| (*i as i64) > cur && e.origin == QueueItemOrigin::Source).count() };
+        if ahead as f64 >= c.window as f64 / 2.0 {
+            return;
+        }
+        Self::flow_draw(c, c.window - ahead);
+        if let Some(cu) = c.current
+            && cu > c.window
+        {
+            let drop = cu - c.window;
+            c.entries.drain(..drop);
+            c.current = Some(cu - drop);
+        }
+    }
+
+    /// `setSource` with mode `flow`.
+    pub(crate) fn flow_set_source(c: &mut Core, kind: SourceKind, label: String, pool: Vec<u32>, start: Option<u32>, arc: FlowArc) {
+        c.entries = Vec::new();
+        c.current = None;
+        c.shuffle = false;
+        let mut remaining = Self::unique(&pool);
+        Self::shuffle_js(c, &mut remaining);
+        let opener = start.and_then(|s| remaining.iter().position(|x| *x == s)).map(|i| remaining.remove(i));
+        let opener_known = opener.is_some_and(|o| Self::energy_known_of(c, o)) as usize;
+        let known = remaining.iter().filter(|i| Self::energy_known_of(c, **i)).count() + opener_known;
+        let lib = c.lib.clone();
+        let uniq = Self::unique(&pool);
+        let feats: Vec<_> = uniq.iter().map(|i| c.feats.get(&lib, *i)).collect();
+        let coverage = flow::coverage(feats.iter().map(|f| f.as_ref()));
+        c.source = Some(Source {
+            kind,
+            label,
+            mode: SourceMode::Flow,
+            round_total: remaining.len() + opener.is_some() as usize,
+            remaining: remaining.into(),
+            arc,
+            pool,
+            quota_known: known,
+            quota_drawn: opener_known,
+            coverage: Some(coverage),
+        });
+        if let Some(o) = opener {
+            c.entries.push(Entry { ix: o, origin: QueueItemOrigin::Source });
+        }
+        Self::flow_draw(c, c.window - opener.is_some() as usize);
+        if !c.entries.is_empty() {
+            c.current = Some(0);
+            Self::start_current(c);
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1368,6 +1853,7 @@ mod tests {
             order: TrackOrder::Sort { field: TrackSortField::Title, dir: SortDir::Asc },
             filter: None,
             start_track_id: None,
+            flow: None,
         })
         .unwrap();
         let q = b.player_get_queue(PageRequest { offset: 0, limit: 100 }).unwrap();
@@ -1436,5 +1922,43 @@ mod lists_tests {
         assert_eq!(l.count, 400);
         let s = b.smart_preview(crate::lists::presets()[0].input.clone(), 0, PageRequest { offset: 0, limit: 5 }).unwrap();
         assert!(s.total > 0);
+    }
+}
+
+#[cfg(test)]
+mod flow_tests {
+    use super::*;
+
+    #[test]
+    fn flow_play_all_fills_the_window_with_reasons_and_a_coverage() {
+        let b = MockBackend::new_manual();
+        b.player_play_all(PlayAllRequest { order: TrackOrder::Shuffle, filter: None, start_track_id: None, flow: Some(FlowArc::Build) }).unwrap();
+        let q = b.player_get_queue(PageRequest { offset: 0, limit: 100 }).unwrap();
+        assert_eq!(q.total, QUEUE_WINDOW, "the window is drawn up front");
+        let src = q.source.unwrap();
+        assert_eq!((src.mode, src.arc, src.label.as_str()), (SourceMode::Flow, Some(FlowArc::Build), "All Tracks"));
+        let cov = src.flow_coverage.unwrap();
+        assert!(cov.total > 50_000 && cov.bpm > 0 && cov.bpm < cov.total, "{cov:?}");
+        assert!(q.items[0].flow.is_none() && q.items.iter().skip(1).any(|i| i.flow.is_some()));
+    }
+
+    #[test]
+    fn lyrics_kinds_follow_the_track_index() {
+        let b = MockBackend::new_manual();
+        assert!(b.lyrics_get("tr_8").unwrap().is_none(), "idx % 4 == 0: none");
+        let synced = b.lyrics_get("tr_5").unwrap().unwrap();
+        assert!(synced.synced && synced.lines.iter().all(|l| l.start_ms.is_some()) && synced.source == LyricsSource::Opensubsonic);
+        let plain = b.lyrics_get("tr_7").unwrap().unwrap();
+        assert!(!plain.synced && plain.lines.iter().all(|l| l.start_ms.is_none()) && plain.source == LyricsSource::Classic);
+    }
+
+    #[test]
+    fn radio_replaces_the_queue_with_same_genre_tracks() {
+        let b = MockBackend::new();
+        b.radio_start(RadioStartRequest { seed: RadioSeed { kind: RadioSeedKind::Track, id: "tr_7".into() } }).unwrap();
+        let q = b.player_get_queue(PageRequest { offset: 0, limit: 5 }).unwrap();
+        assert_eq!(q.source.unwrap().kind, SourceKind::Radio);
+        let genre = b.inner.lib.track(7).genre;
+        assert!(q.items.iter().all(|i| i.track.genre == genre && i.track.id != "tr_7"));
     }
 }

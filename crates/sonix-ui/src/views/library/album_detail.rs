@@ -73,7 +73,8 @@ impl DetailSelection {
     }
 }
 
-gpui::actions!(sonix_library, [SelectAllRows]);
+/// Ctrl/Cmd+A in a `[data-tracklist]` list (`trackListKeydown`'s `selectAll`): one action for every list.
+use crate::views::shell::SelectAll as SelectAllRows;
 
 pub struct AlbumDetailView {
     ctx: Ctx,

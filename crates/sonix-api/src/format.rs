@@ -1,4 +1,5 @@
 //! Display formatting shared by every view (mirrors `src/lib/format.ts`).
+use crate::types::{FlowArc, FlowCoverage, FlowReason};
 use crate::types::{OutputMode, PlayerState, Track, TrackFormat};
 
 /// `m:ss` / `h:mm:ss`, `--:--` for unknown/negative/non-finite.
@@ -318,4 +319,69 @@ pub fn utc_iso(ms: i64) -> String {
     let (y, mo, d, h, mi, _) = utc_parts(ms);
     let s = ms.div_euclid(1000).rem_euclid(60);
     format!("{y:04}-{mo:02}-{d:02}T{h:02}:{mi:02}:{s:02}.{:03}Z", ms.rem_euclid(1000))
+}
+// ---- Flow text helpers (`lib/flowText.ts`): real numbers only
+
+fn pct(n: u32, total: u32) -> String {
+    if n == 0 || total == 0 {
+        return "0%".into();
+    }
+    let p = ((100.0 * n as f64) / total as f64).round() as u32;
+    if p == 0 { "<1%".into() } else { format!("{p}%") }
+}
+
+/// How much of the pool Flow actually has data for.
+pub fn coverage_hint(c: &FlowCoverage, noun: &str) -> String {
+    if c.total == 0 {
+        return String::new();
+    }
+    if c.bpm == 0 {
+        if c.loudness > 0 {
+            return format!("No BPM tags in this {noun} yet: Flow orders by genre, artist spread and loudness (ReplayGain on {})", pct(c.loudness, c.total));
+        }
+        return format!("No BPM tags in this {noun} yet: Flow orders by genre and artist spread");
+    }
+    let key = if c.key > 0 { format!(" · key {}", pct(c.key, c.total)) } else { String::new() };
+    format!("BPM known for {} of this {noun}{key}", pct(c.bpm, c.total))
+}
+
+/// One compact mono line for a row's `flow` reason: `124→126 BPM · 8A→9A · Techno`; "" when there is nothing to say.
+pub fn flow_line(r: Option<&FlowReason>) -> String {
+    let Some(r) = r else { return String::new() };
+    let mut parts: Vec<String> = Vec::new();
+    if let (Some(a), Some(b)) = (r.bpm_from, r.bpm_to) {
+        parts.push(if a == b { format!("{b} BPM") } else { format!("{a}→{b} BPM") });
+    }
+    if let (Some(a), Some(b)) = (&r.key_from, &r.key_to) {
+        parts.push(if a == b { b.clone() } else { format!("{a}→{b}") });
+    }
+    if r.same_genre == Some(true)
+        && let Some(g) = &r.genre
+    {
+        parts.push(g.clone());
+    }
+    parts.join(" · ")
+}
+
+/// Queue rail suffix for a Flow source: ` · Flow` (+ the arc when not steady).
+pub fn flow_mode_label(arc: Option<FlowArc>) -> String {
+    match arc {
+        Some(FlowArc::Build) => " · Flow · Build".into(),
+        Some(FlowArc::Peak) => " · Flow · Peak".into(),
+        _ => " · Flow".into(),
+    }
+}
+
+#[cfg(test)]
+mod flow_text_tests {
+    use super::*;
+
+    #[test]
+    fn hint_and_line_match_flow_text_ts() {
+        let c = FlowCoverage { total: 200, bpm: 140, key: 56, loudness: 0 };
+        assert_eq!(coverage_hint(&c, "view"), "BPM known for 70% of this view · key 28%");
+        let r = FlowReason { bpm_from: Some(124), bpm_to: Some(126), key_from: Some("8A".into()), key_to: Some("9A".into()), genre: Some("Techno".into()), same_genre: Some(true) };
+        assert_eq!(flow_line(Some(&r)), "124→126 BPM · 8A→9A · Techno");
+        assert_eq!(flow_line(None), "");
+    }
 }

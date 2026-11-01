@@ -20,11 +20,11 @@ use super::shell::Shell;
 use crate::app::{self, Services};
 use crate::router::Route;
 use crate::theme::Theme;
-use gpui::{AnyElement, BoxShadow, Context, Entity, IntoElement, Subscription, Window, actions, point, prelude::*, px};
+use gpui::{AnyElement, BoxShadow, Context, Entity, IntoElement, Subscription, Window, point, prelude::*, px};
 use sonix_api::SmartSummary;
 use track_page::PageKind;
 
-actions!(sonix_lists, [SelectAllRows]);
+pub use crate::views::shell::SelectAll as SelectAllRows;
 
 /// What a list page asks the shell for.
 #[derive(Clone)]

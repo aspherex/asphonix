@@ -6,9 +6,13 @@ mod app;
 mod art;
 mod clock;
 mod columns;
+mod dnd;
 mod icons_gen;
 mod metrics;
+mod overlays;
+mod menus;
 mod pager;
+mod playerkeys;
 #[cfg(feature = "parity")]
 mod parity;
 mod perf;
@@ -115,7 +119,8 @@ fn bind_keys(cx: &mut App) {
         // route passes no `selectAll`, so Ctrl+A, Shift+arrows, Home/End and Page keys do nothing there (parity-verified).
         KeyBinding::new("shift-enter", shell::EnqueueSelected, Some("TrackList")),
         // `trackListKeydown`'s `selectAll` (Album detail passes it; the Tracks route does not and ignores the action)
-        KeyBinding::new("ctrl-a", views::library::album_detail::SelectAllRows, Some("TrackList")),
+        KeyBinding::new("ctrl-a", shell::SelectAll, Some("TrackList")),
+        KeyBinding::new("cmd-a", shell::SelectAll, Some("TrackList")),
         // album/artist cards (`tabindex=0`, Enter/Space open, Menu / Shift+F10 the context menu) and Tab traversal
         KeyBinding::new("enter", views::library::cards::CardOpen, Some("Card")),
         KeyBinding::new("space", views::library::cards::CardOpen, Some("Card")),
@@ -124,8 +129,6 @@ fn bind_keys(cx: &mut App) {
         KeyBinding::new("tab", views::library::TabNext, Some("Root && !TextInput")),
         KeyBinding::new("shift-tab", views::library::TabPrev, Some("Root && !TextInput")),
         KeyBinding::new("menu", shell::OpenMenuKey, Some("TrackList")),
-        KeyBinding::new("ctrl-a", views::lists::SelectAllRows, Some("TrackList")),
-        KeyBinding::new("cmd-a", views::lists::SelectAllRows, Some("TrackList")),
         KeyBinding::new("shift-f10", shell::OpenMenuKey, Some("TrackList")),
         KeyBinding::new("space", shell::PlayPause, Some("Root && !TextInput")),
         KeyBinding::new("n", shell::ToggleNowPlaying, Some("Root && !TextInput")),

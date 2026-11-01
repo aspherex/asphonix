@@ -26,7 +26,7 @@ use std::time::{Duration, Instant};
 
 actions!(
     sonix,
-    [PlayPause, ToggleNowPlaying, Escape, ToggleTheme, FocusSearch, NavBack, NavForward, SelUp, SelDown, PlaySelected, EnqueueSelected, OpenMenuKey]
+    [PlayPause, ToggleNowPlaying, Escape, ToggleTheme, FocusSearch, NavBack, NavForward, SelUp, SelDown, PlaySelected, EnqueueSelected, OpenMenuKey, SelectAll]
 );
 
 pub struct Counts {
@@ -48,6 +48,19 @@ pub struct Shell {
     pub(crate) dock: Entity<DockView>,
     pub(crate) queue: Entity<QueueRail>,
     pub(crate) menu: Entity<ContextMenu>,
+    pub(crate) overlays: Entity<crate::overlays::Overlays>,
+    pub(crate) boot: Option<Entity<super::boot::BootIntro>>,
+    /// `updateStore.info`: the newer release found by `updates_check` (title-bar badge, UpdateDialog).
+    pub(crate) update: Option<sonix_api::UpdateInfo>,
+    pub(crate) card: Option<CardHandle>,
+    card_gen: u64,
+    prev_track_id: Option<String>,
+    track_overlay: bool,
+    track_overlay_corner: u8,
+    main_active: bool,
+    main_hwnd: Option<isize>,
+    scale: f32,
+    _boot_sub: Option<Subscription>,
     pub(crate) search: Entity<TextInput>,
     pub(crate) focus: FocusHandle,
     pub(crate) playlists: Vec<Playlist>,
@@ -77,10 +90,12 @@ impl Shell {
         let th = app::theme(cx);
         let player = cx.new(|_| PlayerModel::default());
         let menu = cx.new(|cx| ContextMenu::new(th, cx));
+        let overlays = cx.new(crate::overlays::Overlays::new);
+        cx.set_global(crate::overlays::OverlayHandle(overlays.clone()));
         let tracks = cx.new(|cx| TracksView::new(backend.clone(), art_cache.clone(), &player, &menu, window, cx));
         let np = cx.new(|cx| NowPlayingView::new(backend.clone(), art_cache.clone(), &player, cx));
         let dock = cx.new(|cx| DockView::new(backend.clone(), art_cache.clone(), &player, cx));
-        let queue = cx.new(|cx| QueueRail::new(backend.clone(), art_cache.clone(), &player, cx));
+        let queue = cx.new(|cx| QueueRail::new(backend.clone(), art_cache.clone(), &player, &menu, cx));
         let search = cx.new(|cx| TextInput::new(cx, "SEARCH ARCHIVE", &th, MONO, 12.0, 16.0, 500.0));
         let focus = cx.focus_handle();
         window.focus(&focus);
@@ -114,7 +129,17 @@ impl Shell {
                 }
             }
         }));
-        subs.push(cx.subscribe(&np, |this: &mut Shell, _, _: &NpEvent, cx| this.go_back(cx)));
+        subs.push(cx.subscribe(&player, |this: &mut Shell, _, _: &crate::app::PlayerEvent, cx| this.card_on_player(cx)));
+        subs.push(cx.subscribe_in(&queue, window, |this: &mut Shell, _, ev: &super::queue_rail::RailEvent, window, cx| match ev {
+            super::queue_rail::RailEvent::Navigate(r) => this.navigate(r.clone(), cx),
+            // `playFromQueue` reloads the list, which drops the focus it held: back to the page
+            super::queue_rail::RailEvent::Played => {
+                let f = this.focus.clone();
+                window.focus(&f);
+            }
+        }));
+        subs.push(cx.observe_window_activation(window, |this: &mut Shell, window, _cx| this.main_active = window.is_window_active()));
+        subs.push(cx.subscribe(&np, |this: &mut Shell, _, ev: &NpEvent, cx| this.on_np_event(ev, cx)));
         // `TopBar.svelte: onSearchFocus`: focusing the search box navigates to the Search route
         let search_focus = search.read(cx).focus_handle.clone();
         subs.push(cx.on_focus(&search_focus, window, |this: &mut Shell, _, cx| this.navigate(Route::Search, cx)));
@@ -133,6 +158,18 @@ impl Shell {
             dock,
             queue,
             menu,
+            overlays,
+            boot: None,
+            update: None,
+            card: None,
+            card_gen: 0,
+            prev_track_id: None,
+            track_overlay: !cfg!(feature = "parity"),
+            track_overlay_corner: 0,
+            main_active: true,
+            main_hwnd: crate::winffi::hwnd_of(window),
+            scale: window.scale_factor(),
+            _boot_sub: None,
             search,
             focus,
             playlists: Vec::new(),
@@ -176,6 +213,7 @@ impl Shell {
                     order: sonix_api::TrackOrder::Sort { field: sonix_api::TrackSortField::Title, dir: sonix_api::SortDir::Asc },
                     filter: None,
                     start_track_id: Some("tr_7".into()),
+                    flow: None,
                 });
             });
         }
@@ -231,6 +269,7 @@ impl Shell {
                         order: sonix_api::TrackOrder::Sort { field: sonix_api::TrackSortField::Title, dir: sonix_api::SortDir::Asc },
                         filter: None,
                         start_track_id: Some("tr_7".into()),
+                        flow: None,
                     });
                 });
                 sh.navigate(Route::NowPlaying, cx);
@@ -308,6 +347,13 @@ impl Shell {
                     self.lists_library_changed(cx);
                 }
             }
+            Event::UpdateAvailable(i) => {
+                if i.available {
+                    self.update = Some(i);
+                    cx.notify();
+                }
+            }
+            Event::UpdateProgress(p) => crate::overlays::update_progress(cx, p),
             Event::SyncProgress(_) | Event::Connection(_) => {}
         }
     }
@@ -531,6 +577,8 @@ impl Render for Shell {
             self.shown = true;
             crate::log("first_render");
             window.activate_window();
+            #[cfg(not(feature = "parity"))]
+            self.start_boot(window, cx);
         }
         if let Some(t) = self.resumed_at.take() {
             let ms = t.elapsed().as_secs_f64() * 1000.0;
@@ -571,6 +619,15 @@ impl Render for Shell {
             .id("root")
             .key_context("Root")
             .track_focus(&self.focus)
+            .on_key_down(cx.listener(|this, ev: &gpui::KeyDownEvent, window, cx| {
+                let m = ev.keystroke.modifiers;
+                if *this.router.current() == Route::NowPlaying && this.focus.is_focused(window) && !m.control && !m.alt && !m.platform && !m.shift {
+                    let key = ev.keystroke.key.clone();
+                    if this.np.update(cx, |n, cx| n.key(&key, cx)) {
+                        cx.stop_propagation();
+                    }
+                }
+            }))
             .on_action(cx.listener(|_, _: &PlayPause, _, cx| {
                 app::call(cx, |b| {
                     let _ = b.player_play_pause();
@@ -591,6 +648,9 @@ impl Render for Shell {
                 this.search.update(cx, |i, cx| i.set_content(&q, cx));
             }))
             .on_action(cx.listener(|this, _: &Escape, window, cx| {
+                if this.overlays.update(cx, |o, cx| o.escape(cx)) {
+                    return;
+                }
                 if this.lists_modal_open(cx) {
                     this.lists_modal_cancel(window, cx);
                 } else if this.lists_editor_open(cx) {
@@ -635,6 +695,8 @@ impl Render for Shell {
             .child(self.menu.clone())
             .children(self.lists_editor_overlay())
             .children(self.lists_modal_overlay())
+            .child(self.overlays.clone())
+            .children(self.boot.clone())
             .child(crate::widgets::smooth::host());
         #[cfg(feature = "parity")]
         let root = root.child(crate::probe::frame_marker());
@@ -662,3 +724,191 @@ impl Shell {
     }
 }
 
+
+impl Shell {
+    fn on_np_event(&mut self, ev: &NpEvent, cx: &mut Context<Self>) {
+        match ev {
+            NpEvent::Close => self.go_back(cx),
+            NpEvent::Navigate(r) => self.navigate(r.clone(), cx),
+            NpEvent::Rate { id, rating, title } => {
+                let (id, rating) = (id.clone(), *rating);
+                let set = move |cx: &mut gpui::App| {
+                    let id = id.clone();
+                    app::call(cx, move |b| {
+                        let _ = b.rating_set(sonix_api::SetRatingRequest { id, kind: sonix_api::StarTargetType::Track, rating });
+                    });
+                };
+                if rating == 1 {
+                    // 1 star files are purged nightly: never a one-click misfire
+                    crate::overlays::confirm(cx, "Rate 1 star?", &format!("\"{title}\" will be purged from the library by the nightly cleanup."), "Rate 1★", true, set);
+                } else {
+                    set(cx);
+                }
+            }
+            NpEvent::AddToPlaylist { id, at } => crate::overlays::add_to_playlist(cx, vec![id.clone()], *at),
+            NpEvent::TrackInfo(t) => crate::overlays::track_info(cx, (**t).clone()),
+        }
+    }
+}
+
+impl Shell {
+    /// `App.svelte showIntro`: the launch animation, once per app start (parity: only on request, the web side loads with `?resumed=1`).
+    pub fn start_boot(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if self.boot.is_some() {
+            return;
+        }
+        let (th, bd) = (self.th, self.backdrop.clone());
+        let e = cx.new(|_| super::boot::BootIntro::new(th, bd));
+        let sub = cx.subscribe(&e, |this: &mut Shell, _, _: &super::boot::BootEvent, cx| {
+            this.boot = None;
+            this._boot_sub = None;
+            cx.notify();
+        });
+        self._boot_sub = Some(sub);
+        self.boot = Some(e);
+        let _ = window;
+        cx.notify();
+    }
+}
+
+/// The open track-change card (`overlay.rs`): at most one window, re-used for a newer track.
+pub(crate) struct CardHandle {
+    pub(crate) win: gpui::WindowHandle<super::overlay_card::CardView>,
+    _sub: Subscription,
+}
+
+impl Shell {
+    /// `overlay.rs show`: open (or re-use) the card for `track` and arm the hide timer.
+    pub fn show_card(&mut self, track: sonix_api::Track, cx: &mut Context<Self>) {
+        use super::overlay_card::{CardEvent, CardView, Corner, HEIGHT, MARGIN, WIDTH};
+        self.card_gen += 1;
+        let gen_ = self.card_gen;
+        if let Some(c) = &self.card {
+            let _ = c.win.update(cx, |v, _, cx| v.set_track(track, cx));
+            self.schedule_card_hide(gen_, cx);
+            return;
+        }
+        let Some(main) = self.main_hwnd else { return };
+        let scale = self.scale.max(0.5);
+        let (w, h_px, m) = ((WIDTH * scale) as i32, (HEIGHT * scale) as i32, (MARGIN * scale) as i32);
+        let work = crate::winffi::work_area_of(main).unwrap_or((0, 0, 1920, 1040));
+        let (x, y) = Corner::from_u8(self.track_overlay_corner).place(work, w, h_px, m);
+        let (backend, art) = (self.backend.clone(), cx.global::<Services>().art.clone());
+        let bounds = gpui::Bounds::new(gpui::point(px(x as f32 / scale), px(y as f32 / scale)), gpui::size(px(WIDTH), px(HEIGHT)));
+        let opened = cx.open_window(
+            gpui::WindowOptions {
+                window_bounds: Some(gpui::WindowBounds::Windowed(bounds)),
+                titlebar: Some(gpui::TitlebarOptions { title: Some("SONIX".into()), appears_transparent: true, traffic_light_position: None }),
+                focus: false,
+                show: true,
+                kind: gpui::WindowKind::PopUp,
+                is_movable: false,
+                is_resizable: false,
+                is_minimizable: false,
+                window_background: gpui::WindowBackgroundAppearance::Opaque,
+                ..Default::default()
+            },
+            move |_, cx| cx.new(|_| CardView::new(backend, art, track, (x, y, w, h_px))),
+        );
+        let Ok(win) = opened else { return };
+        let entity = win.entity(cx).ok();
+        let sub = match entity {
+            Some(e) => cx.subscribe(&e, |this: &mut Shell, _, _: &CardEvent, cx| this.open_main_from_card(cx)),
+            None => return,
+        };
+        // show it now (hidden windows do not paint): no activation, topmost; the card itself starts at opacity 0
+        let _ = win.update(cx, |_, window, _| {
+            if let Some(h) = crate::winffi::hwnd_of(window) {
+                crate::winffi::show_no_activate(h, x, y, w, h_px);
+            }
+        });
+        self.card = Some(CardHandle { win, _sub: sub });
+        self.schedule_card_hide(gen_, cx);
+    }
+
+    fn schedule_card_hide(&mut self, gen_: u64, cx: &mut Context<Self>) {
+        if cfg!(feature = "parity") {
+            return; // the runner drives time itself
+        }
+        cx.spawn(async move |this, cx| {
+            cx.background_executor().timer(Duration::from_millis(super::overlay_card::SHOW_FOR_MS)).await;
+            let alive = this.update(cx, |t, cx| {
+                if t.card_gen != gen_ {
+                    return false;
+                }
+                if let Some(c) = &t.card {
+                    let _ = c.win.update(cx, |v, _, cx| v.hide(cx));
+                }
+                true
+            });
+            if !matches!(alive, Ok(true)) {
+                return;
+            }
+            cx.background_executor().timer(Duration::from_millis(super::overlay_card::FADE_MS)).await;
+            let _ = this.update(cx, |t, cx| {
+                if t.card_gen == gen_ {
+                    t.close_card(cx);
+                }
+            });
+        })
+        .detach();
+    }
+
+    /// `dismiss`: destroy the card window now (nothing stays resident).
+    pub fn close_card(&mut self, cx: &mut Context<Self>) {
+        self.card_gen += 1;
+        if let Some(c) = self.card.take() {
+            let _ = c.win.update(cx, |_, window, _| window.remove_window());
+        }
+    }
+
+    fn open_main_from_card(&mut self, cx: &mut Context<Self>) {
+        self.close_card(cx);
+        if let Some(h) = self.main_hwnd {
+            crate::winffi::restore_foreground(h);
+        }
+    }
+
+    /// `PlayerEvent` hook: `should_show` (track change into playback while SONIX is not the focused window).
+    fn card_on_player(&mut self, cx: &mut Context<Self>) {
+        let st = self.player.read(cx).state.clone();
+        let focused = self.main_active && !self.suspended;
+        if super::overlay_card::should_show(self.prev_track_id.as_deref(), &st, self.track_overlay, focused)
+            && let Some(t) = st.track.clone()
+        {
+            self.show_card(t, cx);
+        }
+        self.prev_track_id = st.track.as_ref().map(|t| t.id.clone());
+    }
+}
+
+impl Shell {
+    /// `Sidebar.svelte onPlaylistDrop`: resolve the dragged tracks/album/artist, append them through `playlists_add_tracks`, toast.
+    pub fn drop_on_playlist(&mut self, playlist_id: String, name: String, payload: crate::dnd::DragPayload, cx: &mut Context<Self>) {
+        let b = self.backend.clone();
+        cx.spawn(async move |this, cx| {
+            let p2 = payload.clone();
+            let (n2, id2) = (name.clone(), playlist_id.clone());
+            let msg = cx
+                .background_executor()
+                .spawn(async move {
+                    let ids = crate::dnd::resolve_ids(&p2, &*b);
+                    if ids.is_empty() {
+                        return None;
+                    }
+                    let count = ids.len();
+                    Some(match b.playlists_add_tracks(sonix_api::AddToPlaylistRequest { id: id2, track_ids: ids }) {
+                        Ok(()) => format!("Added {} to \"{}\"", crate::dnd::describe(&p2, count), n2),
+                        Err(_) => format!("Could not add to \"{}\"", n2),
+                    })
+                })
+                .await;
+            let _ = this.update(cx, |_, cx| {
+                if let Some(m) = msg {
+                    crate::overlays::show_toast(cx, &m);
+                }
+            });
+        })
+        .detach();
+    }
+}
