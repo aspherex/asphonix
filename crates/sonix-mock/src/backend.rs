@@ -2017,4 +2017,21 @@ mod flow_tests {
         let genre = b.inner.lib.track(7).genre;
         assert!(q.items.iter().all(|i| i.track.genre == genre && i.track.id != "tr_7"));
     }
+
+    #[test]
+    fn every_rolling_source_takes_flow_and_artist_radio_stays_on_the_artist() {
+        let b = MockBackend::new_manual();
+        b.player_play_playlist(PlaySourceRequest { id: "pl_0".into(), flow: Some(FlowArc::Peak), ..Default::default() }).unwrap();
+        let src = b.player_get_queue(PageRequest { offset: 0, limit: 5 }).unwrap().source.unwrap();
+        assert_eq!((src.kind, src.mode, src.arc), (SourceKind::Playlist, SourceMode::Flow, Some(FlowArc::Peak)));
+        b.player_play_genre(PlayGenreRequest { name: "Techno".into(), shuffle: true, start_track_id: None, flow: None }).unwrap();
+        let q = b.player_get_queue(PageRequest { offset: 0, limit: 5 }).unwrap();
+        assert_eq!(q.source.as_ref().map(|s| (s.kind, s.mode)), Some((SourceKind::Genre, SourceMode::Shuffle)));
+        let cov = b.flow_get_coverage(FlowCoverageRequest { kind: FlowPoolKind::Artist, id: Some("ar_1".into()), filter: None, seed: None }).unwrap();
+        assert!(cov.total > 0);
+        b.radio_start(RadioStartRequest { seed: RadioSeed { kind: RadioSeedKind::Artist, id: "ar_1".into() } }).unwrap();
+        let q = b.player_get_queue(PageRequest { offset: 0, limit: 100 }).unwrap();
+        assert_eq!(q.source.unwrap().kind, SourceKind::Radio);
+        assert!(!q.items.is_empty() && q.items.iter().all(|i| i.track.artist_id.as_deref() == Some("ar_1")));
+    }
 }
