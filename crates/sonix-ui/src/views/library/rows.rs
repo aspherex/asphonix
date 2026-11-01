@@ -66,13 +66,16 @@ pub fn head(th: &Theme, o: RowOpts, prefix: &str) -> AnyElement {
     pid(format!("{prefix}.head"), r).into_any_element()
 }
 
+type WinCb = Rc<dyn Fn(&mut Window, &mut App)>;
+type PosCb = Rc<dyn Fn(Point<Pixels>, &mut Window, &mut App)>;
+
 pub struct RowCb {
-    pub star: Rc<dyn Fn(&mut Window, &mut App)>,
-    pub add: Option<Rc<dyn Fn(Point<Pixels>, &mut Window, &mut App)>>,
+    pub star: WinCb,
+    pub add: Option<PosCb>,
     /// Gets the menu position (under the "..." button).
-    pub more: Rc<dyn Fn(Point<Pixels>, &mut Window, &mut App)>,
+    pub more: PosCb,
     /// The row's index button (`.idx-play`): play from this row.
-    pub play: Rc<dyn Fn(&mut Window, &mut App)>,
+    pub play: WinCb,
 }
 
 pub struct RowState {
@@ -170,7 +173,7 @@ pub fn row(th: &Theme, t: &Track, st: &RowState, o: RowOpts, height: f32, ids: O
     if o.show_artist {
         r = r.child(p(
             "artist",
-            flex_cell(tr::ARTIST_GROW).flex().child(entity_link(&th, Kind::Artist, t.artist_id.as_deref(), &t.artist, MONO_DATA, th.muted, &format!("row{ix}"), window)).into_any_element(),
+            flex_cell(tr::ARTIST_GROW).flex().child(entity_link(&th, (Kind::Artist, t.artist_id.as_deref()), &t.artist, MONO_DATA, th.muted, &format!("row{ix}"), window)).into_any_element(),
         ));
     }
     if o.cols.year {

@@ -16,6 +16,7 @@ use crate::router::Route;
 use crate::text::txt;
 use crate::theme::Theme;
 use crate::tracking::{BODY_MD, BODY_SM, HEADLINE_LG, HEADLINE_SM, LABEL_CAPS, MONO_CODE, MONO_DATA};
+use crate::widgets::WheelScroll as _;
 use crate::widgets::icon;
 use crate::widgets::scrollbar::{self, ScrollbarHandle};
 use gpui::{AnyElement, Context, CursorStyle, IntoElement, Render, Subscription, UniformListScrollHandle, Window, div, prelude::*, px, uniform_list};
@@ -341,6 +342,7 @@ impl HomeView {
             }),
         )
         .track_scroll(self.list.clone())
+        .wheel_scroll()
         .size_full();
         let wrap = div()
             .relative()

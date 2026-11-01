@@ -6,6 +6,7 @@ use crate::probe::pid;
 use crate::text::txt;
 use crate::theme::Theme;
 use crate::tracking::{BODY_SM, LABEL_CAPS};
+use crate::widgets::WheelScroll as _;
 use crate::widgets::icon;
 use gpui::{AnyElement, App, Context, CursorStyle, Div, IntoElement, Window, canvas, div, prelude::*, px};
 use sonix_api::Backend;
@@ -129,23 +130,6 @@ pub fn art_slot<V: 'static>(
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn auto_fill_matches_the_css_grid() {
-        // Home card grid at 1440 x 900: stage 840 - 32 padding - 10 scrollbar = 798, minmax(150px, 1fr), gap 12
-        let (cols, w) = auto_fill(798.0, 150.0, 12.0);
-        assert_eq!(cols, 5);
-        assert!((w - 150.0).abs() < 1e-4);
-        assert_eq!(auto_fill(100.0, 150.0, 12.0).0, 1, "at least one column");
-        // exactly one more column fits when width + gap reaches n * (min + gap)
-        assert_eq!(auto_fill(5.0 * 150.0 + 4.0 * 12.0, 150.0, 12.0).0, 5);
-        assert_eq!(auto_fill(5.0 * 150.0 + 4.0 * 12.0 - 0.1, 150.0, 12.0).0, 4);
-    }
-}
-
 /// `main.stage { overflow-y: auto }` for a route that is a plain page: a scroll container with the 10 px scrollbar
 /// gutter that only exists while the content overflows. The gutter decision comes from the previous frame, so a
 /// canvas asks for one more frame when it changed.
@@ -189,6 +173,7 @@ impl PageScroll {
                     .track_scroll(&self.handle)
                     .size_full()
                     .overflow_y_scroll()
+                    .wheel_scroll()
                     .flex()
                     .flex_col()
                     .when(overflow, |d| d.pr(px(crate::widgets::scrollbar::WIDTH)))
@@ -201,7 +186,7 @@ impl PageScroll {
 }
 
 /// `.genre-link` / `.artist-link` style text button: `base` colour, `hover` colour and an underline while hovered.
-pub fn text_link(th: &Theme, id: &'static str, text: String, spec: crate::tracking::TypeSpec, base: gpui::Hsla, hover: gpui::Hsla, recolour: bool, on_click: impl Fn(&mut Window, &mut App) + 'static) -> impl IntoElement {
+pub fn text_link(th: &Theme, id: &'static str, text: String, spec: crate::tracking::TypeSpec, (base, hover): (gpui::Hsla, gpui::Hsla), recolour: bool, on_click: impl Fn(&mut Window, &mut App) + 'static) -> impl IntoElement {
     let th = *th;
     let mut d = div().id(id).group("lnk").relative().flex().flex_none().cursor(CursorStyle::PointingHand).text_color(base);
     if recolour {
@@ -213,4 +198,21 @@ pub fn text_link(th: &Theme, id: &'static str, text: String, spec: crate::tracki
             cx.stop_propagation();
             on_click(window, cx);
         })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn auto_fill_matches_the_css_grid() {
+        // Home card grid at 1440 x 900: stage 840 - 32 padding - 10 scrollbar = 798, minmax(150px, 1fr), gap 12
+        let (cols, w) = auto_fill(798.0, 150.0, 12.0);
+        assert_eq!(cols, 5);
+        assert!((w - 150.0).abs() < 1e-4);
+        assert_eq!(auto_fill(100.0, 150.0, 12.0).0, 1, "at least one column");
+        // exactly one more column fits when width + gap reaches n * (min + gap)
+        assert_eq!(auto_fill(5.0 * 150.0 + 4.0 * 12.0, 150.0, 12.0).0, 5);
+        assert_eq!(auto_fill(5.0 * 150.0 + 4.0 * 12.0 - 0.1, 150.0, 12.0).0, 4);
+    }
 }

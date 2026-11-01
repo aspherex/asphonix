@@ -402,7 +402,7 @@ impl ArtistDetailView {
             if overflows || expanded {
                 let this = _cx.entity().downgrade();
                 sec = sec.child(
-                    div().flex().child(text_link(&th, "bio-toggle", if expanded { "Show less" } else { "Show more" }.to_uppercase(), LABEL_CAPS, th.accent_fg, th.text, true, move |_, cx| {
+                    div().flex().child(text_link(&th, "bio-toggle", if expanded { "Show less" } else { "Show more" }.to_uppercase(), LABEL_CAPS, (th.accent_fg, th.text), true, move |_, cx| {
                         let _ = this.update(cx, |t, cx| {
                             t.bio_expanded = !t.bio_expanded;
                             cx.notify();

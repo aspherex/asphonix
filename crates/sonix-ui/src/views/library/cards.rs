@@ -161,7 +161,7 @@ pub fn card<V: 'static>(
 
     // --- caption
     let sub: AnyElement = match &item {
-        CardItem::Album(a) => div().flex().min_w_0().child(entity_link(&th, Kind::Artist, a.artist_id.as_deref(), &a.artist, MONO_DATA, th.muted, "card", window)).into_any_element(),
+        CardItem::Album(a) => div().flex().min_w_0().child(entity_link(&th, (Kind::Artist, a.artist_id.as_deref()), &a.artist, MONO_DATA, th.muted, "card", window)).into_any_element(),
         CardItem::Artist(a) => div().flex().min_w_0().child(txt(&th, MONO_DATA, format!("{} ALBUMS", a.album_count)).color(th.muted)).into_any_element(),
     };
     let meta = div()
@@ -231,10 +231,13 @@ pub struct Tile<'a> {
     pub overlays: Option<TileOverlays>,
 }
 
+/// Opens a menu under the "..." button whose box is given.
+pub type MenuUnder = Rc<dyn Fn(&Rc<Cell<Bounds<Pixels>>>, &mut Window, &mut App)>;
+
 pub struct TileOverlays {
     pub play: Rc<dyn Fn(&mut App)>,
     /// Gets the anchor (the "..." button's box) to open the menu under.
-    pub menu: Rc<dyn Fn(&Rc<Cell<Bounds<Pixels>>>, &mut Window, &mut App)>,
+    pub menu: MenuUnder,
 }
 
 /// `.pl-card`: a 56 px art slot + title/sub, 8 px padding, hover border -> focus. Callers attach click handlers on the result.
@@ -279,7 +282,7 @@ pub fn tile<V: 'static>(ctx: &Ctx, th: &Theme, t: Tile<'_>, width: f32, window: 
     }
     meta = meta.child(div().flex().min_w_0().child(txt(&th, BODY_LG, t.title.to_string()).color(th.text).ellipsis()));
     meta = meta.child(match &t.link {
-        Some((k, id, text)) => div().flex().min_w_0().child(entity_link(&th, *k, *id, text, MONO_DATA, th.muted, "tile", window)).into_any_element(),
+        Some((k, id, text)) => div().flex().min_w_0().child(entity_link(&th, (*k, *id), text, MONO_DATA, th.muted, "tile", window)).into_any_element(),
         None => div().flex().min_w_0().child(txt(&th, MONO_DATA, t.sub_text.clone()).color(th.muted).ellipsis()).into_any_element(),
     });
     let mut root = div()

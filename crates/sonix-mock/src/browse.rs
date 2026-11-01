@@ -238,7 +238,7 @@ pub fn top_tracks(lib: &Library, stars: &Stars, id: &str) -> ApiResult<ArtistTop
             }
         }
     }
-    counts.sort_by(|a, b| b.1.cmp(&a.1)); // stable, like Array.sort
+    counts.sort_by_key(|c| std::cmp::Reverse(c.1)); // stable, like Array.sort
     let items: Vec<Track> = counts.into_iter().take(10).map(|(ix, _)| track_s(lib, stars, ix)).collect();
     let total = items.len();
     Ok(ArtistTopTracks { source: TopSource::MostPlayed, items, total, offset: 0 })
@@ -266,6 +266,28 @@ pub fn artist_info(lib: &Library, stars: &Stars, id: &str) -> ApiResult<ArtistIn
 #[allow(dead_code)]
 pub fn genre_names() -> &'static [&'static str] {
     &GENRES
+}
+
+// ------------------------------------------------------------ the simulated server-side play queue (`mock.ts: serverQueue`)
+/// "listened on the phone an hour ago": 8 tracks `tr_{(4242 + j*29) % 50}`, the 4th current, at 83 s.
+pub const SERVER_QUEUE_CURRENT_INDEX: usize = 3;
+pub const SERVER_QUEUE_CURRENT: &str = "tr_29";
+pub const SERVER_QUEUE_POSITION: f64 = 83.0;
+
+pub fn server_queue_ids() -> Vec<String> {
+    (0..8).map(|j| format!("tr_{}", (4242 + j * 29) % 50)).collect()
+}
+
+pub fn server_queue_offer(lib: &Library, stars: &Stars) -> ServerQueueOffer {
+    let ids = server_queue_ids();
+    let ix = library::track_index(&ids[SERVER_QUEUE_CURRENT_INDEX]).unwrap_or(0);
+    ServerQueueOffer {
+        track: track_s(lib, stars, ix),
+        position_sec: SERVER_QUEUE_POSITION,
+        track_count: ids.len(),
+        changed_at: Some(library::iso_from_ms(EPOCH_MS - 3_600_000)),
+        changed_by: Some("SONIX Mobile".into()),
+    }
 }
 
 #[cfg(test)]
@@ -306,27 +328,5 @@ mod tests {
         assert_eq!((p.total, p.items[0].id.as_str()), (1, "al_3"));
         let h = home_sections(&lib, &stars);
         assert_eq!((h.recently_played.len(), h.frequent.len(), h.newest.len(), h.random.len()), (6, 5, 8, 5));
-    }
-}
-
-// ------------------------------------------------------------ the simulated server-side play queue (`mock.ts: serverQueue`)
-/// "listened on the phone an hour ago": 8 tracks `tr_{(4242 + j*29) % 50}`, the 4th current, at 83 s.
-pub const SERVER_QUEUE_CURRENT_INDEX: usize = 3;
-pub const SERVER_QUEUE_CURRENT: &str = "tr_29";
-pub const SERVER_QUEUE_POSITION: f64 = 83.0;
-
-pub fn server_queue_ids() -> Vec<String> {
-    (0..8).map(|j| format!("tr_{}", (4242 + j * 29) % 50)).collect()
-}
-
-pub fn server_queue_offer(lib: &Library, stars: &Stars) -> ServerQueueOffer {
-    let ids = server_queue_ids();
-    let ix = library::track_index(&ids[SERVER_QUEUE_CURRENT_INDEX]).unwrap_or(0);
-    ServerQueueOffer {
-        track: track_s(lib, stars, ix),
-        position_sec: SERVER_QUEUE_POSITION,
-        track_count: ids.len(),
-        changed_at: Some(library::iso_from_ms(EPOCH_MS - 3_600_000)),
-        changed_by: Some("SONIX Mobile".into()),
     }
 }

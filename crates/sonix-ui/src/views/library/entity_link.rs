@@ -50,7 +50,7 @@ fn key_of(kind: Kind, id: &str, salt: &str) -> usize {
 
 /// The name as an `EntityLink` inside a slot of type `spec` / colour `base`. `salt` distinguishes several links to the
 /// same entity on screen (hover state is keyed by it). Inside the web's `button` the inherited letter-spacing is reset.
-pub fn entity_link(th: &Theme, kind: Kind, id: Option<&str>, text: &str, spec: TypeSpec, base: Hsla, salt: &str, window: &mut Window) -> AnyElement {
+pub fn entity_link(th: &Theme, (kind, id): (Kind, Option<&str>), text: &str, spec: TypeSpec, base: Hsla, salt: &str, window: &mut Window) -> AnyElement {
     let th = *th;
     if !is_linked(kind, id) {
         return div().flex().min_w_0().child(txt(&th, spec, text.to_string()).color(base).ellipsis()).into_any_element();

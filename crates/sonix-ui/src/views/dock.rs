@@ -113,9 +113,9 @@ impl Render for DockView {
                             .child(pid("dock.subtitle", div().flex().flex_row().min_w_0().child(match &track {
                                 // `<EntityLink artist/> · <EntityLink album/>`
                                 Some(t) => {
-                                    let mut row = div().flex().flex_row().min_w_0().child(entity_link(&th, LinkKind::Artist, t.artist_id.as_deref(), &t.artist, MONO_DATA, th.muted, "dock", window));
+                                    let mut row = div().flex().flex_row().min_w_0().child(entity_link(&th, (LinkKind::Artist, t.artist_id.as_deref()), &t.artist, MONO_DATA, th.muted, "dock", window));
                                     if let Some(a) = &t.album {
-                                        row = row.child(txt(&th, MONO_DATA, " · ").color(th.muted)).child(entity_link(&th, LinkKind::Album, t.album_id.as_deref(), a, MONO_DATA, th.muted, "dock", window));
+                                        row = row.child(txt(&th, MONO_DATA, " · ").color(th.muted)).child(entity_link(&th, (LinkKind::Album, t.album_id.as_deref()), a, MONO_DATA, th.muted, "dock", window));
                                     }
                                     row.into_any_element()
                                 }

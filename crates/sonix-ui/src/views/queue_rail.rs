@@ -10,6 +10,7 @@ use crate::probe::pid;
 use crate::text::txt;
 use crate::theme::Theme;
 use crate::tracking::{BODY_LG, BODY_MD, BODY_SM, LABEL_CAPS, MONO_CODE, MONO_DATA};
+use crate::widgets::WheelScroll as _;
 use crate::widgets::icon;
 use gpui::{Bounds, ClickEvent, Context, CursorStyle, Entity, IntoElement, Render, Subscription, Window, canvas, div, fill, point, prelude::*, px, size};
 use sonix_api::format as fmt;
@@ -112,7 +113,7 @@ impl Render for QueueRail {
                                     .min_w_0()
                                     .gap(px(2.))
                                     .child(pid("rail.deck.title", div().flex().min_w_0().child(txt(&th, BODY_LG, t.title.clone()).color(th.text).ellipsis())))
-                                    .child(pid("rail.deck.artist", div().flex().child(entity_link(&th, LinkKind::Artist, t.artist_id.as_deref(), &t.artist, MONO_DATA, th.muted, "deck", window)))),
+                                    .child(pid("rail.deck.artist", div().flex().child(entity_link(&th, (LinkKind::Artist, t.artist_id.as_deref()), &t.artist, MONO_DATA, th.muted, "deck", window)))),
                             ),
                     )
                     .child(pid("rail.deck.spectrum", div().h(px(64.)).px(px(space::MD)).child(rail_spectrum(th, bands))))
@@ -151,7 +152,7 @@ impl Render for QueueRail {
                 .child(pid("rail.queue.empty", div().p(px(space::MD)).child(txt(&th, BODY_SM, "Queue is empty.").color(th.muted))))
         } else {
             let (bar, overflow) = crate::widgets::scrollbar::passive(th, &self.scroll);
-            let mut list = div().id("queue-list").track_scroll(&self.scroll).size_full().overflow_y_scroll().flex().flex_col().when(overflow, |d| d.pr(px(tr::SCROLLBAR_W)));
+            let mut list = div().id("queue-list").track_scroll(&self.scroll).size_full().overflow_y_scroll().wheel_scroll().flex().flex_col().when(overflow, |d| d.pr(px(tr::SCROLLBAR_W)));
             if let Some(q) = &q {
                 for (i, it) in q.items.iter().enumerate() {
                     if (i as i64) < cur {
@@ -186,7 +187,7 @@ impl Render for QueueRail {
                                     .flex()
                                     .flex_col()
                                     .child(div().flex().min_w_0().child(txt(&th, BODY_MD, t.title.clone()).color(th.text).ellipsis()))
-                                    .child(div().flex().min_w_0().child(entity_link(&th, LinkKind::Artist, t.artist_id.as_deref(), &t.artist, MONO_CODE, th.muted, &format!("rail{i}"), window))),
+                                    .child(div().flex().min_w_0().child(entity_link(&th, (LinkKind::Artist, t.artist_id.as_deref()), &t.artist, MONO_CODE, th.muted, &format!("rail{i}"), window))),
                             )
                             .child(div().flex_none().child(txt(&th, MONO_CODE, fmt::format_duration(Some(t.duration))).color(th.muted)))
                             .child(div().size(px(20.)).flex_none().flex().items_center().justify_center().child(icon("more", 11., th.muted)))

@@ -16,6 +16,7 @@ use crate::metrics::{anim as m_anim, controls as ctl, tracks as tr};
 use crate::text::txt;
 use crate::theme::Theme;
 use crate::tracking::{BODY_MD, BODY_SM, HEADLINE_MD, LABEL_CAPS, MONO_CODE, MONO_DATA, TypeSpec};
+use crate::widgets::WheelScroll as _;
 use crate::widgets::button::{Variant, button};
 use crate::widgets::context_menu::{ContextMenu, MenuItem};
 use crate::widgets::scrollbar::{self, ScrollbarHandle};
@@ -551,11 +552,11 @@ impl TracksView {
                     format!("track.row.{ix}.title"),
                     div().flex().min_w_0().child(txt(&th, BODY_MD, t.title.clone()).color(if active { th.accent_fg } else { th.text }).ellipsis()),
                 )))
-                .child(pid(format!("track.row.{ix}.artist"), flex_cell(tr::ARTIST_GROW).flex().child(entity_link(&th, LinkKind::Artist, t.artist_id.as_deref(), &t.artist, MONO_DATA, th.muted, &format!("tr{ix}a"), window))))
+                .child(pid(format!("track.row.{ix}.artist"), flex_cell(tr::ARTIST_GROW).flex().child(entity_link(&th, (LinkKind::Artist, t.artist_id.as_deref()), &t.artist, MONO_DATA, th.muted, &format!("tr{ix}a"), window))))
                 .child(pid(
                     format!("track.row.{ix}.album"),
                     flex_cell(tr::ALBUM_GROW).flex().child(match &t.album {
-                        Some(a) => entity_link(&th, LinkKind::Album, t.album_id.as_deref(), a, MONO_DATA, th.muted, &format!("tr{ix}b"), window),
+                        Some(a) => entity_link(&th, (LinkKind::Album, t.album_id.as_deref()), a, MONO_DATA, th.muted, &format!("tr{ix}b"), window),
                         None => txt(&th, MONO_DATA, "—").color(th.muted).no_tracking().ellipsis().into_any_element(),
                     }),
                 ))
@@ -748,6 +749,7 @@ impl Render for TracksView {
             }),
         )
         .track_scroll(self.list.clone())
+        .wheel_scroll()
         .size_full();
 
         let body: AnyElement = if total == 0 && self.pager.has_page(0) {

@@ -15,6 +15,7 @@ use crate::text::{natural_width, txt};
 use crate::theme::{MONO, Theme};
 use crate::tracking::{BODY_MD, BODY_SM, HEADLINE_LG, HEADLINE_SM, LABEL_CAPS, MONO_CODE, MONO_DATA};
 use crate::views::shell::{EnqueueSelected, OpenMenuKey, PlaySelected, SelDown, SelUp};
+use crate::widgets::WheelScroll as _;
 use crate::widgets::context_menu::MenuItem;
 use crate::widgets::scrollbar::{self, ScrollbarHandle};
 use crate::widgets::{hard_shadow, icon};
@@ -308,7 +309,7 @@ impl AlbumDetailView {
         stats = stats.child(sep(&th)).child(txt(&th, MONO_DATA, format!("{} TRACKS", album.song_count)).color(th.muted)).child(sep(&th)).child(txt(&th, MONO_DATA, fmtx::total_duration(album.duration)).color(th.muted));
         if let Some(g) = genre.clone() {
             let g2 = g.clone();
-            stats = stats.child(sep(&th)).child(text_link(&th, "stat-genre", g, MONO_DATA, th.muted, th.accent_fg, true, move |_, cx| navigate(cx, Route::Genre(g2.clone()))));
+            stats = stats.child(sep(&th)).child(text_link(&th, "stat-genre", g, MONO_DATA, (th.muted, th.accent_fg), true, move |_, cx| navigate(cx, Route::Genre(g2.clone()))));
         }
         stats = stats.child(sep(&th)).child(txt(&th, MONO_DATA, fsum).color(th.muted));
 
@@ -404,7 +405,7 @@ impl AlbumDetailView {
             .child(pid("album.name", div().flex().child(txt(&th, HEADLINE_LG, album.name.clone()).color(th.text))))
             .child(div().flex().flex_row().child(pid(
                 "album.artist",
-                text_link(&th, "artist-link", album.artist.clone(), HEADLINE_SM, th.accent_fg, th.accent_fg, false, move |_, cx| {
+                text_link(&th, "artist-link", album.artist.clone(), HEADLINE_SM, (th.accent_fg, th.accent_fg), false, move |_, cx| {
                     if let Some(a) = artist_id.clone() {
                         navigate(cx, Route::Artist(a));
                     }
@@ -443,6 +444,7 @@ impl AlbumDetailView {
             }),
         )
         .track_scroll(self.list.clone())
+        .wheel_scroll()
         .size_full();
         let body = div()
             .id("album-body")
@@ -528,7 +530,7 @@ impl AlbumDetailView {
             match album.genre.clone() {
                 Some(g) => {
                     let g2 = g.clone();
-                    text_link(&th, "meta-genre", g, MONO_DATA, th.text, th.accent_fg, true, move |_, cx| navigate(cx, Route::Genre(g2.clone()))).into_any_element()
+                    text_link(&th, "meta-genre", g, MONO_DATA, (th.text, th.accent_fg), true, move |_, cx| navigate(cx, Route::Genre(g2.clone()))).into_any_element()
                 }
                 None => val("—".into()),
             },

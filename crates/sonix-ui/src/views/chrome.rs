@@ -7,6 +7,7 @@ use crate::router::Route;
 use crate::text::txt;
 use crate::theme::Theme;
 use crate::tracking::{Family, HEADLINE_SM, LABEL_CAPS, MONO_CODE, MONO_DATA, TypeSpec};
+use crate::widgets::WheelScroll as _;
 use crate::widgets::button::ghost_icon;
 use crate::widgets::tooltip::tip;
 use crate::widgets::{icon, icon_g};
@@ -253,6 +254,7 @@ impl Shell {
             .track_scroll(&self.pl_scroll)
             .size_full()
             .overflow_y_scroll()
+            .wheel_scroll()
             .flex()
             .flex_col()
             .pt(px(sb::SECTION_PAD_TOP))
