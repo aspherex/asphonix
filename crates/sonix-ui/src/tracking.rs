@@ -9,7 +9,7 @@
 //! path (the 0.01-0.02em tracking of those styles is below a pixel) so ellipsis
 //! truncation still works.
 use crate::theme::{DISPLAY, MONO};
-use gpui::{Hsla, IntoElement, Pixels, SharedString, TextRun, Window, canvas, div, font, point, prelude::*, px};
+use gpui::{Hsla, IntoElement, Pixels, SharedString, TextRun, Window, canvas, div, point, prelude::*, px};
 
 /// One entry of the DESIGN.md type scale (tokens.css `--type-*`).
 #[derive(Clone, Copy, Debug)]
@@ -81,8 +81,7 @@ pub fn tracked_glyph_x(base_x: f32, i: usize, tracking: f32) -> f32 {
 /// Returns a fixed-size element; wrap it in the caller's own flex container.
 pub fn tracked(text: &str, spec: TypeSpec, body_font: &'static str, color: Hsla, window: &mut Window) -> impl IntoElement + use<> {
     let text: SharedString = if spec.caps { text.to_uppercase().into() } else { text.to_string().into() };
-    let mut f = font(spec.family.name(body_font));
-    f.weight = gpui::FontWeight(spec.weight);
+    let f = crate::text::css_font(spec.family.name(body_font), spec.weight);
     let run = TextRun { len: text.len(), font: f, color, background_color: None, underline: None, strikethrough: None };
     let layout = window.text_system().layout_line(&text, px(spec.size), &[run], None);
     let tracking = spec.tracking_px();

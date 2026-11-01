@@ -273,8 +273,7 @@ impl Shell {
                     "Inter" => "Inter",
                     _ => "JetBrains Mono",
                 };
-                let mut fnt = gpui::font(fam);
-                fnt.weight = gpui::FontWeight(f("weight"));
+                let fnt = crate::text::css_font(fam, f("weight"));
                 let text = s("text");
                 let run = gpui::TextRun { len: text.len(), font: fnt, color: gpui::black(), background_color: None, underline: None, strikethrough: None };
                 let l = window.text_system().layout_line(&text, px(f("size")), &[run], None);
@@ -312,7 +311,10 @@ impl Shell {
         } else if self.search.read(cx).focus_handle.is_focused(window) {
             "search"
         } else {
-            tracks["focus"].as_str().unwrap_or("body")
+            // any focused element inside a `[data-tracklist]` list (Tracks, album tracks, popular tracks)
+            let in_list = window.context_stack().iter().any(|c| c.contains("TrackList"));
+            let filter = tracks["focus"].as_str() == Some("filter") && *self.router.current() == Route::Tracks;
+            if filter { "filter" } else if in_list { "tracklist" } else { "body" }
         };
         let ps = self.player.read(cx).state.clone();
         json!({

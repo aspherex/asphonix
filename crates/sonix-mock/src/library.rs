@@ -176,6 +176,11 @@ impl Library {
         self.offsets[NUM_ALBUMS] as usize
     }
 
+    /// Global index of the first track of album `index` (the per-album prefix sum).
+    pub fn album_first_track(&self, index: usize) -> usize {
+        self.offsets[index] as usize
+    }
+
     /// Binary search: (album index, track index within the album).
     pub fn album_for_track(&self, global: usize) -> (usize, usize) {
         let g = global as u32;
@@ -195,6 +200,8 @@ impl Library {
         let year = 1990 + r.floor_mul(35) as u32;
         let genre = (*r.pick(&GENRES)).to_string();
         let per = 180 + r.floor_mul(180);
+        // mock.ts draws `playCount` before `created` (object literal order)
+        let play_count = r.floor_mul(400) as u32;
         let created = EPOCH_MS - r.floor_mul(10_000_000_000) as i64;
         Album {
             id: id.clone(),
@@ -208,7 +215,7 @@ impl Library {
             duration: (self.counts[index] as u64 * per) as f64,
             starred: None,
             rating: None,
-            play_count: Some(r.floor_mul(400) as u32),
+            play_count: Some(play_count),
             created: Some(iso_from_ms(created)),
         }
     }

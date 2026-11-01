@@ -243,13 +243,13 @@ fn spectrum_canvas(th: Theme, bands: Vec<f32>, caps: Vec<f32>) -> impl IntoEleme
             let cap_h = (2.0 * s).round().max(1.0);
             let bar_w = w / n as f32;
             let dev = |x: f32, y: f32, ww: f32, hh: f32| Bounds::new(point(px((ox + x) / s), px((oy + y) / s)), size(px(ww / s), px(hh / s)));
-            for i in 0..n {
+            for (i, cap) in caps.iter().enumerate().take(n) {
                 let x = (i as f32 * bar_w).round();
                 let bw = ((i as f32 + 1.0) * bar_w).round() - x - gap;
                 let v = (bands.get(i).copied().unwrap_or(0.0) / 255.0).clamp(0.0, 1.0);
                 let bh = (v * h).round().max(1.0);
                 window.paint_quad(fill(dev(x, h - bh, bw, bh), th.meter));
-                let ch = (caps[i] * h).round().max(1.0);
+                let ch = (cap * h).round().max(1.0);
                 window.paint_quad(fill(dev(x, (h - ch - (2.0 * s).round()).max(0.0), bw, cap_h), th.text));
             }
         },

@@ -17,10 +17,12 @@
 //!   [`Backend::subscribe`].
 
 pub mod backend;
+pub mod discovery;
 pub mod error;
 pub mod format;
 pub mod types;
 
 pub use backend::*;
+pub use discovery::*;
 pub use error::*;
 pub use types::*;

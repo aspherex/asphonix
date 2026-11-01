@@ -203,7 +203,7 @@ impl Shell {
             .child(div().flex_1().min_w_0().flex().child(txt(&th, LABEL_CAPS, label.to_string()).ellipsis()))
     }
 
-    pub(crate) fn sidebar(&self, vw: f32, route: &Route, _window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
+    pub(crate) fn sidebar(&self, vw: f32, route: &Route, window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
         let th = self.th;
         let nav_items: [(Route, &str, &str); 6] = [
             (Route::Home, "home", "Home"),
@@ -358,7 +358,7 @@ impl Shell {
             .border_r_1()
             .border_color(th.frame)
             .child(library)
-            .child(pid("sidebar.playlists", div().relative().flex_1().min_h_0().border_t_1().border_color(th.border).child(lists).child(pl_bar)))
+            .child(pid("sidebar.playlists", div().relative().flex_1().min_h_0().border_t_1().border_color(th.border).child(lists).child(pl_bar).child(crate::widgets::smooth::drive(window, crate::widgets::smooth::Scrollable::div(std::ptr::addr_of!(self.pl_scroll) as usize, &self.pl_scroll)))))
             .child(pid("sidebar.footer", footer))
             .into_any_element()
     }

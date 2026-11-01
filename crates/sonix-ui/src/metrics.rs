@@ -290,3 +290,69 @@ pub mod rail {
     pub const HEADER_PAD_Y: f32 = super::space::SM;
     pub const HEADER_PAD_X: f32 = super::space::MD;
 }
+
+/// Library routes (`routes/Home|Albums|Artists|AlbumDetail|ArtistDetail|Genres|GenreDetail.svelte`,
+/// `components/AlbumCard|ArtistCard|VirtualGrid|SegmentedToggle|Checkbox|EntityLink.svelte`).
+pub mod library {
+    use super::space::*;
+    /// `.page { padding: var(--space-lg); gap: var(--space-md) }` (Albums, Artists, Genres, GenreDetail)
+    pub const PAGE_PAD: f32 = LG;
+    pub const PAGE_GAP: f32 = MD;
+    /// `<VirtualGrid minCellWidth={140} textHeight={40} gap={16}>`
+    pub const GRID_MIN_CELL: f32 = 140.0;
+    pub const GRID_TEXT_H: f32 = 40.0;
+    pub const GRID_GAP: f32 = 16.0;
+    /// `.controls { gap: var(--space-lg) }`
+    pub const CONTROLS_GAP: f32 = LG;
+    /// `AlbumCard.svelte:.card { gap: var(--space-xs) }`, `.art { border: 1px }`
+    pub const CARD_GAP: f32 = XS;
+    /// `.star { top: 4px; right: 4px }`, `<Icon name="star-filled" size={11}>`
+    pub const CARD_STAR_INSET: f32 = 4.0;
+    pub const CARD_STAR_ICON: f32 = 11.0;
+    /// `.play-overlay { inset: auto 4px 4px auto; 30x30; translateY(4px) }`, `<Icon play size={18}>`
+    pub const CARD_PLAY: f32 = 30.0;
+    pub const CARD_PLAY_ICON: f32 = 18.0;
+    /// `.menu-overlay { inset: auto auto 4px 4px; 26x26 }`, `<Icon more size={14}>`
+    pub const CARD_MENU: f32 = 26.0;
+    pub const CARD_MENU_ICON: f32 = 14.0;
+    pub const CARD_INSET: f32 = 4.0;
+    pub const CARD_OVERLAY_SHIFT: f32 = 4.0;
+    /// `transition: opacity 0.1s, transform 0.1s`
+    pub const CARD_TRANSITION: f32 = 0.1;
+    /// `SegmentedToggle.svelte`: `.segmented { border: 1px }`, `.segment { padding: var(--space-xs) var(--space-md) }`
+    pub const SEG_PAD_Y: f32 = XS;
+    pub const SEG_PAD_X: f32 = MD;
+    /// `Checkbox.svelte`: `.checkbox { gap: var(--space-sm) }`, `.box { 14x14; border: 1px }`, `.mark { 8x8 }`
+    pub const CHECK_BOX: f32 = 14.0;
+    pub const CHECK_MARK: f32 = 8.0;
+    pub const CHECK_GAP: f32 = SM;
+    /// `Genres.svelte:.grid { minmax(220px, 1fr); gap: var(--space-md) }`, `.card { padding: var(--space-md); gap: xs }`, `.bar { height: 3px }`
+    pub const GENRE_MIN_CELL: f32 = 220.0;
+    pub const GENRE_BAR_H: f32 = 3.0;
+    /// `Home.svelte:.home { gap: var(--space-xl); padding: var(--space-lg) }`
+    pub const HOME_PAD: f32 = LG;
+    pub const HOME_GAP: f32 = XL;
+    /// `.card-grid { minmax(150px, 1fr); gap: var(--space-md) }`, `.tile-grid { minmax(220px, 1fr) }`
+    pub const CARD_GRID_MIN: f32 = 150.0;
+    pub const TILE_GRID_MIN: f32 = 220.0;
+    /// `.pl-card { padding: var(--space-sm); gap: var(--space-sm) }`, `.pl-art { 56x56 }`
+    pub const PL_ART: f32 = 56.0;
+    /// `.pl-play-overlay { inset: auto 2px 2px auto; 22x22 }`, `.pl-menu-overlay { top/right 4px; 22x22 }`
+    pub const PL_PLAY: f32 = 22.0;
+    pub const PL_PLAY_INSET: f32 = 2.0;
+    pub const PL_MENU: f32 = 22.0;
+    pub const PL_MENU_INSET: f32 = 4.0;
+    /// `.list-block { height: 460px }`, `<VirtualList itemHeight={34}>`
+    pub const HOME_LIST_H: f32 = 460.0;
+    pub const HOME_ROW_H: f32 = 34.0;
+    /// `AlbumDetail.svelte`: `.art { 200x200 }`, `.play-btn/.btn-secondary/.btn-icon { height: 40px }`, `.tracks-panel { height: 640px }`, `.meta-panel { width: 280px } / 220px < 1280`
+    pub const ALBUM_ART: f32 = 200.0;
+    pub const BTN_H: f32 = 40.0;
+    pub const TRACKS_PANEL_H: f32 = 640.0;
+    pub const META_PANEL_W: f32 = 280.0;
+    pub const META_PANEL_W_COMPACT: f32 = 220.0;
+    /// `ArtistDetail.svelte`: `.art { 160x160 }`, `.top-row { height: 34px }`, `.extras { 1.4fr 1fr; gap lg }`, `@media (max-width: 1100px)` one column
+    pub const ARTIST_ART: f32 = 160.0;
+    pub const TOP_ROW_H: f32 = 34.0;
+    pub const EXTRAS_STACK_BELOW: f32 = 1100.0;
+}
