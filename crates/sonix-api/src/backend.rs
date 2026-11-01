@@ -172,6 +172,14 @@ pub trait PlayerApi {
     fn player_get_waveform(&self, _track_id: &str) -> ApiResult<Waveform> {
         unimpl!("player_get_waveform")
     }
+    /// `player_remove_from_queue`
+    fn player_remove_from_queue(&self, _index: usize) -> ApiResult<()> {
+        Ok(())
+    }
+    /// `player_reorder_queue`: move one entry (`mock.ts` splice semantics, `current` follows).
+    fn player_reorder_queue(&self, _from: usize, _to: usize) -> ApiResult<()> {
+        Ok(())
+    }
     /// `fullPlayer.loopCycle`: A-B loop (set A, set B, clear).
     fn player_loop_cycle(&self) -> ApiResult<()> {
         Ok(())

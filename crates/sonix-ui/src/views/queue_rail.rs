@@ -9,11 +9,18 @@ use crate::probe::pid;
 use crate::text::txt;
 use crate::theme::Theme;
 use crate::tracking::{BODY_LG, BODY_MD, BODY_SM, LABEL_CAPS, MONO_CODE, MONO_DATA};
+use crate::widgets::context_menu::{ContextMenu, MenuItem};
 use crate::widgets::icon;
-use gpui::{Bounds, ClickEvent, Context, CursorStyle, Entity, IntoElement, Render, Subscription, Window, canvas, div, fill, point, prelude::*, px, size};
+use crate::selection::Selection;
+use gpui::{Bounds, ClickEvent, Context, CursorStyle, Entity, IntoElement, MouseDownEvent, Render, Subscription, Window, canvas, div, fill, point, prelude::*, px, size};
 use sonix_api::format as fmt;
 use sonix_api::*;
 use std::sync::Arc;
+
+pub enum RailEvent {
+    Navigate(crate::router::Route),
+}
+impl gpui::EventEmitter<RailEvent> for QueueRail {}
 
 pub struct QueueRail {
     backend: Arc<dyn Backend>,
@@ -21,13 +28,32 @@ pub struct QueueRail {
     player: Entity<PlayerModel>,
     state: Option<QueueState>,
     scroll: gpui::ScrollHandle,
+    menu: Entity<ContextMenu>,
+    /// multi-select over absolute queue indices (`QueueRail.svelte`: Ctrl/Shift click, remove acts on the selection)
+    sel: Selection,
     _sub: Subscription,
 }
 
+/// Internal drag of a queue row (reorder). External drops use `crate::dnd::SonixDrag`.
+#[derive(Clone)]
+struct QueueDrag {
+    index: usize,
+    label: String,
+}
+struct QueueGhost {
+    label: String,
+    th: Theme,
+}
+impl Render for QueueGhost {
+    fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+        div().px(px(8.)).py(px(4.)).bg(self.th.accent).child(txt(&self.th, MONO_DATA, self.label.clone()).weight(700.0).color(self.th.accent_text))
+    }
+}
+
 impl QueueRail {
-    pub fn new(backend: Arc<dyn Backend>, art: ArtHandle, player: &Entity<PlayerModel>, cx: &mut Context<Self>) -> Self {
+    pub fn new(backend: Arc<dyn Backend>, art: ArtHandle, player: &Entity<PlayerModel>, menu: &Entity<ContextMenu>, cx: &mut Context<Self>) -> Self {
         let sub = cx.subscribe(player, |this: &mut Self, _, _: &PlayerEvent, cx| this.refresh(cx));
-        let mut s = Self { backend, art, player: player.clone(), state: None, scroll: gpui::ScrollHandle::new(), _sub: sub };
+        let mut s = Self { backend, art, player: player.clone(), state: None, scroll: gpui::ScrollHandle::new(), menu: menu.clone(), sel: Selection::default(), _sub: sub };
         s.refresh(cx);
         s
     }
@@ -135,11 +161,13 @@ impl Render for QueueRail {
         };
         let deck = div().flex_none().border_b_1().border_color(th.border).child(header(&th, "rail.deckheader", "Live Transport Deck".into(), Some(format!("{total} QUEUED")))).child(deck_body);
 
-        // ---- queue section
+        // ---- queue sections: "Next in queue" (user-queued, always ahead) and "Next from <source>" (the rolling window)
         let label = match q.as_ref().and_then(|q| q.source.as_ref()) {
             Some(s) => format!("Next from {}{}", s.label, if s.mode == SourceMode::Shuffle { " · Shuffle" } else { "" }),
+            None if q.as_ref().map(|q| q.items.iter().enumerate().any(|(i, it)| (i as i64) > cur && it.origin == QueueItemOrigin::User)).unwrap_or(false) => "Queue".to_string(),
             None => "Next in buffer".to_string(),
         };
+        let is_user = |i: usize, it: &QueueItem| (i as i64) > cur && it.origin == QueueItemOrigin::User;
         let queue_section = if total == 0 {
             div()
                 .flex_1()
@@ -151,52 +179,18 @@ impl Render for QueueRail {
         } else {
             let (bar, overflow) = crate::widgets::scrollbar::passive(th, &self.scroll);
             let mut list = div().id("queue-list").track_scroll(&self.scroll).size_full().overflow_y_scroll().flex().flex_col().when(overflow, |d| d.pr(px(tr::SCROLLBAR_W)));
+            let mut user_rows = Vec::new();
             if let Some(q) = &q {
                 for (i, it) in q.items.iter().enumerate() {
                     if (i as i64) < cur {
                         continue;
                     }
-                    let t = &it.track;
-                    let active = (i as i64) == cur;
-                    let idx = i;
                     let n = i - cur.max(0) as usize;
-                    list = list.child(pid(
-                        format!("rail.row.{n}"),
-                        div()
-                            .id(("qrow", i))
-                            .relative()
-                            .flex()
-                            .flex_row()
-                            .flex_none()
-                            .items_center()
-                            .gap(px(space::XS))
-                            .h(px(44.))
-                            .px(px(space::SM))
-                            .border_b_1()
-                            .border_color(th.mid)
-                            .cursor(CursorStyle::PointingHand)
-                            .when(active, |d| d.bg(th.mid))
-                            .when(!active, |d| d.hover(move |s| s.bg(th.mid)))
-                            .child(icon("drag", 13., th.muted))
-                            .child(
-                                div()
-                                    .flex_1()
-                                    .min_w_0()
-                                    .flex()
-                                    .flex_col()
-                                    .child(div().flex().min_w_0().child(txt(&th, BODY_MD, t.title.clone()).color(th.text).ellipsis()))
-                                    .child(div().flex().min_w_0().child(txt(&th, MONO_CODE, t.artist.clone()).color(th.muted).no_tracking().ellipsis())),
-                            )
-                            .child(div().flex_none().child(txt(&th, MONO_CODE, fmt::format_duration(Some(t.duration))).color(th.muted)))
-                            .child(div().size(px(20.)).flex_none().flex().items_center().justify_center().child(icon("more", 11., th.muted)))
-                            .child(div().size(px(20.)).flex_none().flex().items_center().justify_center().child(icon("close", 11., th.muted)))
-                            .when(active, |d| d.child(div().absolute().left_0().top_0().bottom_0().w(px(tr::ACTIVE_BAR_W)).bg(th.accent_fg)))
-                            .on_click(cx.listener(move |_, _: &ClickEvent, _, cx| {
-                                app::call(cx, move |b| {
-                                    let _ = b.player_jump_to(idx);
-                                });
-                            })),
-                    ));
+                    if is_user(i, it) {
+                        user_rows.push(self.queue_row(&th, it, i, n, false, cx));
+                    } else {
+                        list = list.child(self.queue_row(&th, it, i, n, (i as i64) == cur, cx));
+                    }
                 }
             }
             let footer = q.as_ref().and_then(|q| q.source.as_ref()).filter(|s| s.remaining > 0).map(|s| {
@@ -208,7 +202,36 @@ impl Render for QueueRail {
                     .border_color(th.border)
                     .child(txt(&th, BODY_SM, format!("+ {} more from {}", fmt::fmt_int(s.remaining as u64), s.label)).color(th.muted))
             });
-            div().flex_1().min_h_0().flex().flex_col().child(header(&th, "rail.queue.header", label, None)).child(div().relative().flex_1().min_h_0().child(list).child(bar)).children(footer)
+            let user_section = (!user_rows.is_empty()).then(|| {
+                div()
+                    .flex_none()
+                    .flex()
+                    .flex_col()
+                    .border_b_1()
+                    .border_color(th.border)
+                    // external drops on "Next in queue" = Play next (`data-drop-next`)
+                    .on_drop(cx.listener(|this, d: &crate::dnd::SonixDrag, _, cx| this.drop_external(d.0.clone(), EnqueuePosition::Next, cx)))
+                    .child(header(&th, "rail.user.header", "Next in queue".into(), None))
+                    .children(user_rows)
+            });
+            div()
+                .flex_1()
+                .min_h_0()
+                .flex()
+                .flex_col()
+                .children(user_section)
+                .child(header(&th, "rail.queue.header", label, None))
+                .child(
+                    div()
+                        .relative()
+                        .flex_1()
+                        .min_h_0()
+                        // everywhere else on the rail = Add to queue
+                        .on_drop(cx.listener(|this, d: &crate::dnd::SonixDrag, _, cx| this.drop_external(d.0.clone(), EnqueuePosition::End, cx)))
+                        .child(list)
+                        .child(bar),
+                )
+                .children(footer)
         };
 
         pid(
@@ -246,4 +269,204 @@ fn rail_spectrum(th: Theme, bands: Option<Vec<u8>>) -> impl IntoElement {
         },
     )
     .size_full()
+}
+
+impl QueueRail {
+    /// One queue row (`QueueRail.svelte .row`): drag handle, title/artist, time, "more", remove. Click selects (Ctrl/Shift
+    /// extend), double-click plays; rows are drag sources (reorder) and drop targets (reorder / add).
+    fn queue_row(&self, th: &Theme, it: &QueueItem, i: usize, n: usize, active: bool, cx: &mut Context<Self>) -> gpui::AnyElement {
+        let th = *th;
+        let t = &it.track;
+        let selected = self.sel.contains(i);
+        let idx = i;
+        let drag = QueueDrag { index: i, label: t.title.clone() };
+        pid(
+            format!("rail.row.{n}"),
+            div()
+                .id(("qrow", i))
+                .relative()
+                .flex()
+                .flex_row()
+                .flex_none()
+                .items_center()
+                .gap(px(space::XS))
+                .h(px(44.))
+                .px(px(space::SM))
+                .border_b_1()
+                .border_color(th.mid)
+                .cursor(CursorStyle::PointingHand)
+                .group("qrow")
+                .when(active, |d| d.bg(th.mid))
+                .child(icon("drag", 13., th.muted))
+                .child(
+                    div()
+                        .flex_1()
+                        .min_w_0()
+                        .flex()
+                        .flex_col()
+                        .child(div().flex().min_w_0().child(txt(&th, BODY_MD, t.title.clone()).color(th.text).ellipsis()))
+                        .child(div().flex().min_w_0().child(txt(&th, MONO_CODE, t.artist.clone()).color(th.muted).no_tracking().ellipsis())),
+                )
+                .child(div().flex_none().child(txt(&th, MONO_CODE, fmt::format_duration(Some(t.duration))).color(th.muted)))
+                .child(pid(format!("rail.row.{n}.more"),
+                    div()
+                        .id(("qmore", i))
+                        .group("hv")
+                        .size(px(20.))
+                        .flex_none()
+                        .flex()
+                        .items_center()
+                        .justify_center()
+                        .child(crate::widgets::icon_g("more", 11., th.muted, th.text))
+                        .on_click(cx.listener(move |this, ev: &ClickEvent, window, cx| {
+                            cx.stop_propagation();
+                            let p = ev.position();
+                            this.open_menu(idx, gpui::point(p.x, p.y + px(8.)), window, cx);
+                        })),
+                ))
+                .child(pid(format!("rail.row.{n}.remove"),
+                    div()
+                        .id(("qremove", i))
+                        .group("hv")
+                        .size(px(20.))
+                        .flex_none()
+                        .flex()
+                        .items_center()
+                        .justify_center()
+                        .child(crate::widgets::icon_g("close", 11., th.muted, th.text))
+                        .on_click(cx.listener(move |this, _, _, cx| {
+                            cx.stop_propagation();
+                            let ix = this.sel.for_context_menu(idx);
+                            this.remove(ix, cx);
+                        })),
+                ))
+                .when(active, |d| d.child(div().absolute().left_0().top_0().bottom_0().w(px(tr::ACTIVE_BAR_W)).bg(th.accent_fg)))
+                // `.qrow.selected { outline: 1px solid accent-fg; outline-offset: -1px }`
+                .when(selected, |d| d.child(div().absolute().top_0().left_0().size_full().border_1().border_color(th.accent_fg)))
+                // `.gap-before::before`: a 2 px accent rule on the row edge the dragged row would be inserted at
+                .child(div().absolute().top_0().left_0().w_full().h(px(2.)).bg(gpui::transparent_black()).group_drag_over::<QueueDrag>("qrow", move |s| s.bg(th.accent_fg)))
+                // reorder: drag a row onto another one (the insertion edge shows as an accent rule)
+                .on_drag(drag, move |d: &QueueDrag, _, _, cx| {
+                    let label = d.label.clone();
+                    cx.new(|_| QueueGhost { label, th })
+                })
+                .on_drop(cx.listener(move |this, d: &QueueDrag, _, cx| {
+                    let (from, to) = (d.index, idx);
+                    app::call(cx, move |b| {
+                        let _ = b.player_reorder_queue(from, to);
+                    });
+                    this.refresh(cx);
+                }))
+                // external drag (tracks/albums/artists): onto a row = "Add to queue"
+                .on_drop(cx.listener(|this, d: &crate::dnd::SonixDrag, _, cx| this.drop_external(d.0.clone(), EnqueuePosition::End, cx)))
+                .on_mouse_down(
+                    gpui::MouseButton::Right,
+                    cx.listener(move |this, ev: &MouseDownEvent, window, cx| {
+                        cx.stop_propagation();
+                        this.open_menu(idx, ev.position, window, cx);
+                    }),
+                )
+                .on_click(cx.listener(move |this, ev: &ClickEvent, _, cx| {
+                    if ev.click_count() >= 2 {
+                        app::call(cx, move |b| {
+                            let _ = b.player_jump_to(idx);
+                        });
+                    } else {
+                        let m = ev.modifiers();
+                        this.sel.click(idx, m.control || m.platform, m.shift);
+                        cx.notify();
+                    }
+                })),
+        )
+        .into_any_element()
+    }
+
+    fn remove(&mut self, mut ix: Vec<usize>, cx: &mut Context<Self>) {
+        ix.sort_unstable();
+        ix.dedup();
+        self.sel.clear();
+        app::call(cx, move |b| {
+            for i in ix.into_iter().rev() {
+                let _ = b.player_remove_from_queue(i);
+            }
+        });
+        self.refresh(cx);
+    }
+
+    /// Context menu of a queue row / the selection it belongs to (`QueueRail.svelte buildQueueRowMenu` -> `trackMenuItems`).
+    fn open_menu(&mut self, i: usize, pos: gpui::Point<gpui::Pixels>, window: &mut Window, cx: &mut Context<Self>) {
+        let ix = self.sel.for_context_menu(i);
+        let Some(q) = &self.state else { return };
+        let tracks: Vec<Track> = ix.iter().filter_map(|k| q.items.get(*k).map(|it| it.track.clone())).collect();
+        if tracks.is_empty() {
+            return;
+        }
+        let ids: Vec<String> = tracks.iter().map(|t| t.id.clone()).collect();
+        let first = ix.first().copied().unwrap_or(i);
+        let (this_rm, this_nav, this_next) = (cx.entity().downgrade(), cx.entity().downgrade(), cx.entity().downgrade());
+        let (ix_rm, ix_next) = (ix.clone(), ix.clone());
+        let items = crate::menus::track_menu_items(crate::menus::TrackMenu {
+            tracks,
+            at: pos,
+            on_play_now: std::rc::Rc::new(move |cx| {
+                app::call(cx, move |b| {
+                    let _ = b.player_jump_to(first);
+                })
+            }),
+            // `moveToPlayNext`: take the rows out and re-insert them right after the playing track as user items
+            on_play_next: Some(std::rc::Rc::new(move |cx| {
+                if let Some(t) = this_next.upgrade() {
+                    let (ix, ids) = (ix_next.clone(), ids.clone());
+                    t.update(cx, |t, cx| {
+                        t.sel.clear();
+                        let mut idx = ix;
+                        idx.sort_unstable();
+                        idx.dedup();
+                        app::call(cx, move |b| {
+                            for i in idx.iter().rev() {
+                                let _ = b.player_remove_from_queue(*i);
+                            }
+                            let _ = b.player_enqueue(EnqueueRequest { track_ids: ids, position: EnqueuePosition::Next });
+                        });
+                        t.refresh(cx);
+                    });
+                }
+            })),
+            on_remove_from_queue: Some(std::rc::Rc::new(move |cx| {
+                if let Some(t) = this_rm.upgrade() {
+                    let ix = ix_rm.clone();
+                    t.update(cx, |t, cx| t.remove(ix, cx));
+                }
+            })),
+            on_navigate: std::rc::Rc::new(move |r, cx| {
+                if let Some(t) = this_nav.upgrade() {
+                    t.update(cx, |_, cx| cx.emit(RailEvent::Navigate(r)));
+                }
+            }),
+        });
+        self.menu.update(cx, |m, cx| m.show(items, pos, window, cx));
+    }
+
+    /// External drop (`dnd.ts` payload): resolve to track ids and enqueue them.
+    fn drop_external(&mut self, payload: crate::dnd::DragPayload, position: EnqueuePosition, cx: &mut Context<Self>) {
+        let b = self.backend.clone();
+        cx.spawn(async move |this, cx| {
+            let ok = cx
+                .background_executor()
+                .spawn(async move {
+                    let ids = crate::dnd::resolve_ids(&payload, &*b);
+                    if ids.is_empty() {
+                        return false;
+                    }
+                    b.player_enqueue(EnqueueRequest { track_ids: ids, position }).is_ok()
+                })
+                .await;
+            let _ = this.update(cx, |t, cx| {
+                if ok {
+                    t.refresh(cx);
+                }
+            });
+        })
+        .detach();
+    }
 }

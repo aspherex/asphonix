@@ -289,133 +289,42 @@ impl TracksView {
         if tracks.is_empty() {
             return;
         }
-        let items = self.menu_items(&tracks, cx);
+        let items = self.menu_items(&tracks, pos, cx);
         self.menu.update(cx, |m, cx| m.show(items, pos, window, cx));
         cx.notify();
     }
 
-    fn menu_items(&self, tracks: &[Track], cx: &mut Context<Self>) -> Vec<MenuItem> {
-        let n = tracks.len();
-        let suffix = if n > 1 { format!(" ({n} tracks)") } else { String::new() };
-        let ids: Vec<String> = tracks.iter().map(|t| t.id.clone()).collect();
-        let first = tracks[0].clone();
+    fn menu_items(&self, tracks: &[Track], at: Point<Pixels>, cx: &mut Context<Self>) -> Vec<MenuItem> {
         let this = cx.entity().downgrade();
-        let all_starred = tracks.iter().all(|t| t.starred.is_some());
-
-        let ids_a = ids.clone();
-        let this_a = this.clone();
-        let play_now = MenuItem::action("Play now", move |_, cx| {
-            let ids = ids_a.clone();
-            if let Some(t) = this_a.upgrade() {
-                t.update(cx, |t, cx| {
-                    if ids.len() == 1 {
-                        t.play_from(ids[0].clone(), cx);
-                    } else {
-                        app::call(cx, move |b| {
-                            let _ = b.player_play_queue(PlayQueueRequest { track_ids: ids, start_index: 0 });
-                        });
-                    }
-                });
-            }
-        })
-        .icon("play");
-        let enqueue = |label: String, pos: EnqueuePosition, ids: Vec<String>, icon: &'static str| {
-            MenuItem::action(label, move |_, cx| {
-                let ids = ids.clone();
-                app::call(cx, move |b| {
-                    let _ = b.player_enqueue(EnqueueRequest { track_ids: ids, position: pos });
-                });
-            })
-            .icon(icon)
-        };
-        let playlists: Vec<MenuItem> = self
-            .playlists
-            .iter()
-            .filter(|p| !p.read_only)
-            .map(|p| {
-                let (pid, ids) = (p.id.clone(), ids.clone());
-                MenuItem::action(p.name.clone(), move |_, cx| {
-                    let (pid, ids) = (pid.clone(), ids.clone());
-                    app::call(cx, move |b| {
-                        let _ = b.playlists_add_tracks(AddToPlaylistRequest { id: pid, track_ids: ids });
+        let ids: Vec<String> = tracks.iter().map(|t| t.id.clone()).collect();
+        let this_play = this.clone();
+        let ids_play = ids.clone();
+        let this_nav = this.clone();
+        crate::menus::track_menu_items(crate::menus::TrackMenu {
+            tracks: tracks.to_vec(),
+            at,
+            on_play_now: std::rc::Rc::new(move |cx| {
+                let ids = ids_play.clone();
+                if let Some(t) = this_play.upgrade() {
+                    t.update(cx, |t, cx| {
+                        if ids.len() == 1 {
+                            t.play_from(ids[0].clone(), cx);
+                        } else {
+                            app::call(cx, move |b| {
+                                let _ = b.player_play_queue(PlayQueueRequest { track_ids: ids, start_index: 0 });
+                            });
+                        }
                     });
-                })
-            })
-            .collect();
-        let rate = |stars: u8, ids: Vec<String>| {
-            let label = if stars == 0 { "Clear rating".to_string() } else { format!("{}★", stars) };
-            let mut it = MenuItem::action(label, move |_, cx| {
-                let ids = ids.clone();
-                app::call(cx, move |b| {
-                    for id in ids {
-                        let _ = b.rating_set(SetRatingRequest { id, kind: StarTargetType::Track, rating: stars });
-                    }
-                });
-            });
-            if stars == 1 {
-                it = it.danger().hint("1★ tracks are purged by the NAS nightly.");
-            }
-            it
-        };
-        let ids_l = ids.clone();
-        let like = MenuItem::action(format!("{}{suffix}", if all_starred { "Unlike" } else { "Like" }), move |_, cx| {
-            let ids = ids_l.clone();
-            app::call(cx, move |b| {
-                for id in ids {
-                    let req = StarRequest { id, kind: StarTargetType::Track };
-                    let _ = if all_starred { b.star_remove(req) } else { b.star_add(req) };
                 }
-            });
+            }),
+            on_play_next: None,
+            on_remove_from_queue: None,
+            on_navigate: std::rc::Rc::new(move |r, cx| {
+                if let Some(t) = this_nav.upgrade() {
+                    t.update(cx, |_, cx| cx.emit(TracksEvent::Navigate(r)));
+                }
+            }),
         })
-        .icon(if all_starred { "heart-filled" } else { "heart" });
-
-        // Order and icons of `menus.ts: trackMenuItems`.
-        let mut items = vec![
-            play_now,
-            enqueue(format!("Play next{suffix}"), EnqueuePosition::Next, ids.clone(), "next"),
-            enqueue(format!("Add to queue{suffix}"), EnqueuePosition::End, ids.clone(), "queue"),
-        ];
-        if n == 1 {
-            // radio is not ported (no backend call yet): the entry exists for structural parity, inert
-            items.push(MenuItem::action("Start radio", |_, _| {}).icon("equalizer"));
-        }
-        items.extend([
-            MenuItem::submenu(format!("Add to playlist{suffix}"), playlists).icon("add"),
-            like,
-            MenuItem::submenu(format!("Rate{suffix}"), vec![rate(0, ids.clone()), rate(5, ids.clone()), rate(4, ids.clone()), rate(3, ids.clone()), rate(2, ids.clone()), rate(1, ids.clone())]).icon("star"),
-        ]);
-        if n == 1 {
-            if let Some(al) = first.album_id.clone() {
-                let this = this.clone();
-                items.push(
-                    MenuItem::action("Go to album", move |_, cx| {
-                        if let Some(t) = this.upgrade() {
-                            let al = al.clone();
-                            t.update(cx, |_, cx| cx.emit(TracksEvent::Navigate(Route::Album(al))));
-                        }
-                    })
-                    .icon("album"),
-                );
-            }
-            if let Some(ar) = first.artist_id.clone() {
-                let this = this.clone();
-                items.push(
-                    MenuItem::action("Go to artist", move |_, cx| {
-                        if let Some(t) = this.upgrade() {
-                            let ar = ar.clone();
-                            t.update(cx, |_, cx| cx.emit(TracksEvent::Navigate(Route::Artist(ar))));
-                        }
-                    })
-                    .icon("artist"),
-                );
-            }
-            items.push(MenuItem::separator());
-            // track info dialog is not ported: entry present, inert
-            items.push(MenuItem::action("Track info", |_, _| {}).icon("eye"));
-            let text = format!("{} – {}", first.artist, first.title);
-            items.push(MenuItem::action("Copy \"Artist – Title\"", move |_, cx| cx.write_to_clipboard(ClipboardItem::new_string(text.clone()))));
-        }
-        items
     }
 
     // ------------------------------------------------------------ keyboard
@@ -499,6 +408,9 @@ impl TracksView {
         let starred = t.starred.is_some();
         let id_play = t.id.clone();
         let hovered = self.hover_row == Some(ix);
+        // `TrackRow dragIds`: dragging a selected row drags the whole (loaded part of the) selection
+        let drag_ids: Vec<String> = if selected && self.sel.len() > 1 && self.sel.len() <= 500 { self.sel.indices().into_iter().filter_map(|i| self.pager.get(i).map(|t| t.id.clone())).collect() } else { vec![t.id.clone()] };
+        let drag = crate::dnd::SonixDrag(crate::dnd::DragPayload::Tracks(drag_ids));
         // `.idx { transition: opacity 0.1s }`; the play glyph appears at once on :hover.
         let idx_opacity = 1.0 - anim::transition(window, ("idx-fade", ix), if hovered { 1.0 } else { 0.0 }, m_anim::IDX_FADE);
         let idx_cell = pid(
@@ -546,6 +458,10 @@ impl TracksView {
                 .border_b_1()
                 .border_color(th.mid)
                 .cursor(CursorStyle::Arrow)
+                .on_drag(drag, move |d: &crate::dnd::SonixDrag, _, _, cx| {
+                    let label: SharedString = crate::dnd::ghost_label(&d.0).into();
+                    cx.new(|_| crate::dnd::Ghost { label, th })
+                })
                 .when(active || selected, |d| d.bg(th.mid))
                 .when(!active && !selected, |d| d.hover(move |s| s.bg(th.mid)))
                 .child(idx_cell)

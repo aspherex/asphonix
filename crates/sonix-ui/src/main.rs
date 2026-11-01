@@ -6,9 +6,11 @@ mod app;
 mod art;
 mod clock;
 mod columns;
+mod dnd;
 mod icons_gen;
 mod metrics;
 mod overlays;
+mod menus;
 mod pager;
 mod playerkeys;
 #[cfg(feature = "parity")]

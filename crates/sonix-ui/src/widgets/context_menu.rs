@@ -363,7 +363,7 @@ impl Render for ContextMenu {
             .on_mouse_down_out(cx.listener(|this, _, window, cx| this.close(window, cx)))
             .on_mouse_down(MouseButton::Right, cx.listener(|this, _, window, cx| this.close(window, cx))))
             .into_any_element();
-        deferred(anchored().position(pos).child(panel)).with_priority(1).into_any_element()
+        deferred(anchored().position(pos).snap_to_window_with_margin(px(8.)).child(panel)).with_priority(1).into_any_element()
     }
 }
 

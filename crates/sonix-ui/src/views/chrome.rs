@@ -281,7 +281,18 @@ impl Shell {
             let icon_name = if p.read_only { if p.smart { "bolt" } else { "lock" } } else { "playlist" };
             lists = lists.child(pid(
                 format!("sidebar.pl.s{i}"),
-                pl_row(SharedString::from(format!("pl-{}", p.id)), active, icon_name, p.name.clone(), p.song_count.to_string()).on_click(cx.listener(move |this, _, _, cx| this.navigate(Route::Playlist(id.clone()), cx))),
+                {
+                    let row = pl_row(SharedString::from(format!("pl-{}", p.id)), active, icon_name, p.name.clone(), p.song_count.to_string()).relative().on_click(cx.listener(move |this, _, _, cx| this.navigate(Route::Playlist(id.clone()), cx)));
+                    if p.read_only {
+                        row
+                    } else {
+                        // drop target (`Sidebar.svelte onPlaylistDrop`): read-only playlists never are; the hover frame is a dashed accent outline
+                        let (pid_, pname) = (p.id.clone(), p.name.clone());
+                        row.on_drop(cx.listener(move |this, d: &crate::dnd::SonixDrag, _, cx| this.drop_on_playlist(pid_.clone(), pname.clone(), d.0.clone(), cx))).child(
+                            div().absolute().top_0().left_0().size_full().border_1().border_dashed().border_color(gpui::transparent_black()).group_drag_over::<crate::dnd::SonixDrag>("hv", move |s| s.border_color(th.accent_fg)),
+                        )
+                    }
+                },
             ));
         }
 

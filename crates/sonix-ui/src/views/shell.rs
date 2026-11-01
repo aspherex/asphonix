@@ -86,7 +86,7 @@ impl Shell {
         let tracks = cx.new(|cx| TracksView::new(backend.clone(), art_cache.clone(), &player, &menu, window, cx));
         let np = cx.new(|cx| NowPlayingView::new(backend.clone(), art_cache.clone(), &player, cx));
         let dock = cx.new(|cx| DockView::new(backend.clone(), art_cache.clone(), &player, cx));
-        let queue = cx.new(|cx| QueueRail::new(backend.clone(), art_cache.clone(), &player, cx));
+        let queue = cx.new(|cx| QueueRail::new(backend.clone(), art_cache.clone(), &player, &menu, cx));
         let search = cx.new(|cx| TextInput::new(cx, "SEARCH ARCHIVE", &th, MONO, 12.0, 16.0, 500.0));
         let focus = cx.focus_handle();
         window.focus(&focus);
@@ -113,6 +113,9 @@ impl Shell {
             }
         }));
         subs.push(cx.subscribe(&player, |this: &mut Shell, _, _: &crate::app::PlayerEvent, cx| this.card_on_player(cx)));
+        subs.push(cx.subscribe(&queue, |this: &mut Shell, _, ev: &super::queue_rail::RailEvent, cx| match ev {
+            super::queue_rail::RailEvent::Navigate(r) => this.navigate(r.clone(), cx),
+        }));
         subs.push(cx.observe_window_activation(window, |this: &mut Shell, window, _cx| this.main_active = window.is_window_active()));
         subs.push(cx.subscribe(&np, |this: &mut Shell, _, ev: &NpEvent, cx| this.on_np_event(ev, cx)));
         // `TopBar.svelte: onSearchFocus`: focusing the search box navigates to the Search route
@@ -804,5 +807,36 @@ impl Shell {
             self.show_card(t, cx);
         }
         self.prev_track_id = st.track.as_ref().map(|t| t.id.clone());
+    }
+}
+
+impl Shell {
+    /// `Sidebar.svelte onPlaylistDrop`: resolve the dragged tracks/album/artist, append them through `playlists_add_tracks`, toast.
+    pub fn drop_on_playlist(&mut self, playlist_id: String, name: String, payload: crate::dnd::DragPayload, cx: &mut Context<Self>) {
+        let b = self.backend.clone();
+        cx.spawn(async move |this, cx| {
+            let p2 = payload.clone();
+            let (n2, id2) = (name.clone(), playlist_id.clone());
+            let msg = cx
+                .background_executor()
+                .spawn(async move {
+                    let ids = crate::dnd::resolve_ids(&p2, &*b);
+                    if ids.is_empty() {
+                        return None;
+                    }
+                    let count = ids.len();
+                    Some(match b.playlists_add_tracks(sonix_api::AddToPlaylistRequest { id: id2, track_ids: ids }) {
+                        Ok(()) => format!("Added {} to \"{}\"", crate::dnd::describe(&p2, count), n2),
+                        Err(_) => format!("Could not add to \"{}\"", n2),
+                    })
+                })
+                .await;
+            let _ = this.update(cx, |_, cx| {
+                if let Some(m) = msg {
+                    crate::overlays::show_toast(cx, &m);
+                }
+            });
+        })
+        .detach();
     }
 }

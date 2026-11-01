@@ -805,6 +805,7 @@ impl PlayerApi for MockBackend {
         let ids: Vec<Entry> = req.track_ids.iter().filter_map(|i| track_index(i)).map(|i| Entry { ix: i as u32, origin: QueueItemOrigin::User }).collect();
         let at = match req.position {
             EnqueuePosition::Next => c.current.map(|i| i + 1).unwrap_or(0),
+            EnqueuePosition::End if c.source.is_none() => c.entries.len(),
             EnqueuePosition::End => {
                 // end of the contiguous user run after `current`, still ahead of source entries
                 let mut p = c.current.map(|i| i + 1).unwrap_or(0);
@@ -816,6 +817,51 @@ impl PlayerApi for MockBackend {
         };
         let at = at.min(c.entries.len());
         c.entries.splice(at..at, ids);
+        self.inner.push_state(&c);
+        drop(c);
+        self.inner.emit(Event::QueueChanged);
+        Ok(())
+    }
+
+    fn player_remove_from_queue(&self, index: usize) -> ApiResult<()> {
+        let mut c = self.inner.core.lock().unwrap();
+        if index >= c.entries.len() {
+            return Ok(());
+        }
+        c.entries.remove(index);
+        match c.current {
+            Some(cur) if cur == index => c.current = if c.entries.is_empty() { None } else { Some(index.min(c.entries.len() - 1)) },
+            Some(cur) if cur > index => c.current = Some(cur - 1),
+            _ => {}
+        }
+        Inner::refill(&mut c);
+        if c.current.is_none() && !c.entries.is_empty() {
+            c.current = Some(0);
+        }
+        self.inner.push_state(&c);
+        drop(c);
+        self.inner.emit(Event::QueueChanged);
+        Ok(())
+    }
+
+    fn player_reorder_queue(&self, from: usize, to: usize) -> ApiResult<()> {
+        let mut c = self.inner.core.lock().unwrap();
+        if from >= c.entries.len() {
+            return Ok(());
+        }
+        let moved = c.entries.remove(from);
+        let to = to.min(c.entries.len());
+        c.entries.insert(to, moved);
+        if let Some(cur) = c.current {
+            if cur == from {
+                c.current = Some(to);
+            } else if from < cur && cur <= to {
+                c.current = Some(cur - 1);
+            } else if to <= cur && cur < from {
+                c.current = Some(cur + 1);
+            }
+        }
+        Inner::refill(&mut c);
         self.inner.push_state(&c);
         drop(c);
         self.inner.emit(Event::QueueChanged);
