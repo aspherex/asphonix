@@ -52,6 +52,18 @@ impl PlayerApi for RealBackend {
             start_track_id: q.start_track_id,
         })
     }
+    fn player_play_playlist(&self, req: PlaySourceRequest) -> ApiResult<()> {
+        self.play_playlist_impl(req)
+    }
+    fn player_play_liked(&self, req: PlaySourceRequest) -> ApiResult<()> {
+        self.play_liked_impl(req)
+    }
+    fn player_play_artist(&self, req: PlayArtistRequest) -> ApiResult<()> {
+        self.play_artist_impl(req)
+    }
+    fn player_play_genre(&self, req: PlayGenreRequest) -> ApiResult<()> {
+        self.play_genre_impl(req)
+    }
     fn player_play_pause(&self) -> ApiResult<()> {
         self.send(EngineCommand::PlayPause)
     }
@@ -121,5 +133,37 @@ impl OutputApi for RealBackend {
     fn output_get_status(&self) -> ApiResult<OutputStatus> {
         let s = self.0.engine.request_blocking(EngineCommand::GetOutputStatus).ok_or_else(|| ApiError::new(ErrorCode::Unknown, "engine did not reply"))?;
         conv(s)
+    }
+}
+
+impl RealBackend {
+    /// Rolling `PlaySource` from `(id, artist)` rows (playlist/artist/genre/liked), like the WebView app's `*_source_cmd`.
+    fn play_rows(&self, kind: core::SourceKind, label: String, source_id: Option<String>, rows: Vec<(String, String)>, shuffle: bool, flow: Option<FlowArc>, start: Option<String>) -> ApiResult<()> {
+        let (track_ids, artists): (Vec<String>, Vec<Option<String>>) = rows.into_iter().map(|(id, a)| (id, (!a.is_empty()).then_some(a))).unzip();
+        let (mode, arc) = match flow {
+            Some(f) => (core::SourceMode::Flow, conv(f)?),
+            None if shuffle => (core::SourceMode::Shuffle, Default::default()),
+            None => (core::SourceMode::InOrder, Default::default()),
+        };
+        self.send(EngineCommand::PlaySource { kind, label, source_id, mode, arc, track_ids, artists, start_track_id: start })
+    }
+}
+
+impl RealBackend {
+    pub(crate) fn play_playlist_impl(&self, req: PlaySourceRequest) -> ApiResult<()> {
+        let (name, rows) = library::get_playlist_play_source(&self.0.db, &req.id, req.start_track_id.as_deref()).map_err(err)?.ok_or_else(|| ApiError::not_found("playlist"))?;
+        self.play_rows(core::SourceKind::Playlist, name, Some(req.id), rows, req.shuffle, req.flow, req.start_track_id)
+    }
+    pub(crate) fn play_liked_impl(&self, req: PlaySourceRequest) -> ApiResult<()> {
+        let rows = library::get_liked_play_source(&self.0.db, req.start_track_id.as_deref()).map_err(err)?;
+        self.play_rows(core::SourceKind::Liked, "Liked Songs".into(), None, rows, req.shuffle, req.flow, req.start_track_id)
+    }
+    pub(crate) fn play_artist_impl(&self, req: PlayArtistRequest) -> ApiResult<()> {
+        let (name, rows) = library::get_artist_play_source(&self.0.db, &req.id, req.start_track_id.as_deref()).map_err(err)?.ok_or_else(|| ApiError::not_found("artist"))?;
+        self.play_rows(core::SourceKind::Artist, name, Some(req.id), rows, req.shuffle, req.flow, req.start_track_id)
+    }
+    pub(crate) fn play_genre_impl(&self, req: PlayGenreRequest) -> ApiResult<()> {
+        let (name, rows) = library::discovery::get_genre_play_source(&self.0.db, &req.name, req.start_track_id.as_deref()).map_err(err)?.ok_or_else(|| ApiError::not_found("genre"))?;
+        self.play_rows(core::SourceKind::Genre, name, None, rows, req.shuffle, req.flow, req.start_track_id)
     }
 }

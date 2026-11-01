@@ -73,6 +73,13 @@ fn login_profiles_restore_logout() {
     std::thread::sleep(std::time::Duration::from_millis(1500));
     let ps2 = b.player_get_state().unwrap();
     println!("after next: {:?} {:?}", ps2.status, ps2.track.as_ref().map(|t| t.title.clone()));
+    // rolling sources: shuffle the first playlist with tracks
+    if let Some(p) = pls.iter().find(|p| p.song_count > 0) {
+        b.player_play_playlist(PlaySourceRequest { id: p.id.clone(), shuffle: true, start_track_id: None, seed: 1, flow: None }).unwrap();
+        std::thread::sleep(std::time::Duration::from_millis(2500));
+        let q = b.player_get_queue(PageRequest { offset: 0, limit: 50 }).unwrap();
+        println!("playlist source: status={:?} queue total={} source={:?}", b.player_get_state().unwrap().status, q.total, q.source.as_ref().map(|s| s.label.clone()));
+    }
     b.player_pause().unwrap();
     let q = b.player_get_queue(PageRequest { offset: 0, limit: 10 }).unwrap();
     println!("queue total={}", q.total);
