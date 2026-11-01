@@ -47,6 +47,13 @@ pub struct Shell {
     pub(crate) menu: Entity<ContextMenu>,
     pub(crate) overlays: Entity<crate::overlays::Overlays>,
     pub(crate) boot: Option<Entity<super::boot::BootIntro>>,
+    pub(crate) card: Option<CardHandle>,
+    card_gen: u64,
+    prev_track_id: Option<String>,
+    track_overlay: bool,
+    main_active: bool,
+    main_hwnd: Option<isize>,
+    scale: f32,
     _boot_sub: Option<Subscription>,
     pub(crate) search: Entity<TextInput>,
     pub(crate) focus: FocusHandle,
@@ -105,6 +112,8 @@ impl Shell {
                 }
             }
         }));
+        subs.push(cx.subscribe(&player, |this: &mut Shell, _, _: &crate::app::PlayerEvent, cx| this.card_on_player(cx)));
+        subs.push(cx.observe_window_activation(window, |this: &mut Shell, window, _cx| this.main_active = window.is_window_active()));
         subs.push(cx.subscribe(&np, |this: &mut Shell, _, ev: &NpEvent, cx| this.on_np_event(ev, cx)));
         // `TopBar.svelte: onSearchFocus`: focusing the search box navigates to the Search route
         let search_focus = search.read(cx).focus_handle.clone();
@@ -125,6 +134,13 @@ impl Shell {
             menu,
             overlays,
             boot: None,
+            card: None,
+            card_gen: 0,
+            prev_track_id: None,
+            track_overlay: !cfg!(feature = "parity"),
+            main_active: true,
+            main_hwnd: crate::winffi::hwnd_of(window),
+            scale: window.scale_factor(),
             _boot_sub: None,
             search,
             focus,
@@ -677,5 +693,116 @@ impl Shell {
         self.boot = Some(e);
         let _ = window;
         cx.notify();
+    }
+}
+
+/// The open track-change card (`overlay.rs`): at most one window, re-used for a newer track.
+pub(crate) struct CardHandle {
+    pub(crate) win: gpui::WindowHandle<super::overlay_card::CardView>,
+    _sub: Subscription,
+}
+
+impl Shell {
+    /// `overlay.rs show`: open (or re-use) the card for `track` and arm the hide timer.
+    pub fn show_card(&mut self, track: sonix_api::Track, cx: &mut Context<Self>) {
+        use super::overlay_card::{CardEvent, CardView, Corner, HEIGHT, MARGIN, WIDTH};
+        self.card_gen += 1;
+        let gen_ = self.card_gen;
+        if let Some(c) = &self.card {
+            let _ = c.win.update(cx, |v, _, cx| v.set_track(track, cx));
+            self.schedule_card_hide(gen_, cx);
+            return;
+        }
+        let Some(main) = self.main_hwnd else { return };
+        let scale = self.scale.max(0.5);
+        let (w, h_px, m) = ((WIDTH * scale) as i32, (HEIGHT * scale) as i32, (MARGIN * scale) as i32);
+        let work = crate::winffi::work_area_of(main).unwrap_or((0, 0, 1920, 1040));
+        let (x, y) = Corner::TopLeft.place(work, w, h_px, m);
+        let (backend, art) = (self.backend.clone(), cx.global::<Services>().art.clone());
+        let bounds = gpui::Bounds::new(gpui::point(px(x as f32 / scale), px(y as f32 / scale)), gpui::size(px(WIDTH), px(HEIGHT)));
+        let opened = cx.open_window(
+            gpui::WindowOptions {
+                window_bounds: Some(gpui::WindowBounds::Windowed(bounds)),
+                titlebar: Some(gpui::TitlebarOptions { title: Some("SONIX".into()), appears_transparent: true, traffic_light_position: None }),
+                focus: false,
+                show: true,
+                kind: gpui::WindowKind::PopUp,
+                is_movable: false,
+                is_resizable: false,
+                is_minimizable: false,
+                window_background: gpui::WindowBackgroundAppearance::Opaque,
+                ..Default::default()
+            },
+            move |_, cx| cx.new(|_| CardView::new(backend, art, track, (x, y, w, h_px))),
+        );
+        let Ok(win) = opened else { return };
+        let entity = win.entity(cx).ok();
+        let sub = match entity {
+            Some(e) => cx.subscribe(&e, |this: &mut Shell, _, _: &CardEvent, cx| this.open_main_from_card(cx)),
+            None => return,
+        };
+        // show it now (hidden windows do not paint): no activation, topmost; the card itself starts at opacity 0
+        let _ = win.update(cx, |_, window, _| {
+            if let Some(h) = crate::winffi::hwnd_of(window) {
+                crate::winffi::show_no_activate(h, x, y, w, h_px);
+            }
+        });
+        self.card = Some(CardHandle { win, _sub: sub });
+        self.schedule_card_hide(gen_, cx);
+    }
+
+    fn schedule_card_hide(&mut self, gen_: u64, cx: &mut Context<Self>) {
+        if cfg!(feature = "parity") {
+            return; // the runner drives time itself
+        }
+        cx.spawn(async move |this, cx| {
+            cx.background_executor().timer(Duration::from_millis(super::overlay_card::SHOW_FOR_MS)).await;
+            let alive = this.update(cx, |t, cx| {
+                if t.card_gen != gen_ {
+                    return false;
+                }
+                if let Some(c) = &t.card {
+                    let _ = c.win.update(cx, |v, _, cx| v.hide(cx));
+                }
+                true
+            });
+            if !matches!(alive, Ok(true)) {
+                return;
+            }
+            cx.background_executor().timer(Duration::from_millis(super::overlay_card::FADE_MS)).await;
+            let _ = this.update(cx, |t, cx| {
+                if t.card_gen == gen_ {
+                    t.close_card(cx);
+                }
+            });
+        })
+        .detach();
+    }
+
+    /// `dismiss`: destroy the card window now (nothing stays resident).
+    pub fn close_card(&mut self, cx: &mut Context<Self>) {
+        self.card_gen += 1;
+        if let Some(c) = self.card.take() {
+            let _ = c.win.update(cx, |_, window, _| window.remove_window());
+        }
+    }
+
+    fn open_main_from_card(&mut self, cx: &mut Context<Self>) {
+        self.close_card(cx);
+        if let Some(h) = self.main_hwnd {
+            crate::winffi::restore_foreground(h);
+        }
+    }
+
+    /// `PlayerEvent` hook: `should_show` (track change into playback while SONIX is not the focused window).
+    fn card_on_player(&mut self, cx: &mut Context<Self>) {
+        let st = self.player.read(cx).state.clone();
+        let focused = self.main_active && !self.suspended;
+        if super::overlay_card::should_show(self.prev_track_id.as_deref(), &st, self.track_overlay, focused)
+            && let Some(t) = st.track.clone()
+        {
+            self.show_card(t, cx);
+        }
+        self.prev_track_id = st.track.as_ref().map(|t| t.id.clone());
     }
 }

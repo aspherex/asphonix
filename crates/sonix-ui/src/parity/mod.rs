@@ -208,6 +208,53 @@ impl Shell {
                 "route": self.router.current().path(),
                 "light": self.th.light
             }),
+            "card" => {
+                let id = s("trackId");
+                let b = self.backend.clone();
+                cx.spawn(async move |this, cx| {
+                    let t = cx
+                        .background_executor()
+                        .spawn(async move {
+                            let _ = b.player_play_all(sonix_api::PlayAllRequest {
+                                order: sonix_api::TrackOrder::Sort { field: sonix_api::TrackSortField::Title, dir: sonix_api::SortDir::Asc },
+                                filter: None,
+                                start_track_id: Some(id),
+                            });
+                            b.player_get_state().ok().and_then(|s| s.track)
+                        })
+                        .await;
+                    let _ = this.update(cx, |sh, cx| {
+                        if let Some(t) = t {
+                            sh.show_card(t, cx);
+                        }
+                    });
+                })
+                .detach();
+                json!({"ok": true})
+            }
+            "ocapture" => {
+                let Some(c) = &self.card else { return err("no card") };
+                let path = s("path");
+                let r = c.win.update(cx, |_, w, _| {
+                    if let Some(h) = crate::winffi::hwnd_of(w) {
+                        crate::log(&format!("card {}", crate::winffi::debug_state(h)));
+                    }
+                    crate::winffi::hwnd_of(w).and_then(crate::winffi::capture_client)
+                });
+                match r {
+                    Ok(Some((w, h, mut bgra))) => {
+                        for p in bgra.chunks_mut(4) {
+                            p.swap(0, 2);
+                            p[3] = 255;
+                        }
+                        match image::save_buffer(path, &bgra, w, h, image::ColorType::Rgba8) {
+                            Ok(()) => json!({"ok": true, "w": w, "h": h}),
+                            Err(e) => err(e),
+                        }
+                    }
+                    _ => err("card capture failed"),
+                }
+            }
             "boot" => {
                 self.start_boot(window, cx);
                 window.refresh();
@@ -249,6 +296,12 @@ impl Shell {
                     }
                 } else {
                     crate::clock::manual::unfreeze();
+                }
+                if let Some(c) = &self.card {
+                    let _ = c.win.update(cx, |_, w, cx| {
+                        cx.notify();
+                        w.refresh();
+                    });
                 }
                 window.refresh();
                 json!({"ok": true, "t": crate::clock::now()})

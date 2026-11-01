@@ -243,3 +243,121 @@ mod tests {
         assert_eq!(size_kind(4), None);
     }
 }
+
+/// Work area (taskbar excluded, physical px: x, y, w, h) of the monitor `hwnd` is on.
+#[cfg(windows)]
+pub fn work_area_of(hwnd: isize) -> Option<(i32, i32, i32, i32)> {
+    use std::ffi::c_void;
+    #[repr(C)]
+    struct MonitorInfo {
+        size: u32,
+        monitor: [i32; 4],
+        work: [i32; 4],
+        flags: u32,
+    }
+    #[link(name = "user32")]
+    unsafe extern "system" {
+        fn MonitorFromWindow(h: *mut c_void, flags: u32) -> *mut c_void;
+        fn GetMonitorInfoW(m: *mut c_void, i: *mut MonitorInfo) -> i32;
+    }
+    unsafe {
+        let m = MonitorFromWindow(hwnd as *mut c_void, 2);
+        let mut i = MonitorInfo { size: std::mem::size_of::<MonitorInfo>() as u32, monitor: [0; 4], work: [0; 4], flags: 0 };
+        if m.is_null() || GetMonitorInfoW(m, &mut i) == 0 {
+            return None;
+        }
+        Some((i.work[0], i.work[1], i.work[2] - i.work[0], i.work[3] - i.work[1]))
+    }
+}
+#[cfg(not(windows))]
+pub fn work_area_of(_: isize) -> Option<(i32, i32, i32, i32)> {
+    None
+}
+
+/// Show a window without activating it: `WS_EX_NOACTIVATE | WS_EX_TOOLWINDOW`, topmost, `SWP_NOACTIVATE`,
+/// `SW_SHOWNOACTIVATE` (the track-change card must never take the focus from the app the user is working in).
+#[cfg(windows)]
+pub fn show_no_activate(hwnd: isize, x: i32, y: i32, w: i32, ht: i32) {
+    use std::ffi::c_void;
+    #[link(name = "user32")]
+    unsafe extern "system" {
+        fn GetWindowLongPtrW(h: *mut c_void, i: i32) -> isize;
+        fn SetWindowLongPtrW(h: *mut c_void, i: i32, v: isize) -> isize;
+        fn SetWindowPos(h: *mut c_void, after: *mut c_void, x: i32, y: i32, w: i32, h2: i32, flags: u32) -> i32;
+        fn GetWindowRect(h: *mut c_void, r: *mut c_void) -> i32;
+        fn GetClientRect(h: *mut c_void, r: *mut c_void) -> i32;
+        fn ShowWindow(h: *mut c_void, cmd: i32) -> i32;
+    }
+    unsafe {
+        let hw = hwnd as *mut c_void;
+        let ex = GetWindowLongPtrW(hw, -20);
+        SetWindowLongPtrW(hw, -20, ex | 0x0800_0000 | 0x80 | 0x8);
+        SetWindowLongPtrW(hw, -16, 0x8000_0000u32 as i32 as isize); // WS_POPUP: no caption/frame, client = the whole window
+        // HWND_TOPMOST = -1; SWP_NOACTIVATE | SWP_FRAMECHANGED
+        SetWindowPos(hw, -1isize as *mut c_void, x, y, w, ht, 0x0010 | 0x0020);
+        // whatever non-client frame the window still has: grow the outer size so the CLIENT area is exactly w x ht
+        let (mut wr, mut cr) = ([0i32; 4], [0i32; 4]);
+        GetWindowRect(hw, wr.as_mut_ptr() as *mut c_void);
+        GetClientRect(hw, cr.as_mut_ptr() as *mut c_void);
+        let (dw, dh) = ((wr[2] - wr[0]) - (cr[2] - cr[0]), (wr[3] - wr[1]) - (cr[3] - cr[1]));
+        if dw > 0 || dh > 0 {
+            SetWindowPos(hw, -1isize as *mut c_void, x, y, w + dw, ht + dh, 0x0010);
+        }
+        ShowWindow(hw, 4);
+    }
+}
+#[cfg(not(windows))]
+pub fn show_no_activate(_: isize, _: i32, _: i32, _: i32, _: i32) {}
+
+/// Restore a minimized window and bring it to the foreground (card click -> main window).
+#[cfg(windows)]
+pub fn restore_foreground(hwnd: isize) {
+    use std::ffi::c_void;
+    #[link(name = "user32")]
+    unsafe extern "system" {
+        fn ShowWindow(h: *mut c_void, cmd: i32) -> i32;
+        fn IsIconic(h: *mut c_void) -> i32;
+        fn SetForegroundWindow(h: *mut c_void) -> i32;
+    }
+    unsafe {
+        let h = hwnd as *mut c_void;
+        if IsIconic(h) != 0 {
+            ShowWindow(h, 9);
+        }
+        SetForegroundWindow(h);
+    }
+}
+#[cfg(not(windows))]
+pub fn restore_foreground(_: isize) {}
+
+/// Debug aid: visibility, window rect and client rect of `hwnd`.
+#[cfg(windows)]
+pub fn debug_state(hwnd: isize) -> String {
+    use std::ffi::c_void;
+    #[repr(C)]
+    #[derive(Default, Debug)]
+    struct Rect {
+        l: i32,
+        t: i32,
+        r: i32,
+        b: i32,
+    }
+    #[link(name = "user32")]
+    unsafe extern "system" {
+        fn IsWindowVisible(h: *mut c_void) -> i32;
+        fn GetWindowRect(h: *mut c_void, r: *mut Rect) -> i32;
+        fn GetClientRect(h: *mut c_void, r: *mut Rect) -> i32;
+        fn IsIconic(h: *mut c_void) -> i32;
+    }
+    unsafe {
+        let h = hwnd as *mut c_void;
+        let (mut w, mut c) = (Rect::default(), Rect::default());
+        GetWindowRect(h, &mut w);
+        GetClientRect(h, &mut c);
+        format!("visible={} iconic={} window={:?} client={:?}", IsWindowVisible(h), IsIconic(h), w, c)
+    }
+}
+#[cfg(not(windows))]
+pub fn debug_state(_: isize) -> String {
+    String::new()
+}
