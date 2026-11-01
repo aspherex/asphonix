@@ -1,6 +1,7 @@
 //! `RealBackend`: the `Backend` trait over the vendored SONIX core (`sonix-core`).
 //! Phase 2 step 1: login, profiles, keychain, session status. Everything else
 //! returns `unimplemented` (see `stubs.rs`) until the later steps land.
+mod player;
 mod reads;
 mod stubs;
 
@@ -41,9 +42,11 @@ struct Session {
 struct Inner {
     rt: tokio::runtime::Runtime,
     dir: PathBuf,
-    db: Db,
+    db: Arc<Db>,
     epoch: AtomicU64,
-    client: Mutex<Option<Client>>,
+    client: Arc<std::sync::RwLock<Option<Client>>>,
+    engine: sonix_core::audio::EngineHandle,
+    prefs: Arc<sonix_core::audio::Prefs>,
     session: Mutex<Session>,
     subs: Mutex<Vec<Sender<Event>>>,
 }
@@ -90,14 +93,25 @@ impl RealBackend {
         secrets::set_service_name(IDENTIFIER);
         let dir = config_dir();
         let _ = std::fs::create_dir_all(&dir);
+        let db = Arc::new(Db::open(&data_dir()).expect("library db"));
+        let client: Arc<std::sync::RwLock<Option<Client>>> = Arc::new(std::sync::RwLock::new(None));
+        let prefs = Arc::new(sonix_core::audio::Prefs::default());
+        let (ev_tx, ev_rx) = channel::<Event>();
+        let source: Arc<dyn sonix_core::audio::TrackSource> = Arc::new(sonix_core::audio::SubsonicTrackSource::new(client.clone()));
+        let engine = sonix_core::audio::EngineHandle::with_events(Arc::new(player::Events(ev_tx)), source, db.clone(), false, 20)
+            .with_continuity(prefs.clone(), None, None);
+        // Safety default: shared mode until the user picks exclusive in Settings.
+        engine.send(sonix_core::audio::EngineCommand::SetOutputMode(sonix_core::ipc::OutputMode::Shared));
         let rt = tokio::runtime::Builder::new_multi_thread().worker_threads(2).enable_all().build().expect("tokio");
         let cfg = secrets::load_config(&dir);
         let me = Self(Arc::new(Inner {
             rt,
-            db: Db::open(&data_dir()).expect("library db"),
+            db,
+            engine,
+            prefs,
             epoch: AtomicU64::new(0),
             dir,
-            client: Mutex::new(None),
+            client,
             session: Mutex::new(Session {
                 state: Some(if cfg.is_some() { ConnectionState::Connecting } else { ConnectionState::Disconnected }),
                 cfg: cfg.clone(),
@@ -105,6 +119,14 @@ impl RealBackend {
             }),
             subs: Mutex::new(Vec::new()),
         }));
+        {
+            let b = me.clone();
+            std::thread::spawn(move || {
+                while let Ok(ev) = ev_rx.recv() {
+                    b.emit(ev);
+                }
+            });
+        }
         if let Some(cfg) = cfg {
             let b = me.clone();
             std::thread::spawn(move || match secrets::load_profile_password(&cfg.url, &cfg.username) {
@@ -121,7 +143,7 @@ impl RealBackend {
 
     /// Background sync (full catalog when the DB is empty or `full`, else incremental).
     pub(crate) fn start_sync(&self, full: bool) {
-        let Some(client) = self.0.client.lock().unwrap().clone() else { return };
+        let Some(client) = self.0.client.read().unwrap().clone() else { return };
         let me = self.clone();
         let epoch = self.0.epoch.load(std::sync::atomic::Ordering::SeqCst);
         self.0.rt.spawn(async move {
@@ -178,7 +200,7 @@ impl RealBackend {
         if !same && previous.is_some() {
             self.0.db.clear_all().map_err(err)?;
         }
-        *self.0.client.lock().unwrap() = Some(client);
+        *self.0.client.write().unwrap() = Some(client);
         {
             let mut s = self.0.session.lock().unwrap();
             s.cfg = Some(cfg);
@@ -197,7 +219,7 @@ impl AuthApi for RealBackend {
     }
 
     fn auth_probe(&self) -> ApiResult<ServerCapabilities> {
-        let client = self.0.client.lock().unwrap().clone().ok_or_else(|| ApiError::new(ErrorCode::NotConnected, "not connected"))?;
+        let client = self.0.client.read().unwrap().clone().ok_or_else(|| ApiError::new(ErrorCode::NotConnected, "not connected"))?;
         let caps = self.0.rt.block_on(client.probe_capabilities()).map_err(err)?;
         Ok(wire_caps(&caps))
     }
@@ -212,7 +234,7 @@ impl AuthApi for RealBackend {
             secrets::delete_profile_password(&cfg.url, &cfg.username, false).map_err(err)?;
         }
         secrets::clear_config(&self.0.dir).map_err(err)?;
-        *self.0.client.lock().unwrap() = None;
+        *self.0.client.write().unwrap() = None;
         *self.0.session.lock().unwrap() = Session { state: Some(ConnectionState::Disconnected), ..Default::default() };
         self.set_state(ConnectionState::Disconnected, None);
         Ok(())

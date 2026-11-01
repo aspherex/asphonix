@@ -127,7 +127,7 @@ impl ArtApi for RealBackend {
         let bytes = match std::fs::read(&path) {
             Ok(b) if !b.is_empty() => b,
             _ => {
-                let client = self.0.client.lock().unwrap().clone().ok_or_else(|| ApiError::new(ErrorCode::NotConnected, "not connected"))?;
+                let client = self.0.client.read().unwrap().clone().ok_or_else(|| ApiError::new(ErrorCode::NotConnected, "not connected"))?;
                 let (b, _) = self.0.rt.block_on(client.get_cover_art(cover_art, Some(size))).map_err(err)?;
                 let _ = std::fs::create_dir_all(&dir);
                 let tmp = path.with_extension("tmp");
