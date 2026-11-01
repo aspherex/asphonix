@@ -2,7 +2,7 @@
 //! artist_tracks/home_sections/genres/genre`, `browse_get_artist_top_tracks/info`, `history_recent`),
 //! as pure functions over the generated [`Library`] and the star map. Orders, seeds and the
 //! "popular / most played / similar" rules are the ones of the JS mock.
-use crate::library::{self, EPOCH_MS, GENRES, Library, NUM_ALBUMS, NUM_ARTISTS, Rng};
+use crate::library::{self, EPOCH_MS, Library, NUM_ALBUMS, NUM_ARTISTS, Rng};
 use sonix_api::*;
 use std::cmp::Ordering;
 use std::collections::HashMap;
@@ -260,11 +260,6 @@ pub fn artist_info(lib: &Library, stars: &Stars, id: &str) -> ApiResult<ArtistIn
         biography: if idx % 4 == 3 { None } else { Some(MOCK_BIO.join("\n")) },
         similar: if idx % 5 == 4 { Vec::new() } else { similar },
     })
-}
-
-#[allow(dead_code)]
-pub fn genre_names() -> &'static [&'static str] {
-    &GENRES
 }
 
 // ------------------------------------------------------------ the simulated server-side play queue (`mock.ts: serverQueue`)

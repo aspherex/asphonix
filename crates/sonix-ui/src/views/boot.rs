@@ -7,7 +7,7 @@
 use crate::anim::cubic_bezier;
 use crate::theme::{DISPLAY, MONO, Theme};
 use gpui::{
-    App, Bounds, BorderStyle, Context, ContentMask, EventEmitter, Hsla, IntoElement, Render, Rgba, SharedString, TextRun, Window, canvas, div, point, prelude::*, px, quad, size,
+    Bounds, BorderStyle, Context, ContentMask, EventEmitter, Hsla, IntoElement, Render, Rgba, SharedString, TextRun, Window, canvas, div, point, prelude::*, px, quad, size,
 };
 use std::sync::Arc;
 
@@ -284,5 +284,3 @@ impl Render for BootIntro {
     }
 }
 
-#[allow(dead_code)]
-fn _app(_: &App) {}
