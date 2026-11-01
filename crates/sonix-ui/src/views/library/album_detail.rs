@@ -646,9 +646,9 @@ mod tests {
         s.click(4, true, false);
         assert!(s.has(2) && s.has(4) && s.len() == 2);
         s.click(6, false, true); // shift extends from the anchor (4) and keeps the rest
-        assert!((2..=6).all(|i| s.has(i)));
-        s.click(3, true, false); // ctrl toggles
-        assert!(!s.has(3));
+        assert!(s.has(2) && !s.has(3) && (4..=6).all(|i| s.has(i)));
+        s.click(5, true, false); // ctrl toggles
+        assert!(!s.has(5));
         assert_eq!(s.for_context_menu(9), vec![9]);
         s.select_all(3);
         assert_eq!(s.for_context_menu(1), vec![0, 1, 2], "inside the selection: keep it");

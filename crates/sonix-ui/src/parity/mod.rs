@@ -312,7 +312,10 @@ impl Shell {
         } else if self.search.read(cx).focus_handle.is_focused(window) {
             "search"
         } else {
-            tracks["focus"].as_str().unwrap_or("body")
+            // any focused element inside a `[data-tracklist]` list (Tracks, album tracks, popular tracks)
+            let in_list = window.context_stack().iter().any(|c| c.contains("TrackList"));
+            let filter = tracks["focus"].as_str() == Some("filter") && *self.router.current() == Route::Tracks;
+            if filter { "filter" } else if in_list { "tracklist" } else { "body" }
         };
         let ps = self.player.read(cx).state.clone();
         json!({

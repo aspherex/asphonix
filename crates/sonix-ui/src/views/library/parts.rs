@@ -137,8 +137,8 @@ mod tests {
     fn auto_fill_matches_the_css_grid() {
         // Home card grid at 1440 x 900: stage 840 - 32 padding - 10 scrollbar = 798, minmax(150px, 1fr), gap 12
         let (cols, w) = auto_fill(798.0, 150.0, 12.0);
-        assert_eq!(cols, 4);
-        assert!((w - 190.5).abs() < 1e-4);
+        assert_eq!(cols, 5);
+        assert!((w - 150.0).abs() < 1e-4);
         assert_eq!(auto_fill(100.0, 150.0, 12.0).0, 1, "at least one column");
         // exactly one more column fits when width + gap reaches n * (min + gap)
         assert_eq!(auto_fill(5.0 * 150.0 + 4.0 * 12.0, 150.0, 12.0).0, 5);
