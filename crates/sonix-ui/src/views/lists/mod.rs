@@ -6,6 +6,8 @@ pub mod history;
 pub mod menus;
 pub mod modal;
 pub mod playlists;
+pub mod search;
+pub mod settings;
 pub mod smart_rules;
 pub mod table;
 pub mod track_page;
@@ -43,12 +45,14 @@ pub struct ListsHost {
     track_page: Option<Entity<track_page::TrackPage>>,
     history: Option<Entity<history::HistoryView>>,
     playlists: Option<Entity<playlists::PlaylistsView>>,
+    search: Option<Entity<search::SearchView>>,
+    settings: Option<Entity<settings::SettingsView>>,
     subs: Vec<Subscription>,
 }
 
 impl ListsHost {
     pub fn handles(r: &Route) -> bool {
-        matches!(r, Route::Playlists | Route::Playlist(_) | Route::Liked | Route::Smart(_) | Route::History)
+        matches!(r, Route::Playlists | Route::Playlist(_) | Route::Liked | Route::Smart(_) | Route::History | Route::Search | Route::Settings)
     }
 }
 
@@ -110,6 +114,24 @@ impl Shell {
                 }
                 self.lists.history.clone().unwrap().into_any_element()
             }
+            Route::Settings => {
+                if self.lists.settings.is_none() {
+                    let v = cx.new(|cx| settings::SettingsView::new(backend, &menu, cx));
+                    self.lists.subs.push(cx.subscribe(&v, |sh: &mut Shell, _, ev: &ListsEvent, cx| sh.lists_event(ev, cx)));
+                    self.lists.settings = Some(v);
+                }
+                self.lists.settings.clone().unwrap().into_any_element()
+            }
+            Route::Search => {
+                if self.lists.search.is_none() {
+                    let art = Self::lists_art(cx);
+                    let input = self.search.clone();
+                    let v = cx.new(|cx| search::SearchView::new(backend, art, &menu, &input, cx));
+                    self.lists.subs.push(cx.subscribe(&v, |sh: &mut Shell, _, ev: &ListsEvent, cx| sh.lists_event(ev, cx)));
+                    self.lists.search = Some(v);
+                }
+                self.lists.search.clone().unwrap().into_any_element()
+            }
             _ => {
                 if self.lists.playlists.is_none() {
                     let art = Self::lists_art(cx);
@@ -119,6 +141,42 @@ impl Shell {
                 }
                 self.lists.playlists.clone().unwrap().into_any_element()
             }
+        }
+    }
+
+    /// Window-level keys of the Search route (`<svelte:window onkeydown>`): Up/Down move, Shift+Enter enqueues.
+    pub(crate) fn lists_search_key(&mut self, ev: &gpui::KeyDownEvent, cx: &mut Context<Self>) {
+        if *self.router.current() != Route::Search {
+            return;
+        }
+        let Some(s) = self.lists.search.clone() else { return };
+        let k = ev.keystroke.key.as_str();
+        let m = ev.keystroke.modifiers;
+        if m.control || m.alt || m.platform {
+            return;
+        }
+        match k {
+            "down" | "up" => {
+                s.update(cx, |s, cx| {
+                    s.arrow(k == "down", cx);
+                });
+            }
+            "enter" if m.shift => s.update(cx, |s, cx| s.enter(true, cx)),
+            _ => {}
+        }
+    }
+
+    /// Escape on the Search route clears the query; returns whether it did.
+    pub(crate) fn lists_search_escape(&mut self, cx: &mut Context<Self>) -> bool {
+        if *self.router.current() != Route::Search {
+            return false;
+        }
+        match self.lists.search.clone() {
+            Some(s) => {
+                s.update(cx, |s, cx| s.escape(cx));
+                true
+            }
+            None => false,
         }
     }
 
@@ -171,6 +229,8 @@ impl Shell {
             Route::Playlist(_) | Route::Liked | Route::Smart(_) => self.lists.track_page.as_ref().map(|p| p.read(cx).parity_state(window, cx)).unwrap_or_default(),
             Route::History => self.lists.history.as_ref().map(|p| p.read(cx).parity_state(window, cx)).unwrap_or_default(),
             Route::Playlists => self.lists.playlists.as_ref().map(|p| p.read(cx).parity_state()).unwrap_or_default(),
+            Route::Search => self.lists.search.as_ref().map(|p| p.read(cx).parity_state()).unwrap_or_default(),
+            Route::Settings => self.lists.settings.as_ref().map(|p| p.read(cx).parity_state()).unwrap_or_default(),
             _ => serde_json::Value::Null,
         }
     }

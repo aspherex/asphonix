@@ -168,3 +168,22 @@ pub fn page_content_width(window: &Window, overflow: bool) -> f32 {
     let rail = if super::super::shell::Shell::rail_docked(vw, &crate::router::Route::Tracks) { crate::metrics::layout::RAIL_W } else { 0.0 };
     vw - super::super::shell::Shell::sidebar_width(vw) - rail - 2.0 * crate::metrics::lists::PAGE_PAD - if overflow { crate::metrics::tracks::SCROLLBAR_W } else { 0.0 }
 }
+
+/// Greedy word wrap of `white-space: normal` text into `width` px with the font of `spec` (block-box text).
+pub fn wrap_text(th: &Theme, window: &Window, text: &str, spec: crate::tracking::TypeSpec, width: f32) -> Vec<String> {
+    let fam = spec.family.name(th.body_font);
+    let w = |t: &str| crate::text::natural_width(window, t, fam, spec.size, spec.weight, spec.tracking_px());
+    let mut lines: Vec<String> = Vec::new();
+    let mut cur = String::new();
+    for word in text.split(' ') {
+        let cand = if cur.is_empty() { word.to_string() } else { format!("{cur} {word}") };
+        if !cur.is_empty() && w(&cand) > width {
+            lines.push(std::mem::take(&mut cur));
+            cur = word.to_string();
+        } else {
+            cur = cand;
+        }
+    }
+    lines.push(cur);
+    lines
+}

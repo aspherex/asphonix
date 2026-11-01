@@ -546,6 +546,7 @@ impl Render for Shell {
                     let _ = b.player_play_pause();
                 })
             }))
+            .on_key_down(cx.listener(|this, ev: &gpui::KeyDownEvent, _, cx| this.lists_search_key(ev, cx)))
             .on_action(cx.listener(|this, _: &ToggleNowPlaying, _, cx| this.toggle_now_playing(cx)))
             .on_action(cx.listener(|this, _: &ToggleTheme, _, cx| this.toggle_theme(cx)))
             .on_action(cx.listener(|this, _: &NavBack, _, cx| this.go_back(cx)))
@@ -553,12 +554,16 @@ impl Render for Shell {
             .on_action(cx.listener(|this, _: &FocusSearch, window, cx| {
                 let f = this.search.read(cx).focus_handle.clone();
                 window.focus(&f);
+                // Ctrl+K with an old query selects it so typing starts a new search
+                let q = this.search.read(cx).content.to_string();
+                this.search.update(cx, |i, cx| i.set_content(&q, cx));
             }))
             .on_action(cx.listener(|this, _: &Escape, window, cx| {
                 if this.lists_modal_open(cx) {
                     this.lists_modal_cancel(window, cx);
                 } else if this.menu.read(cx).is_open() {
                     this.menu.update(cx, |m, cx| m.close(window, cx));
+                } else if this.lists_search_escape(cx) {
                 } else if *this.router.current() == Route::NowPlaying {
                     this.go_back(cx);
                 } else if this.queue_drawer {
