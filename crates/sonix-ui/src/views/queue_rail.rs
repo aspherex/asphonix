@@ -285,7 +285,7 @@ impl Render for QueueRail {
                             }
                         }))
                         // `startAutoScroll`: the list scrolls while a dragged row sits within 36 px of its top/bottom edge
-                        .on_drag_move::<QueueDrag>(cx.listener(|this, ev: &DragMoveEvent<QueueDrag>, window, cx| {
+                        .on_drag_move::<QueueDrag>(cx.listener(|this, ev: &DragMoveEvent<QueueDrag>, _window, cx| {
                             const EDGE: f32 = 36.0;
                             let (y, top, bottom) = (f32::from(ev.event.position.y), f32::from(ev.bounds.top()), f32::from(ev.bounds.bottom()));
                             let dy = if y < top + EDGE && y > top - EDGE {
@@ -297,9 +297,9 @@ impl Render for QueueRail {
                             };
                             if dy != this.drag_dy {
                                 this.drag_dy = dy;
-                                if dy != 0.0 {
-                                    window.request_animation_frame();
-                                }
+                                // NOT window.request_animation_frame(): outside render/paint GPUI has no current view
+                                // and unwraps None (panic = abort: the crash at fault offset 0x65e1e5). notify()
+                                // re-renders, and render keeps requesting frames while drag_dy != 0.
                                 cx.notify();
                             }
                         }))
