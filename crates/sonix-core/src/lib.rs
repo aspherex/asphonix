@@ -1,4 +1,7 @@
-//! Vendored Tauri-free core of the SONIX WebView app. See VENDORED.md.
+pub mod audio;
+pub mod discovery;
 pub mod ipc;
+pub mod library;
 pub mod secrets;
 pub mod subsonic;
+pub mod overlay;
