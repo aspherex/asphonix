@@ -109,7 +109,11 @@ impl Render for DockView {
                             .flex_col()
                             .min_w_0()
                             .child(pid("dock.title", div().flex().min_w_0().child(txt(&th, BODY_LG, title).color(th.text).ellipsis())))
-                            .child(pid("dock.subtitle", div().flex().min_w_0().child(txt(&th, MONO_DATA, subtitle).color(th.muted).ellipsis()))),
+                            .child(pid("dock.subtitle", div().flex().min_w_0().child({
+                                let t = txt(&th, MONO_DATA, subtitle).color(th.muted).ellipsis();
+                                // artist/album are `EntityLink` buttons (UA `letter-spacing: normal`); the placeholder is plain text
+                                if has { t.no_tracking() } else { t }
+                            }))),
                     ),
             )
             .children(track.as_ref().map(|t| {

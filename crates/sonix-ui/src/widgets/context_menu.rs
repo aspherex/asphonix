@@ -3,6 +3,9 @@
 //! supports one submenu level, full keyboard navigation (Up/Down/Home/End/Enter/Left/
 //! Right/Esc) and restores the previous focus when it closes.
 use super::{hard_shadow, icon};
+use crate::probe::pid;
+use crate::text::txt;
+use crate::tracking::{BODY_SM, MONO_CODE};
 use crate::theme::Theme;
 use gpui::{
     AnchoredPositionMode, AnyElement, App, Context, FocusHandle, Focusable, IntoElement, KeyDownEvent, MouseButton, ParentElement, Pixels,
@@ -95,7 +98,23 @@ pub struct ContextMenu {
     focus: FocusHandle,
 }
 
-const WIDTH: f32 = 220.0;
+/// `ContextMenu.svelte:.menu { min-width: 200px; max-width: 280px }` (the width is the content width in between).
+const MIN_W: f32 = 200.0;
+const MAX_W: f32 = 280.0;
+
+/// Content width of a menu panel: `.item` padding 12 + [icon 14 + gap 8] + label + [gap 8 + chevron 12] + padding 12.
+fn panel_width(window: &Window, th: &Theme, items: &[MenuItem]) -> f32 {
+    let mut w = MIN_W;
+    for it in items {
+        if matches!(it.kind, Kind::Separator) {
+            continue;
+        }
+        let label = crate::text::natural_width(window, &it.label, BODY_SM.family.name(th.body_font), BODY_SM.size, BODY_SM.weight, BODY_SM.tracking_px());
+        let w_item = 24.0 + if it.icon.is_some() { 22.0 } else { 0.0 } + label + if matches!(it.kind, Kind::Submenu(_)) { 20.0 } else { 0.0 } + 2.0;
+        w = w.max(w_item);
+    }
+    w.min(MAX_W)
+}
 
 impl ContextMenu {
     pub fn new(th: Theme, cx: &mut Context<Self>) -> Self {
@@ -224,13 +243,13 @@ impl ContextMenu {
         cx.stop_propagation();
     }
 
-    fn panel(&self, items: &[MenuItem], active: Option<usize>, sub: Option<usize>, parent: Option<usize>, cx: &mut Context<Self>) -> gpui::Div {
+    fn panel(&self, items: &[MenuItem], active: Option<usize>, sub: Option<usize>, parent: Option<usize>, width: f32, window: &Window, cx: &mut Context<Self>) -> gpui::Div {
         let th = self.th;
         let mut col = div()
             .occlude()
             .flex()
             .flex_col()
-            .w(px(WIDTH))
+            .w(px(width))
             .py(px(4.))
             .bg(th.mid)
             .border_1()
@@ -241,7 +260,7 @@ impl ContextMenu {
             .font_family(th.body_font);
         for (i, it) in items.iter().enumerate() {
             if matches!(it.kind, Kind::Separator) {
-                col = col.child(div().h(px(1.)).my(px(4.)).bg(th.border));
+                col = col.child(pid(format!("menu.child.{}", i + usize::from(parent.is_some()) * 100), div().h(px(1.)).my(px(4.)).bg(th.border)));
                 continue;
             }
             let is_active = active == Some(i);
@@ -257,8 +276,9 @@ impl ContextMenu {
             let is_sub = matches!(it.kind, Kind::Submenu(_));
             let submenu = match (&it.kind, is_active && self.open.as_ref().map(|o| o.sub_open).unwrap_or(false)) {
                 (Kind::Submenu(v), true) => {
-                    let p = self.panel(v, sub, None, Some(i), cx);
-                    Some(deferred(anchored().position_mode(AnchoredPositionMode::Local).position(point(px(WIDTH - 4.), px(-5.))).child(p)).with_priority(2))
+                    let sw = panel_width(window, &th, v);
+                    let p = self.panel(v, sub, None, Some(i), sw, window, cx);
+                    Some(deferred(anchored().position_mode(AnchoredPositionMode::Local).position(point(px(width - 4.), px(-5.))).child(p)).with_priority(2))
                 }
                 _ => None,
             };
@@ -302,12 +322,12 @@ impl ContextMenu {
                     this.activate(parent, i, window, cx);
                 }))
                 .children(it.icon.map(|n| icon(n, 14., th.muted).text_color(if it.danger { th.clip } else if is_active { th.accent_fg } else { th.muted })))
-                .child(div().flex_1().min_w_0().child(it.label.clone()))
+                .child(div().flex_1().min_w_0().flex().child(txt(&th, BODY_SM, it.label.clone()).ellipsis()))
                 .children(is_sub.then(|| icon("chevron-right", 12., colr)))
                 .children(submenu);
-            col = col.child(row);
+            col = col.child(pid(format!("menu.child.{}", i + usize::from(parent.is_some()) * 100), row));
             if let Some(h) = &it.hint {
-                col = col.child(div().px(px(12.)).pb(px(4.)).mt(px(-4.)).text_size(px(11.)).line_height(px(14.)).text_color(th.muted).child(h.clone()));
+                col = col.child(div().px(px(12.)).pb(px(4.)).mt(px(-4.)).child(txt(&th, MONO_CODE, h.clone()).color(th.muted)));
             }
         }
         col
@@ -321,17 +341,18 @@ impl Focusable for ContextMenu {
 }
 
 impl Render for ContextMenu {
-    fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let Some(o) = self.open.as_ref() else { return div().into_any_element() };
         let (items, pos, active, sub) = (o.items.clone(), o.pos, o.active, o.sub_active);
-        let panel: AnyElement = self
-            .panel(&items, active, sub, None, cx)
+        let width = panel_width(window, &self.th, &items);
+        let panel: AnyElement = pid("menu", self
+            .panel(&items, active, sub, None, width, window, cx)
             .id("context-menu")
             .track_focus(&self.focus)
             .key_context("ContextMenu")
             .on_key_down(cx.listener(|this, ev: &KeyDownEvent, window, cx| this.on_key(ev, window, cx)))
             .on_mouse_down_out(cx.listener(|this, _, window, cx| this.close(window, cx)))
-            .on_mouse_down(MouseButton::Right, cx.listener(|this, _, window, cx| this.close(window, cx)))
+            .on_mouse_down(MouseButton::Right, cx.listener(|this, _, window, cx| this.close(window, cx))))
             .into_any_element();
         deferred(anchored().position(pos).child(panel)).with_priority(1).into_any_element()
     }

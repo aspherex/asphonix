@@ -116,6 +116,12 @@ pub fn cover<V: 'static>(
     cx: &mut Context<V>,
 ) -> AnyElement {
     let base = div().size(px(logical)).flex_none().overflow_hidden();
+    // Parity harness: the web mock cannot resolve `sonix://art` in a plain browser (the <img> is hidden, leaving the
+    // slot background), so the native side renders the empty slot too.
+    #[cfg(feature = "parity")]
+    if std::env::var_os("SONIX_PARITY_NOART").is_some() {
+        return base.into_any_element();
+    }
     let Some(id) = id else { return base.bg(hsla(0.0, 0.0, 0.5, 0.12)).into_any_element() };
     let sid: SharedString = id.to_string().into();
     let bucket = bucket_for((logical * window.scale_factor()).ceil() as u32);

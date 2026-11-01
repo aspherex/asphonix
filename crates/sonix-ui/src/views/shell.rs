@@ -51,6 +51,11 @@ pub struct Shell {
     pub(crate) status: Option<SessionStatus>,
     pub(crate) counts: Counts,
     pub(crate) queue_drawer: bool,
+    pub(crate) pl_scroll: gpui::ScrollHandle,
+    /// `uiState.queueRailCollapsed`: the docked rail (>= 1440 px) hidden by the dock's queue button.
+    pub(crate) rail_collapsed: bool,
+    last_vw: f32,
+    spectrum_on: bool,
     pub(crate) suspended: bool,
     backdrop: Option<Arc<RenderImage>>,
     shown: bool,
@@ -78,7 +83,12 @@ impl Shell {
         subs.push(cx.subscribe(&dock, |this: &mut Shell, _, ev: &DockEvent, cx| match ev {
             DockEvent::OpenNowPlaying => this.toggle_now_playing(cx),
             DockEvent::ToggleQueue => {
-                this.queue_drawer = !this.queue_drawer;
+                // `uiState.toggleQueueRail`: collapse the docked rail, or open/close the compact drawer
+                if this.last_vw >= crate::metrics::bp::RAIL_DOCKED_FROM {
+                    this.rail_collapsed = !this.rail_collapsed;
+                } else {
+                    this.queue_drawer = !this.queue_drawer;
+                }
                 cx.notify();
             }
         }));
@@ -111,6 +121,10 @@ impl Shell {
             status: None,
             counts: Counts { tracks: None, albums: None, artists: None, liked: None },
             queue_drawer: false,
+            pl_scroll: gpui::ScrollHandle::new(),
+            rail_collapsed: false,
+            last_vw: 1440.0,
+            spectrum_on: false,
             suspended: false,
             backdrop: None,
             shown: false,
@@ -258,6 +272,9 @@ impl Shell {
             Event::Spectrum(f) => {
                 if !self.suspended {
                     self.player.update(cx, |p, _| p.apply_spectrum(f));
+                    if self.spectrum_on && *self.router.current() != Route::NowPlaying {
+                        self.queue.update(cx, |_, cx| cx.notify());
+                    }
                 }
             }
             Event::QueueChanged => {
@@ -463,7 +480,16 @@ impl Render for Shell {
         let vw = f32::from(window.viewport_size().width);
         let route = self.router.current().clone();
         let on_np = route == Route::NowPlaying;
-        let docked = Self::rail_docked(vw, &route);
+        let docked = Self::rail_docked(vw, &route) && !self.rail_collapsed;
+        self.last_vw = vw;
+        // `onVisibleSpectrumFrame`: the backend computes the spectrum only while Now Playing or the rail is on screen.
+        let want_spectrum = !self.suspended && (on_np || docked || (self.queue_drawer && !on_np));
+        if want_spectrum != self.spectrum_on {
+            self.spectrum_on = want_spectrum;
+            app::call(cx, move |b| {
+                let _ = b.player_set_spectrum_active(want_spectrum);
+            });
+        }
 
         self.fs.tick();
         crate::probe::begin_frame();

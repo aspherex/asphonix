@@ -144,3 +144,27 @@ mod tests {
         assert!((scroll_for_thumb_top(vp, content, len, 9999.0) - (content - vp)).abs() < 0.5);
     }
 }
+
+/// Passive scrollbar for plain scroll containers (`overflow-y: auto` + `track_scroll(handle)`): the same 10 px
+/// track/thumb look as [`scrollbar`], drawn only when the content overflows (as Chromium does). Returns the
+/// element and whether it overflows (callers reserve [`WIDTH`] on the right of their content in that case).
+pub fn passive(th: Theme, h: &gpui::ScrollHandle) -> (AnyElement, bool) {
+    let max = f32::from(h.max_offset().height);
+    let view = f32::from(h.bounds().size.height);
+    if max <= 0.5 || view <= 0.0 {
+        return (div().into_any_element(), false);
+    }
+    let content = view + max;
+    let scroll = -f32::from(h.offset().y);
+    let (len, top) = thumb(view, content, scroll).unwrap_or((view, 0.0));
+    let el = div()
+        .absolute()
+        .top_0()
+        .right_0()
+        .bottom_0()
+        .w(px(WIDTH))
+        .bg(th.low)
+        .child(div().absolute().left_0().top(px(top)).w_full().h(px(len)).bg(th.low).child(div().size_full().border_2().border_color(th.low).bg(th.high)))
+        .into_any_element();
+    (el, true)
+}

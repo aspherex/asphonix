@@ -40,6 +40,12 @@ impl Txt {
         self.color = Some(c);
         self
     }
+    /// `letter-spacing: normal`: UA buttons (e.g. the `EntityLink` / `sort-btn` buttons inside a styled span) reset the
+    /// inherited tracking, so their text is not letter-spaced even when the surrounding class says so.
+    pub fn no_tracking(mut self) -> Self {
+        self.tracking = 0.0;
+        self
+    }
     pub fn weight(mut self, w: f32) -> Self {
         self.weight = w;
         self
@@ -64,7 +70,7 @@ fn run_for(text: &str, family: &'static str, weight: f32, color: Hsla) -> TextRu
 }
 
 /// Natural width in px of `text` (shaped width + one tracking step per glyph).
-fn natural_width(window: &Window, text: &str, family: &'static str, size: f32, weight: f32, tracking: f32) -> f32 {
+pub fn natural_width(window: &Window, text: &str, family: &'static str, size: f32, weight: f32, tracking: f32) -> f32 {
     if text.is_empty() {
         return 0.0;
     }

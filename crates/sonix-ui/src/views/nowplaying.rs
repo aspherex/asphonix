@@ -85,12 +85,8 @@ impl NowPlayingView {
         self.visible && !self.suspended
     }
 
-    fn sync_spectrum(&self, cx: &mut Context<Self>) {
-        let on = self.spectrum_wanted();
-        app::call(cx, move |b| {
-            let _ = b.player_set_spectrum_active(on);
-        });
-    }
+    /// The shell owns `player_set_spectrum_active` (Now Playing or the rail needs frames).
+    fn sync_spectrum(&self, _cx: &mut Context<Self>) {}
 
     pub fn set_visible(&mut self, v: bool, cx: &mut Context<Self>) {
         if self.visible == v {

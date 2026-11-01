@@ -130,7 +130,7 @@ impl Shell {
             .child(pid("topbar.pill.dot", div().size(px(top::DOT)).flex_none().bg(if connected { th.accent } else { th.muted })))
             .child(pid("topbar.pill.state", txt(&th, MONO_DATA, state_label)))
             .when(connected, |d| d.child(pid("topbar.pill.sep", txt(&th, MONO_DATA, "·").color(th.border))).child(pid("topbar.pill.ping", txt(&th, MONO_DATA, ping))));
-        let search = div()
+        let mut search = div()
             .flex_1()
             .max_w(px(top::SEARCH_MAX_W))
             .flex()
@@ -146,6 +146,9 @@ impl Shell {
             .child(icon("search", top::ICON_SEARCH, th.muted))
             .child(div().flex_1().min_w_0().child(self.search.clone()))
             .child(pid("topbar.search.kbd", div().px(px(top::KBD_PAD_X)).py(px(top::KBD_PAD_Y)).bg(th.high).flex_none().child(txt(&th, MONO_CODE, "CTRL K").color(th.muted))));
+        // `.search { flex: 1; max-width: 420px }` next to `.collection { margin-left: auto }`: the search takes the free
+        // space first (up to its max), the spacer only what is left (grow 1000:1 approximates "first").
+        search.style().flex_grow = Some(1000.0);
         let collection = div()
             .flex()
             .flex_row()
@@ -230,6 +233,7 @@ impl Shell {
                 .group("hv")
                 .flex()
                 .flex_row()
+                .flex_none()
                 .items_center()
                 .gap(px(sb::ROW_GAP))
                 .w_full()
@@ -243,22 +247,23 @@ impl Shell {
                 .child(div().flex_1().min_w_0().flex().child(txt(&th, MONO_DATA, name).weight(if active { 700.0 } else { 500.0 }).ellipsis()))
                 .child(div().flex_none().child(txt(&th, MONO_CODE, count).weight(if active { 700.0 } else { 400.0 })))
         };
+        let (pl_bar, pl_overflow) = crate::widgets::scrollbar::passive(th, &self.pl_scroll);
         let mut lists = div()
             .id("playlist-scroll")
-            .flex_1()
-            .min_h_0()
+            .track_scroll(&self.pl_scroll)
+            .size_full()
             .overflow_y_scroll()
-            .border_t_1()
-            .border_color(th.border)
             .flex()
             .flex_col()
             .pt(px(sb::SECTION_PAD_TOP))
-            .pb(px(sb::SECTION_PAD_BOTTOM));
+            .pb(px(sb::SECTION_PAD_BOTTOM))
+            .when(pl_overflow, |d| d.pr(px(crate::metrics::tracks::SCROLLBAR_W)));
         lists = lists.child(pid(
             "sidebar.playlists.title",
             div()
                 .flex()
                 .flex_row()
+                .flex_none()
                 .items_center()
                 .justify_between()
                 .px(px(sb::TITLE_PAD_X))
@@ -269,7 +274,7 @@ impl Shell {
         ));
         let liked = self.counts.liked.map(|n| fmt::fmt_int(n as u64)).unwrap_or_else(|| "—".into());
         lists = lists.child(pid("sidebar.pl.liked", pl_row("pl-liked".into(), *route == Route::Liked, "heart-filled", "Liked Songs".into(), liked).on_click(cx.listener(|this, _, _, cx| this.navigate(Route::Liked, cx)))));
-        lists = lists.child(div().h(px(layout::RULE)).mx(px(sb::SEP_MARGIN_X)).my(px(sb::SEP_MARGIN_Y)).bg(th.border));
+        lists = lists.child(div().h(px(layout::RULE)).flex_none().mx(px(sb::SEP_MARGIN_X)).my(px(sb::SEP_MARGIN_Y)).bg(th.border));
         for (i, p) in self.playlists.iter().enumerate() {
             let active = *route == Route::Playlist(p.id.clone());
             let id = p.id.clone();
@@ -353,7 +358,7 @@ impl Shell {
             .border_r_1()
             .border_color(th.frame)
             .child(library)
-            .child(pid("sidebar.playlists", lists))
+            .child(pid("sidebar.playlists", div().relative().flex_1().min_h_0().border_t_1().border_color(th.border).child(lists).child(pl_bar)))
             .child(pid("sidebar.footer", footer))
             .into_any_element()
     }

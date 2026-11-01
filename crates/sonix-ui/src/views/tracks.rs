@@ -354,19 +354,24 @@ impl TracksView {
                 }
             });
         })
-        .icon(if all_starred { "heart" } else { "heart-filled" });
+        .icon(if all_starred { "heart-filled" } else { "heart" });
 
+        // Order and icons of `menus.ts: trackMenuItems`.
         let mut items = vec![
             play_now,
-            enqueue(format!("Play next{suffix}"), EnqueuePosition::Next, ids.clone(), "skip-fwd"),
+            enqueue(format!("Play next{suffix}"), EnqueuePosition::Next, ids.clone(), "next"),
             enqueue(format!("Add to queue{suffix}"), EnqueuePosition::End, ids.clone(), "queue"),
-            MenuItem::separator(),
-            MenuItem::submenu(format!("Add to playlist{suffix}"), playlists).icon("playlist"),
-            like,
-            MenuItem::submenu(format!("Rate{suffix}"), vec![rate(0, ids.clone()), rate(5, ids.clone()), rate(4, ids.clone()), rate(3, ids.clone()), rate(2, ids.clone()), rate(1, ids.clone())]),
         ];
         if n == 1 {
-            items.push(MenuItem::separator());
+            // radio is not ported (no backend call yet): the entry exists for structural parity, inert
+            items.push(MenuItem::action("Start radio", |_, _| {}).icon("equalizer"));
+        }
+        items.extend([
+            MenuItem::submenu(format!("Add to playlist{suffix}"), playlists).icon("add"),
+            like,
+            MenuItem::submenu(format!("Rate{suffix}"), vec![rate(0, ids.clone()), rate(5, ids.clone()), rate(4, ids.clone()), rate(3, ids.clone()), rate(2, ids.clone()), rate(1, ids.clone())]).icon("star"),
+        ]);
+        if n == 1 {
             if let Some(al) = first.album_id.clone() {
                 let this = this.clone();
                 items.push(
@@ -391,6 +396,9 @@ impl TracksView {
                     .icon("artist"),
                 );
             }
+            items.push(MenuItem::separator());
+            // track info dialog is not ported: entry present, inert
+            items.push(MenuItem::action("Track info", |_, _| {}).icon("eye"));
             let text = format!("{} – {}", first.artist, first.title);
             items.push(MenuItem::action("Copy \"Artist – Title\"", move |_, cx| cx.write_to_clipboard(ClipboardItem::new_string(text.clone()))));
         }
@@ -439,7 +447,7 @@ impl TracksView {
             .cursor(CursorStyle::PointingHand)
             .text_color(th.muted)
             .hover(move |s| s.text_color(th.text))
-            .child(txt(&th, spec, format!("{label}{arrow}")))
+            .child(txt(&th, spec, format!("{label}{arrow}")).no_tracking())
             .on_click(cx.listener(move |this, _, _, cx| this.on_sort(field, cx)))
     }
 
@@ -510,7 +518,7 @@ impl TracksView {
                 }),
         );
         let cell = |name: &str, grow: f32, text: String| {
-            pid(format!("track.row.{ix}.{name}"), flex_cell(grow).flex().child(txt(&th, MONO_DATA, text).color(th.muted).ellipsis()))
+            pid(format!("track.row.{ix}.{name}"), flex_cell(grow).flex().child(txt(&th, MONO_DATA, text).color(th.muted).no_tracking().ellipsis()))
         };
         let right = |name: &str, w: f32, s: String| pid(format!("track.row.{ix}.{name}"), div().w(px(w)).flex_none().flex().justify_end().child(txt(&th, MONO_DATA, s).color(th.muted)));
 
