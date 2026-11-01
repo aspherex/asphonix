@@ -126,7 +126,7 @@ impl Render for QueueRail {
                             .px(px(space::MD))
                             .pb(px(space::MD))
                             .child(txt(&th, MONO_CODE, fmt::format_duration(Some(ps.position_sec))).color(th.muted))
-                            .child(div().flex().min_w_0().child(txt(&th, MONO_CODE, readout).color(if ps.bit_perfect { th.muted } else { th.muted }).ellipsis()))
+                            .child(div().flex().min_w_0().child(txt(&th, MONO_CODE, readout).color(th.muted).ellipsis()))
                             .child(txt(&th, MONO_CODE, fmt::format_duration(Some(ps.duration_sec))).color(th.muted)),
                     )
                     .into_any_element()

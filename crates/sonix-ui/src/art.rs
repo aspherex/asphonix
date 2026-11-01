@@ -89,12 +89,15 @@ impl ArtCache {
         self.failed.clear();
         self.map.drain().map(|(_, v)| v.0).collect()
     }
+    #[cfg(test)]
     pub fn bytes(&self) -> usize {
         self.bytes
     }
+    #[cfg(test)]
     pub fn len(&self) -> usize {
         self.map.len()
     }
+    #[cfg(test)]
     pub fn is_empty(&self) -> bool {
         self.map.is_empty()
     }

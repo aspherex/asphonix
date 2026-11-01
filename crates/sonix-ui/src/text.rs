@@ -99,8 +99,7 @@ impl Element for Txt {
 
     fn request_layout(&mut self, _: Option<&GlobalElementId>, _: Option<&InspectorElementId>, window: &mut Window, _cx: &mut App) -> (LayoutId, ()) {
         let (text, family, sz, weight, tracking, ellipsis, line) = (self.text.clone(), self.family, self.size, self.weight, self.tracking, self.ellipsis, self.line);
-        let mut style = Style::default();
-        style.flex_shrink = if ellipsis { 1.0 } else { 0.0 };
+        let mut style = Style { flex_shrink: if ellipsis { 1.0 } else { 0.0 }, ..Style::default() };
         if ellipsis {
             style.min_size.width = Length::Definite(DefiniteLength::Absolute(AbsoluteLength::Pixels(px(0.))));
         }
@@ -163,17 +162,12 @@ impl Element for Txt {
         let baseline_dev = (f32::from(bounds.origin.y) * s + half + asc).round();
         let baseline = px(baseline_dev / s);
         let x0 = f32::from(bounds.origin.x);
-        let mut i = 0usize;
-        for (gk, (_, gx, ri, gi)) in glyphs.iter().enumerate() {
-            if gk >= keep {
-                break;
-            }
+        for (i, (_, gx, ri, gi)) in glyphs.iter().take(keep).enumerate() {
             let r = &layout.runs[*ri];
             let g = &r.glyphs[*gi];
             if !g.is_emoji {
                 let _ = window.paint_glyph(point(px(x0 + gx + i as f32 * tr), baseline), r.font_id, g.id, px(self.size), color);
             }
-            i += 1;
         }
         if let Some(el) = ell {
             let base = if keep == n { f32::from(layout.width) } else { glyphs[keep].1 };

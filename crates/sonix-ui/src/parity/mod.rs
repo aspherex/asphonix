@@ -131,13 +131,49 @@ impl Shell {
                             };
                             for k in seq {
                                 // Not inside an app update: SendMessage re-enters GPUI's window procedure.
-                                crate::winffi::send_mouse(hwnd, k, x, y, &button, m.control, m.shift, m.alt, g("dy") / 100.0);
+                                crate::winffi::send_mouse(hwnd, k, x, y, &button, (m.control, m.shift, m.alt), g("dy") / 100.0);
                             }
                             let _ = this.update_in(cx, |_, w, _| w.refresh());
                             json!({"ok": true})
                         }
                         _ => err("no hwnd"),
                     }
+                } else if name == "key" {
+                    // Dispatched with the window + app only, NOT inside an update of the Shell entity: actions bound on the
+                    // root (Escape, Space, N, ...) update the Shell and would re-enter its lease (abort).
+                    let keys: Vec<Keystroke> = match cmd.get("text").and_then(Value::as_str) {
+                        Some(t) => t
+                            .chars()
+                            .map(|ch| {
+                                let mut ks = Keystroke { modifiers: Modifiers::default(), key: ch.to_string(), key_char: Some(ch.to_string()) };
+                                if ch.is_uppercase() {
+                                    ks.key = ch.to_lowercase().to_string();
+                                    ks.modifiers.shift = true;
+                                }
+                                ks
+                            })
+                            .collect(),
+                        None => match Keystroke::parse(cmd.get("keys").and_then(Value::as_str).unwrap_or("")) {
+                            Ok(mut ks) => {
+                                let m = ks.modifiers;
+                                if ks.key_char.is_none() && ks.key.chars().count() == 1 && !m.control && !m.alt && !m.platform {
+                                    ks.key_char = Some(ks.key.clone());
+                                }
+                                vec![ks]
+                            }
+                            Err(e) => {
+                                let _ = req.reply.send(err(e));
+                                continue;
+                            }
+                        },
+                    };
+                    let _ = cx.update(|window, cx| {
+                        for ks in keys {
+                            window.dispatch_keystroke(ks, cx);
+                        }
+                        window.refresh();
+                    });
+                    json!({"ok": true})
                 } else if name == "settle" {
                     let n = cmd.get("frames").and_then(Value::as_u64).unwrap_or(2);
                     let target = crate::probe::frames() + n;
@@ -194,30 +230,7 @@ impl Shell {
                 json!({"ok": true})
             }
             "mouse" => err("handled by the async loop"),
-            "key" => {
-                if let Some(t) = c.get("text").and_then(Value::as_str) {
-                    for ch in t.chars() {
-                        let mut ks = Keystroke { modifiers: Modifiers::default(), key: ch.to_string(), key_char: Some(ch.to_string()) };
-                        if ch.is_uppercase() {
-                            ks.key = ch.to_lowercase().to_string();
-                            ks.modifiers.shift = true;
-                        }
-                        window.dispatch_keystroke(ks, cx);
-                    }
-                } else {
-                    let mut ks = match Keystroke::parse(&s("keys")) {
-                        Ok(k) => k,
-                        Err(e) => return err(e),
-                    };
-                    let m = ks.modifiers;
-                    if ks.key_char.is_none() && ks.key.chars().count() == 1 && !m.control && !m.alt && !m.platform {
-                        ks.key_char = Some(ks.key.clone());
-                    }
-                    window.dispatch_keystroke(ks, cx);
-                }
-                window.refresh();
-                json!({"ok": true})
-            }
+            "key" => err("handled by the async loop"),
             "clock" => {
                 if let Some(t) = c.get("freeze").and_then(Value::as_f64) {
                     crate::clock::manual::freeze(t);
@@ -291,9 +304,10 @@ impl Shell {
     }
 
     fn parity_state(&self, window: &mut Window, cx: &mut Context<Self>) -> Value {
-        let tracks = self.tracks.read(cx).parity_state(window);
+        let tracks = self.tracks.read(cx).parity_state(window, cx);
         let menu_open = self.menu.read(cx).is_open();
-        let focus = if menu_open {
+        let _ = menu_open;
+        let focus = if menu_open && self.menu.read(cx).has_focus(window) {
             "menu"
         } else if self.search.read(cx).focus_handle.is_focused(window) {
             "search"
@@ -308,6 +322,10 @@ impl Shell {
             "viewport": [f32::from(window.viewport_size().width), f32::from(window.viewport_size().height)],
             "focus": focus,
             "selection": tracks["selection"],
+            "selectionCount": tracks["selectionCount"],
+            "sort": tracks["sort"],
+            "trackCount": tracks["trackCount"],
+            "titles": tracks["titles"],
             "scrollTop": tracks["scrollTop"],
             "menu": self.menu.read(cx).parity_state(),
             "queueDrawer": self.queue_drawer,

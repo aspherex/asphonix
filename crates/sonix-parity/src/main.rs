@@ -40,10 +40,84 @@ fn crop(a: &[String]) {
     out.save(&a[4]).unwrap();
 }
 
+/// `parity-diff textcrop <web.png> <native.png> <out.png> <x> <y> <w> <h> [zoom]`: crop (CSS px, dpr 1.5) of one string, written
+/// as web / native / |diff| stacked, plus JSON with mean luminance, ink coverage (mean |lum - bg| over the crop, bg = the most
+/// common colour) and the mean absolute difference. Used for the text-fidelity report.
+fn textcrop(a: &[String]) {
+    let web = image::open(&a[2]).expect("web").to_rgba8();
+    let nat = image::open(&a[3]).expect("native").to_rgba8();
+    let f = |i: usize| a[i].parse::<f64>().unwrap();
+    let (x, y, w, h) = ((f(5) * 1.5).floor() as u32, (f(6) * 1.5).floor() as u32, (f(7) * 1.5).ceil() as u32, (f(8) * 1.5).ceil() as u32);
+    let z: u32 = a.get(9).and_then(|s| s.parse().ok()).unwrap_or(6);
+    let px = |img: &RgbaImage, xx: u32, yy: u32| *img.get_pixel((x + xx).min(img.width() - 1), (y + yy).min(img.height() - 1));
+    let stats = |img: &RgbaImage| {
+        let mut hist = std::collections::HashMap::<[u8; 3], u32>::new();
+        for yy in 0..h {
+            for xx in 0..w {
+                let p = px(img, xx, yy);
+                *hist.entry([p[0], p[1], p[2]]).or_default() += 1;
+            }
+        }
+        let bg = hist.iter().max_by_key(|(_, c)| **c).map(|(k, _)| *k).unwrap();
+        let bgl = lum(&Rgba([bg[0], bg[1], bg[2], 255]));
+        let (mut sl, mut ink, mut max_dev) = (0.0, 0.0, 0.0f64);
+        for yy in 0..h {
+            for xx in 0..w {
+                let l = lum(&px(img, xx, yy));
+                sl += l;
+                ink += (l - bgl).abs() / 255.0;
+                max_dev = max_dev.max((l - bgl).abs());
+            }
+        }
+        (sl / (w * h) as f64, ink, max_dev)
+    };
+    let (lw, iw, mw) = stats(&web);
+    let (ln, inat, mn) = stats(&nat);
+    let mut out = RgbaImage::new(w * z, (h * 3 + 4) * z);
+    let mut sad = 0.0;
+    for yy in 0..h {
+        for xx in 0..w {
+            let (pw, pn) = (px(&web, xx, yy), px(&nat, xx, yy));
+            let d = (0..3).map(|c| (pw[c] as i32 - pn[c] as i32).abs()).max().unwrap();
+            sad += d as f64;
+            let dv = Rgba([(d * 3).min(255) as u8, (d * 3).min(255) as u8, (d * 3).min(255) as u8, 255]);
+            for dy in 0..z {
+                for dx in 0..z {
+                    out.put_pixel(xx * z + dx, yy * z + dy, pw);
+                    out.put_pixel(xx * z + dx, (h + 2 + yy) * z + dy, pn);
+                    out.put_pixel(xx * z + dx, (2 * h + 4 + yy) * z + dy, dv);
+                }
+            }
+        }
+    }
+    out.save(&a[4]).unwrap();
+    // best integer device-pixel shift of the native crop that minimises the luminance difference to the web crop
+    let mut best = (f64::MAX, 0i32, 0i32);
+    for sy in -3..=3i32 {
+        for sx in -3..=3i32 {
+            let mut sad = 0.0;
+            for yy in 3..h.saturating_sub(3) {
+                for xx in 3..w.saturating_sub(3) {
+                    let pw = px(&web, xx, yy);
+                    let pn = px(&nat, (xx as i32 + sx) as u32, (yy as i32 + sy) as u32);
+                    sad += (lum(&pw) - lum(&pn)).abs();
+                }
+            }
+            if sad < best.0 {
+                best = (sad, sx, sy);
+            }
+        }
+    }
+    println!("{}", serde_json::json!({"bestShiftDevPx": [best.1, best.2], "meanLumWeb": lw, "meanLumNative": ln, "inkWeb": iw, "inkNative": inat, "inkRatio": if iw > 0.0 { inat / iw } else { 0.0 }, "peakContrastWeb": mw, "peakContrastNative": mn, "meanAbsDiff": sad / (w * h) as f64}));
+}
+
 fn main() {
     let a: Vec<String> = std::env::args().collect();
     if a.get(1).map(String::as_str) == Some("crop") {
         return crop(&a);
+    }
+    if a.get(1).map(String::as_str) == Some("textcrop") {
+        return textcrop(&a);
     }
     if a.len() < 5 {
         eprintln!("usage: parity-diff web.png native.png out-dir text-rects.json [dpr] [tol]");

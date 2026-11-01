@@ -80,6 +80,8 @@ pub fn ghost_icon(id: impl Into<ElementId>, th: Theme, name: &str, icon_size: f3
 
 /// `ghost_icon` with the colour a disabled button gets (`.icon-link:disabled`: border-idle; `.t-btn:disabled`:
 /// muted). Both also carry `base.css button:disabled { opacity: 0.5 }`.
+// flat parameter list on purpose: every call site is a one-line icon button
+#[allow(clippy::too_many_arguments)]
 pub fn ghost_icon_with(id: impl Into<ElementId>, th: Theme, name: &str, icon_size: f32, box_size: f32, on: bool, disabled: bool, disabled_col: gpui::Hsla) -> Stateful<Div> {
     let col = if disabled { disabled_col } else if on { th.accent_fg } else { th.muted };
     let mut d = div().id(id).flex().items_center().justify_center().size(px(box_size)).flex_none().group("hv").child(if disabled { icon(name, icon_size, col) } else { icon_g(name, icon_size, col, th.accent_fg) });

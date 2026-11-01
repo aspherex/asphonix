@@ -3,8 +3,7 @@
 //! *content* box (border excluded), `max-width` is inclusive, so Added is hidden at
 //! <= 760 px and Year at <= 600 px. Header and rows read the same value.
 
-pub const HIDE_ADDED_AT: f32 = 760.0;
-pub const HIDE_YEAR_AT: f32 = 600.0;
+use crate::metrics::tracks::{HIDE_ADDED_BELOW as HIDE_ADDED_AT, HIDE_YEAR_BELOW as HIDE_YEAR_AT};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Columns {

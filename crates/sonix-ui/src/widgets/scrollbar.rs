@@ -9,7 +9,7 @@ use gpui::{
 use std::cell::Cell;
 use std::rc::Rc;
 
-pub const WIDTH: f32 = 10.0;
+pub const WIDTH: f32 = crate::metrics::tracks::SCROLLBAR_W;
 const MIN_THUMB: f32 = 24.0;
 
 #[derive(Default)]
@@ -35,6 +35,7 @@ pub fn thumb(viewport: f32, content: f32, scroll: f32) -> Option<(f32, f32)> {
 }
 
 /// Inverse of [`thumb`]: scroll offset for a given thumb top.
+#[cfg(test)]
 pub fn scroll_for_thumb_top(viewport: f32, content: f32, thumb_len: f32, top: f32) -> f32 {
     let travel = (viewport - thumb_len).max(1.0);
     (top / travel).clamp(0.0, 1.0) * (content - viewport).max(0.0)
@@ -98,7 +99,7 @@ pub fn scrollbar(id: &'static str, th: Theme, list: &UniformListScrollHandle, st
                 .w_full()
                 .h(px(len))
                 .bg(th.low)
-                .child(div().size_full().m(px(0.)).border_2().border_color(th.low).bg(if dragging { th.muted } else { th.high }).hover(move |s| s.bg(th.muted)))
+                .child(div().size_full().m(px(0.)).border(px(crate::metrics::tracks::SCROLLBAR_THUMB_BORDER)).border_color(th.low).bg(if dragging { th.muted } else { th.high }).hover(move |s| s.bg(th.muted)))
                 .on_mouse_down(MouseButton::Left, move |ev: &MouseDownEvent, window: &mut Window, _cx| {
                     if let Some((_, _, scroll)) = metrics(&h_down) {
                         st_down.drag.set(Some((f32::from(ev.position.y), scroll)));
@@ -107,6 +108,30 @@ pub fn scrollbar(id: &'static str, th: Theme, list: &UniformListScrollHandle, st
                 }),
         )
         .into_any_element()
+}
+
+/// Passive scrollbar for plain scroll containers (`overflow-y: auto` + `track_scroll(handle)`): the same 10 px
+/// track/thumb look as [`scrollbar`], drawn only when the content overflows (as Chromium does). Returns the
+/// element and whether it overflows (callers reserve [`WIDTH`] on the right of their content in that case).
+pub fn passive(th: Theme, h: &gpui::ScrollHandle) -> (AnyElement, bool) {
+    let max = f32::from(h.max_offset().height);
+    let view = f32::from(h.bounds().size.height);
+    if max <= 0.5 || view <= 0.0 {
+        return (div().into_any_element(), false);
+    }
+    let content = view + max;
+    let scroll = -f32::from(h.offset().y);
+    let (len, top) = thumb(view, content, scroll).unwrap_or((view, 0.0));
+    let el = div()
+        .absolute()
+        .top_0()
+        .right_0()
+        .bottom_0()
+        .w(px(WIDTH))
+        .bg(th.low)
+        .child(div().absolute().left_0().top(px(top)).w_full().h(px(len)).bg(th.low).child(div().size_full().border(px(crate::metrics::tracks::SCROLLBAR_THUMB_BORDER)).border_color(th.low).bg(th.high)))
+        .into_any_element();
+    (el, true)
 }
 
 #[cfg(test)]
@@ -143,28 +168,4 @@ mod tests {
         assert_eq!(scroll_for_thumb_top(vp, content, len, -50.0), 0.0);
         assert!((scroll_for_thumb_top(vp, content, len, 9999.0) - (content - vp)).abs() < 0.5);
     }
-}
-
-/// Passive scrollbar for plain scroll containers (`overflow-y: auto` + `track_scroll(handle)`): the same 10 px
-/// track/thumb look as [`scrollbar`], drawn only when the content overflows (as Chromium does). Returns the
-/// element and whether it overflows (callers reserve [`WIDTH`] on the right of their content in that case).
-pub fn passive(th: Theme, h: &gpui::ScrollHandle) -> (AnyElement, bool) {
-    let max = f32::from(h.max_offset().height);
-    let view = f32::from(h.bounds().size.height);
-    if max <= 0.5 || view <= 0.0 {
-        return (div().into_any_element(), false);
-    }
-    let content = view + max;
-    let scroll = -f32::from(h.offset().y);
-    let (len, top) = thumb(view, content, scroll).unwrap_or((view, 0.0));
-    let el = div()
-        .absolute()
-        .top_0()
-        .right_0()
-        .bottom_0()
-        .w(px(WIDTH))
-        .bg(th.low)
-        .child(div().absolute().left_0().top(px(top)).w_full().h(px(len)).bg(th.low).child(div().size_full().border_2().border_color(th.low).bg(th.high)))
-        .into_any_element();
-    (el, true)
 }

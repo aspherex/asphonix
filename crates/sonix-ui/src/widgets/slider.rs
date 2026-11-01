@@ -1,6 +1,7 @@
 //! Horizontal slider / fader (`Fader.svelte`): a 24 px hit area around a 4 px rail,
 //! accent fill, optional buffered bar, 10x18 cap. Drag is tracked with window-level
 //! mouse listeners registered while dragging, so it keeps working outside the element.
+use crate::metrics::fader as fd;
 use crate::theme::Theme;
 use gpui::{
     App, Bounds, CursorStyle, DispatchPhase, ElementId, MouseButton, MouseDownEvent, MouseMoveEvent, MouseUpEvent, Pixels, Stateful, Div,
@@ -86,14 +87,14 @@ pub fn slider(id: impl Into<ElementId>, th: Theme, st: &SliderHandle, frac: f32,
     let frac = frac.clamp(0.0, 1.0);
     let dragging = st.dragging.get();
     track(id, st, on_change)
-        .h(px(24.))
+        .h(px(fd::HIT_H))
         .child(
             div()
                 .absolute()
-                .top(px(10.))
+                .top(px(fd::RAIL_TOP))
                 .left_0()
                 .w_full()
-                .h(px(4.))
+                .h(px(fd::RAIL_H))
                 .bg(th.highest)
                 .children(buffered.map(|b| div().absolute().top_0().left_0().h_full().w(relative(b.clamp(0., 1.))).bg(th.muted)))
                 .child(div().absolute().top_0().left_0().h_full().w(relative(frac)).bg(th.accent)),
@@ -101,11 +102,11 @@ pub fn slider(id: impl Into<ElementId>, th: Theme, st: &SliderHandle, frac: f32,
         .child(
             div()
                 .absolute()
-                .top(px(3.))
+                .top(px((fd::HIT_H - fd::CAP_H) / 2.0))
                 .left(relative(frac))
-                .ml(px(-5.))
-                .w(px(10.))
-                .h(px(18.))
+                .ml(px(-fd::CAP_W / 2.0))
+                .w(px(fd::CAP_W))
+                .h(px(fd::CAP_H))
                 .border_1()
                 .border_color(gpui::black())
                 .bg(if dragging { th.accent } else { th.text }),

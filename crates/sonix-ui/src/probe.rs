@@ -16,9 +16,6 @@ pub fn pid<E: IntoElement>(_id: impl Into<SharedString>, e: E) -> E {
 #[cfg(not(feature = "parity"))]
 #[inline(always)]
 pub fn begin_frame() {}
-#[cfg(not(feature = "parity"))]
-#[inline(always)]
-pub fn end_frame() {}
 
 #[cfg(feature = "parity")]
 pub use enabled::*;

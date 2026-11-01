@@ -3,6 +3,10 @@
 //! (`file:selector`, files relative to the SONIX repo's `src/`). Views must use these constants
 //! instead of literals; the parity runner (docs/PARITY.md) measures the result against the web app.
 //! All values are CSS px (logical px in GPUI).
+// This is a reference table first: it also lists values of components whose native views are only partly
+// ported (spectrum/meter constants for the Now Playing panel, the 24 px spacing step), so some entries are
+// intentionally unreferenced until those views land.
+#![allow(dead_code)]
 
 /// `styles/tokens.css :root` spacing scale (`--space-xs/sm/md/lg/xl`).
 pub mod space {
@@ -191,10 +195,9 @@ pub mod controls {
     pub const BTN_SHADOW: f32 = 2.0;
     /// Icon inside page buttons: `<Icon size={14}/>`
     pub const BTN_ICON: f32 = 14.0;
-    /// `.field { height: 36px; padding: 0 var(--space-md); gap: var(--space-xs); border: 1px }`
+    /// `.field { height: 36px; padding: 0 var(--space-md); border: 1px }`
     pub const FIELD_H: f32 = 36.0;
     pub const FIELD_PAD_X: f32 = super::space::MD;
-    pub const FIELD_GAP: f32 = super::space::XS;
     /// Intrinsic width of Chromium's default `<input>` (size=20) in the body font at 13px:
     /// measured on the web app (field border box 191 px with Inter, see parity boxes `page.filter`).
     pub const FIELD_W_DARK: f32 = 191.0;

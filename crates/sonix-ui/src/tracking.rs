@@ -43,6 +43,8 @@ impl Family {
 
 macro_rules! ty {
     ($n:ident, $fam:ident, $size:expr, $line:expr, $tr:expr, $w:expr, $caps:expr) => {
+        // the whole DESIGN.md scale is kept, including steps no ported screen uses yet (MONO_METRIC)
+        #[allow(dead_code)]
         pub const $n: TypeSpec = TypeSpec { family: Family::$fam, size: $size, line: $line, tracking_em: $tr, weight: $w, caps: $caps };
     };
 }
@@ -146,7 +148,7 @@ mod tests {
     #[test]
     fn type_scale_matches_tokens() {
         assert_eq!((LABEL_CAPS.size, LABEL_CAPS.line, LABEL_CAPS.weight), (10.0, 12.0, 700.0));
-        assert!(LABEL_CAPS.caps && HEADLINE_MD.caps && !MONO_DATA.caps);
+        assert_eq!((LABEL_CAPS.caps, HEADLINE_MD.caps, MONO_DATA.caps), (true, true, false));
         assert_eq!((BODY_MD.size, BODY_MD.line), (13.0, 18.0));
         assert_eq!(MONO_DATA.family, Family::Mono);
     }

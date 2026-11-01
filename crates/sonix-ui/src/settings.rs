@@ -1,5 +1,7 @@
 //! Tiny local UI preferences (theme). Stored next to the user's config, never in the
 //! library: `%APPDATA%\SoniX.native\ui.json` (or `$HOME/.config/SoniX.native/ui.json`).
+// the parity build never reads or writes the user's ui.json, so these are unused there
+#![cfg_attr(feature = "parity", allow(dead_code))]
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 

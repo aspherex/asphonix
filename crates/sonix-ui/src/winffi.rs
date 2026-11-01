@@ -36,8 +36,9 @@ pub mod size_hook {
     use std::ffi::c_void;
     type Hwnd = *mut c_void;
     type SubProc = unsafe extern "system" fn(Hwnd, u32, usize, isize, usize, usize) -> isize;
+    type MinimizeCallback = Box<dyn Fn(bool)>;
     thread_local! {
-        static HOOK: RefCell<Option<Box<dyn Fn(bool)>>> = const { RefCell::new(None) };
+        static HOOK: RefCell<Option<MinimizeCallback>> = const { RefCell::new(None) };
         static MIN: Cell<bool> = const { Cell::new(false) };
     }
     #[link(name = "comctl32")]
@@ -48,20 +49,20 @@ pub mod size_hook {
     unsafe extern "system" fn sub(h: Hwnd, msg: u32, w: usize, l: isize, _id: usize, _d: usize) -> isize {
         if msg == 0x0005 {
             // WM_SIZE
-            if let Some(now_min) = super::size_kind(w) {
-                if MIN.with(|m| m.replace(now_min)) != now_min {
-                    HOOK.with(|c| {
-                        if let Some(f) = c.borrow().as_ref() {
-                            f(now_min)
-                        }
-                    });
-                }
+            if let Some(now_min) = super::size_kind(w)
+                && MIN.with(|m| m.replace(now_min)) != now_min
+            {
+                HOOK.with(|c| {
+                    if let Some(f) = c.borrow().as_ref() {
+                        f(now_min)
+                    }
+                });
             }
         }
         unsafe { DefSubclassProc(h, msg, w, l) }
     }
     /// Must be called on the UI thread with the window's HWND.
-    pub fn install(hwnd: isize, f: Box<dyn Fn(bool)>) -> bool {
+    pub fn install(hwnd: isize, f: MinimizeCallback) -> bool {
         HOOK.with(|c| *c.borrow_mut() = Some(f));
         unsafe { SetWindowSubclass(hwnd as Hwnd, sub, 1, 0) != 0 }
     }
@@ -73,19 +74,6 @@ pub fn hwnd_of(window: &gpui::Window) -> Option<isize> {
     match HasWindowHandle::window_handle(window).ok()?.as_raw() {
         RawWindowHandle::Win32(h) => Some(h.hwnd.get()),
         _ => None,
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    #[test]
-    fn wm_size_decoding() {
-        assert_eq!(size_kind(1), Some(true));
-        assert_eq!(size_kind(0), Some(false));
-        assert_eq!(size_kind(2), Some(false));
-        assert_eq!(size_kind(3), None);
-        assert_eq!(size_kind(4), None);
     }
 }
 
@@ -167,7 +155,8 @@ pub fn capture_client(hwnd: isize) -> Option<(u32, u32, Vec<u8>)> {
 /// with `SetKeyboardState` (this thread's key table, which is what `GetKeyState` reads), so
 /// Ctrl/Shift/Alt clicks work without touching the real keyboard.
 #[cfg(all(windows, feature = "parity"))]
-pub fn send_mouse(hwnd: isize, kind: &str, x: i32, y: i32, button: &str, ctrl: bool, shift: bool, alt: bool, wheel_notches: f32) {
+pub fn send_mouse(hwnd: isize, kind: &str, x: i32, y: i32, button: &str, mods: (bool, bool, bool), wheel_notches: f32) {
+    let (ctrl, shift, alt) = mods;
     use std::ffi::c_void;
     #[repr(C)]
     struct Pt {
@@ -239,5 +228,18 @@ pub fn send_mouse(hwnd: isize, kind: &str, x: i32, y: i32, button: &str, ctrl: b
             _ => {}
         }
         SetKeyboardState(saved.as_ptr());
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[test]
+    fn wm_size_decoding() {
+        assert_eq!(size_kind(1), Some(true));
+        assert_eq!(size_kind(0), Some(false));
+        assert_eq!(size_kind(2), Some(false));
+        assert_eq!(size_kind(3), None);
+        assert_eq!(size_kind(4), None);
     }
 }

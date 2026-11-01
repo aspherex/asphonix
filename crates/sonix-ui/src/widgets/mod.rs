@@ -22,10 +22,6 @@ pub fn icon_g(name: &str, size: f32, color: Hsla, hover: Hsla) -> Svg {
     icon(name, size, color).group_hover("hv", move |s| s.text_color(hover))
 }
 
-/// (unused inheriting variant, kept for reference) Icon that takes its colour from the parent's `text_color` (so `hover` styles reach it).
-pub fn icon_i(name: &str, size: f32) -> Svg {
-    svg().path(format!("icons/{name}.svg")).size(px(size)).flex_none()
-}
 
 /// `box-shadow: Npx Npx 0 <shadow>`: hard offset, no blur. Only for small static elements.
 pub fn hard_shadow(th: &Theme, off: f32) -> Vec<BoxShadow> {

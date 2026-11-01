@@ -13,12 +13,30 @@ widget layer, minimize/restore behaviour, perf harness, all against a determinis
 backend (the title bar says `MOCK`). Everything else is tracked in `docs/PORTING.md`;
 what does not match the web app yet is listed in `docs/PARITY.md`.
 
+## Parity with the web app (measured)
+
+`parity/` drives the web app (mock backend, headless Edge over CDP) and this app (a `parity`-feature build with a local control
+channel) through the same scenarios and diffs boxes, pixels, animation frames, behaviour and text rendering. Results and
+method: `docs/PARITY.md`.
+
+```
+npm ci   # once, in the web reference worktree (D:Codesonix-parity-ref)
+cargo build --profile fast --features parity -p sonix-ui   # never a release build
+cargo build --release -p sonix-parity                      # image metrics
+node parity/run.mjs [--only <substring>]    # scenarios -> parity/out/<scenario>/{web,native,diff}.png, boxes.json, metrics.json
+node parity/run.mjs --behavior              # scripted input, state dumps compared per step
+node parity/textfidelity.mjs                # text crops, LCD vs grayscale web
+node parity/report.mjs                      # regenerate the tables in docs/PARITY.md
+```
+
 ## Layout
 
 ```
 crates/sonix-api   the command contract as Rust (types + `Backend` trait + events)
 crates/sonix-mock  deterministic mock backend (bit-exact port of mock.ts generators)
-crates/sonix-ui    the GPUI app, binary `sonix-native`
+crates/sonix-ui    the GPUI app, binary `sonix-native` (`--features parity`: automation hook, never in release)
+crates/sonix-parity image diff / text-crop metrics for the parity runner (`parity-diff`)
+parity/            Node runner (CDP + control channel), scenarios, behaviours, selector map
 assets/            fonts (TTF), icons (split from the SoniX sprite), pre-rendered backdrops
 scripts/           perf.ps1, shot.ps1, gen-icons.mjs
 docs/              PERF, PORTING, PARITY, GPUI-GAPS, screenshots

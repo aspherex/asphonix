@@ -20,9 +20,6 @@ impl Selection {
     pub fn len(&self) -> usize {
         self.set.len()
     }
-    pub fn is_empty(&self) -> bool {
-        self.set.is_empty()
-    }
     pub fn contains(&self, i: usize) -> bool {
         self.set.contains(&i)
     }
@@ -57,6 +54,7 @@ impl Selection {
         }
     }
 
+    #[cfg(test)]
     pub fn select_all(&mut self, total: usize) {
         self.set = (0..total).collect();
         if total > 0 {

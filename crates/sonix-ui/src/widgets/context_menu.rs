@@ -54,6 +54,7 @@ impl MenuItem {
         self.danger = true;
         self
     }
+    #[cfg(test)]
     pub fn disabled(mut self, d: bool) -> Self {
         self.disabled = d;
         self
@@ -125,6 +126,12 @@ impl ContextMenu {
     }
     pub fn is_open(&self) -> bool {
         self.open.is_some()
+    }
+
+    /// Parity harness: whether the menu panel really holds keyboard focus.
+    #[cfg(feature = "parity")]
+    pub fn has_focus(&self, window: &Window) -> bool {
+        self.focus.is_focused(window)
     }
 
     /// Parity harness: open flag, item labels and the highlighted entry (top level and submenu).
@@ -202,10 +209,10 @@ impl ContextMenu {
             "down" | "up" => {
                 let dir = if key == "down" { 1 } else { -1 };
                 if o.sub_open {
-                    if let Some(a) = o.active {
-                        if let Kind::Submenu(v) = &o.items[a].kind {
-                            o.sub_active = step(v, o.sub_active, dir);
-                        }
+                    if let Some(a) = o.active
+                        && let Kind::Submenu(v) = &o.items[a].kind
+                    {
+                        o.sub_active = step(v, o.sub_active, dir);
                     }
                 } else {
                     o.active = step(&o.items, o.active, dir);
@@ -243,6 +250,8 @@ impl ContextMenu {
         cx.stop_propagation();
     }
 
+    // one argument per piece of per-panel state (items/active/sub/parent/width) plus the window and context
+    #[allow(clippy::too_many_arguments)]
     fn panel(&self, items: &[MenuItem], active: Option<usize>, sub: Option<usize>, parent: Option<usize>, width: f32, window: &Window, cx: &mut Context<Self>) -> gpui::Div {
         let th = self.th;
         let mut col = div()

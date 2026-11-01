@@ -25,7 +25,7 @@ use std::time::{Duration, Instant};
 
 actions!(
     sonix,
-    [PlayPause, ToggleNowPlaying, Escape, ToggleTheme, FocusSearch, NavBack, NavForward, SelUp, SelDown, SelUpExtend, SelDownExtend, PgUp, PgDown, ListHome, ListEnd, PlaySelected, SelectAllRows, OpenMenuKey]
+    [PlayPause, ToggleNowPlaying, Escape, ToggleTheme, FocusSearch, NavBack, NavForward, SelUp, SelDown, PlaySelected, EnqueueSelected, OpenMenuKey]
 );
 
 pub struct Counts {
@@ -101,6 +101,9 @@ impl Shell {
             }
         }));
         subs.push(cx.subscribe(&np, |this: &mut Shell, _, _: &NpEvent, cx| this.go_back(cx)));
+        // `TopBar.svelte: onSearchFocus`: focusing the search box navigates to the Search route
+        let search_focus = search.read(cx).focus_handle.clone();
+        subs.push(cx.on_focus(&search_focus, window, |this: &mut Shell, _, cx| this.navigate(Route::Search, cx)));
         subs.push(cx.subscribe(&tracks, |this: &mut Shell, _, ev: &TracksEvent, cx| match ev {
             TracksEvent::Navigate(r) => this.navigate(r.clone(), cx),
         }));
@@ -136,11 +139,9 @@ impl Shell {
         this.start_event_pump(cx);
         this.load_static(cx);
         this.install_minimize_hook(window, cx);
-        if let Ok(r) = std::env::var("SONIX_ROUTE") {
-            if let Some(r) = Route::parse(&r) {
-                this.router.navigate(r);
-                this.route_changed(cx);
-            }
+        if let Some(r) = std::env::var("SONIX_ROUTE").ok().and_then(|r| Route::parse(&r)) {
+            this.router.navigate(r);
+            this.route_changed(cx);
         }
         this.debug_hooks(window, cx);
         #[cfg(feature = "parity")]
@@ -421,6 +422,8 @@ impl Shell {
     fn suspend(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         crate::log("suspend: releasing caches");
         self.suspended = true;
+        self.spectrum_on = false;
+        crate::anim::clear(); // no transition may keep requesting frames while minimized
         app::call(cx, |b| {
             let _ = b.player_set_spectrum_active(false);
         });

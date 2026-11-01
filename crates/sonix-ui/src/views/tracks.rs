@@ -2,7 +2,7 @@
 //! table with sortable headers, the width-driven Year/Added hiding rule, hover / selected /
 //! active rows, Ctrl/Shift multi-select, keyboard navigation, double-click or Enter to play,
 //! a context menu and a draggable styled scrollbar.
-use super::shell::{ListEnd, ListHome, OpenMenuKey, PgDown, PgUp, PlaySelected, SelDown, SelUp, SelectAllRows, Shell};
+use super::shell::{EnqueueSelected, OpenMenuKey, PlaySelected, SelDown, SelUp, Shell};
 use crate::app::{self, PlayerEvent, PlayerModel};
 use crate::art::ArtHandle;
 use crate::columns::{Columns, visible_columns};
@@ -21,7 +21,7 @@ use crate::widgets::scrollbar::{self, ScrollbarHandle};
 use crate::widgets::text_input::{InputEvent, TextInput};
 use crate::widgets::{icon, icon_g};
 use gpui::{
-    AnyElement, ClickEvent, ClipboardItem, Context, CursorStyle, Div, Entity, EventEmitter, FocusHandle, Focusable, FontWeight, IntoElement, MouseButton,
+    AnyElement, ClickEvent, ClipboardItem, Context, CursorStyle, Div, Entity, EventEmitter, FocusHandle, Focusable, IntoElement, MouseButton,
     MouseDownEvent, Point, Pixels, Render, ScrollStrategy, SharedString, Stateful, Subscription, Timer, UniformListScrollHandle, Window, div,
     prelude::*, px, uniform_list,
 };
@@ -117,12 +117,25 @@ impl TracksView {
 
     /// Parity harness: selection, scroll offset and which of this view's controls has focus.
     #[cfg(feature = "parity")]
-    pub(crate) fn parity_state(&self, window: &Window) -> serde_json::Value {
-        let focus = if self.focus.is_focused(window) { "tracklist" } else { "body" };
+    pub(crate) fn parity_state(&self, window: &Window, cx: &gpui::App) -> serde_json::Value {
+        let focus = if self.focus.is_focused(window) {
+            "tracklist"
+        } else if self.filter_input.read(cx).focus_handle.is_focused(window) {
+            "filter"
+        } else {
+            "body"
+        };
+        let sel = self.sel.indices();
+        let scroll = f32::from(-self.list.0.borrow().base_handle.offset().y);
+        let titles: Vec<String> = if scroll < 36.0 { (0..3).filter_map(|i| self.pager.get(i).map(|t| t.title.clone())).collect() } else { vec![] };
         serde_json::json!({
             "focus": focus,
-            "selection": self.sel.indices(),
-            "scrollTop": f32::from(-self.list.0.borrow().base_handle.offset().y),
+            "selectionCount": if sel.len() > 1 { sel.len() } else { 0 }, // the header only shows "N SELECTED" for more than one row
+            "selection": sel.iter().filter(|i| **i < 12).collect::<Vec<_>>(),
+            "scrollTop": scroll,
+            "sort": {"field": format!("{:?}", self.sort), "dir": format!("{:?}", self.dir)},
+            "trackCount": self.pager.total,
+            "titles": titles,
         })
     }
 
@@ -421,10 +434,6 @@ impl TracksView {
         cx.notify();
     }
 
-    fn page_rows(&self) -> isize {
-        (self.vis.end.saturating_sub(self.vis.start)).saturating_sub(1).max(1) as isize
-    }
-
     // ------------------------------------------------------------ render pieces
     fn cols(&self, window: &Window) -> Columns {
         let vw = f32::from(window.viewport_size().width);
@@ -435,7 +444,7 @@ impl TracksView {
 
     /// Sortable column header: a `<button class="sort-btn">` inside `.type-label-caps`. UA buttons reset
     /// `text-transform`, so the labels stay mixed case ("Title ↑"); colour is the head's muted, stark on hover.
-    fn header_cell(&self, id: &'static str, label: &'static str, field: TrackSortField, right: bool, cx: &mut Context<Self>) -> Stateful<Div> {
+    fn header_cell(&self, id: &'static str, label: &'static str, field: TrackSortField, cx: &mut Context<Self>) -> Stateful<Div> {
         let th = self.th;
         let arrow = if self.sort == field { if self.dir == SortDir::Desc { " ↓" } else { " ↑" } } else { "" };
         let spec = TypeSpec { caps: false, ..LABEL_CAPS };
@@ -443,7 +452,6 @@ impl TracksView {
             .id(id)
             .flex()
             .flex_row()
-            .when(right, |d| d.justify_end())
             .cursor(CursorStyle::PointingHand)
             .text_color(th.muted)
             .hover(move |s| s.text_color(th.text))
@@ -468,13 +476,13 @@ impl TracksView {
                 .border_b_1()
                 .border_color(th.border)
                 .child(div().w(px(tr::IDX_W)).flex_none())
-                .child(pid("table.head.title", flex_cell(tr::TITLE_GROW).child(self.header_cell("h-title", "Title", TrackSortField::Title, false, cx))))
-                .child(pid("table.head.artist", flex_cell(tr::ARTIST_GROW).child(self.header_cell("h-artist", "Artist", TrackSortField::Artist, false, cx))))
-                .child(pid("table.head.album", flex_cell(tr::ALBUM_GROW).child(self.header_cell("h-album", "Album", TrackSortField::Album, false, cx))))
-                .when(cols.year, |d| d.child(pid("table.head.year", div().w(px(tr::YEAR_W)).flex_none().child(self.header_cell("h-year", "Year", TrackSortField::Year, true, cx)))))
-                .when(cols.added, |d| d.child(pid("table.head.added", div().w(px(tr::ADDED_W)).flex_none().child(self.header_cell("h-added", "Added", TrackSortField::DateAdded, true, cx)))))
-                .child(pid("table.head.format", div().w(px(tr::FORMAT_W)).flex_none().child(self.header_cell("h-format", "Format", TrackSortField::Format, true, cx))))
-                .child(pid("table.head.time", div().w(px(tr::TIME_W)).flex_none().child(self.header_cell("h-time", "Time", TrackSortField::Duration, true, cx))))
+                .child(pid("table.head.title", flex_cell(tr::TITLE_GROW).flex().child(pid("table.head.btn.title", self.header_cell("h-title", "Title", TrackSortField::Title, cx)))))
+                .child(pid("table.head.artist", flex_cell(tr::ARTIST_GROW).flex().child(pid("table.head.btn.artist", self.header_cell("h-artist", "Artist", TrackSortField::Artist, cx)))))
+                .child(pid("table.head.album", flex_cell(tr::ALBUM_GROW).flex().child(pid("table.head.btn.album", self.header_cell("h-album", "Album", TrackSortField::Album, cx)))))
+                .when(cols.year, |d| d.child(pid("table.head.year", div().w(px(tr::YEAR_W)).flex_none().flex().justify_end().child(pid("table.head.btn.year", self.header_cell("h-year", "Year", TrackSortField::Year, cx))))))
+                .when(cols.added, |d| d.child(pid("table.head.added", div().w(px(tr::ADDED_W)).flex_none().flex().justify_end().child(pid("table.head.btn.added", self.header_cell("h-added", "Added", TrackSortField::DateAdded, cx))))))
+                .child(pid("table.head.format", div().w(px(tr::FORMAT_W)).flex_none().flex().justify_end().child(pid("table.head.btn.format", self.header_cell("h-format", "Format", TrackSortField::Format, cx)))))
+                .child(pid("table.head.time", div().w(px(tr::TIME_W)).flex_none().flex().justify_end().child(pid("table.head.btn.time", self.header_cell("h-time", "Time", TrackSortField::Duration, cx)))))
                 .child(spacer())
                 .child(spacer()),
         )
@@ -578,6 +586,8 @@ impl TracksView {
                     cx.listener(move |this, ev: &MouseDownEvent, window, cx| {
                         window.focus(&this.focus);
                         this.open_menu(ix, ev.position, window, cx);
+                        // the list body (a focusable ancestor) must not take the focus back from the menu
+                        cx.stop_propagation();
                     }),
                 ),
         )
@@ -598,7 +608,7 @@ impl TracksView {
             .cursor(CursorStyle::PointingHand)
             .text_color(if starred { th.accent_fg } else { th.muted })
             .hover(move |s| s.text_color(if starred { th.accent_fg } else { th.text }))
-            .child(icon_g(if starred { "heart-filled" } else { "heart" }, 14., if starred { th.accent_fg } else { th.muted }, if starred { th.accent_fg } else { th.text }))
+            .child(icon_g(if starred { "heart-filled" } else { "heart" }, tr::ROW_ICON, if starred { th.accent_fg } else { th.muted }, if starred { th.accent_fg } else { th.text }))
             .on_click(cx.listener(move |this, _, _, cx| {
                 cx.stop_propagation();
                 this.toggle_star(&t, cx);
@@ -618,7 +628,7 @@ impl TracksView {
             .cursor(CursorStyle::PointingHand)
             .text_color(th.muted)
             .hover(move |s| s.text_color(th.text))
-            .child(icon_g("more", 14., th.muted, th.text))
+            .child(icon_g("more", tr::ROW_ICON, th.muted, th.text))
             .on_click(cx.listener(move |this, ev: &ClickEvent, window, cx| {
                 cx.stop_propagation();
                 let p = ev.position();
@@ -703,7 +713,7 @@ impl Render for TracksView {
                             .border_1()
                             .border_color(if filter_focused { th.focus } else { th.border })
                             .when(filter_focused, |d| d.shadow(crate::widgets::hard_shadow(&th, ctl::BTN_SHADOW)))
-                            .child(div().flex_1().min_w_0().h_full().child(self.filter_input.clone()))
+                            .child(pid("page.filter.input", div().flex_1().min_w_0().h_full().flex().items_center().child(self.filter_input.clone())))
                             .when(filter_empty, |d| {
                                 d.child(
                                     div()
@@ -748,22 +758,12 @@ impl Render for TracksView {
                 .track_focus(&self.focus)
                 .on_action(cx.listener(|this, _: &SelDown, _, cx| this.key_move(1, false, cx)))
                 .on_action(cx.listener(|this, _: &SelUp, _, cx| this.key_move(-1, false, cx)))
-                .on_action(cx.listener(|this, _: &crate::views::shell::SelDownExtend, _, cx| this.key_move(1, true, cx)))
-                .on_action(cx.listener(|this, _: &crate::views::shell::SelUpExtend, _, cx| this.key_move(-1, true, cx)))
-                .on_action(cx.listener(|this, _: &PgDown, _, cx| {
-                    let n = this.page_rows();
-                    this.key_move(n, false, cx)
-                }))
-                .on_action(cx.listener(|this, _: &PgUp, _, cx| {
-                    let n = this.page_rows();
-                    this.key_move(-n, false, cx)
-                }))
-                .on_action(cx.listener(|this, _: &ListHome, _, cx| this.key_move(isize::MIN / 2, false, cx)))
-                .on_action(cx.listener(|this, _: &ListEnd, _, cx| this.key_move(isize::MAX / 2, false, cx)))
-                .on_action(cx.listener(|this, _: &SelectAllRows, _, cx| {
-                    let total = this.pager.total;
-                    this.sel.select_all(total);
-                    cx.notify();
+                .on_action(cx.listener(|this, _: &EnqueueSelected, _, cx| {
+                    if let Some(id) = this.sel.cursor().and_then(|i| this.pager.get(i)).map(|t| t.id.clone()) {
+                        app::call(cx, move |b| {
+                            let _ = b.player_enqueue(EnqueueRequest { track_ids: vec![id], position: EnqueuePosition::End });
+                        });
+                    }
                 }))
                 .on_action(cx.listener(|this, _: &PlaySelected, _, cx| {
                     if let Some(t) = this.sel.cursor().and_then(|i| this.pager.get(i)).map(|t| t.id.clone()) {

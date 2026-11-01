@@ -42,14 +42,15 @@ pub enum PlayerEvent {
 pub struct PlayerModel {
     pub state: PlayerState,
     pub spectrum: Option<SpectrumFrame>,
-    pub spectrum_at: std::time::Instant,
+    /// Counts frames: consumers that keep their own smoothing detect "a new frame arrived" by comparing it.
+    pub spectrum_seq: u64,
 }
 
 impl EventEmitter<PlayerEvent> for PlayerModel {}
 
 impl Default for PlayerModel {
     fn default() -> Self {
-        Self { state: PlayerState::idle(), spectrum: None, spectrum_at: std::time::Instant::now() }
+        Self { state: PlayerState::idle(), spectrum: None, spectrum_seq: 0 }
     }
 }
 
@@ -77,6 +78,6 @@ impl PlayerModel {
     }
     pub fn apply_spectrum(&mut self, f: SpectrumFrame) {
         self.spectrum = Some(f);
-        self.spectrum_at = std::time::Instant::now();
+        self.spectrum_seq += 1;
     }
 }

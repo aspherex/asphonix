@@ -17,9 +17,8 @@ use sonix_api::*;
 use std::cell::Cell;
 use std::rc::Rc;
 use std::sync::Arc;
-use std::time::Instant;
+use crate::metrics::spectrum as sp;
 
-const BANDS: usize = SPECTRUM_BANDS;
 
 pub struct NowPlayingView {
     backend: Arc<dyn Backend>,
@@ -27,11 +26,7 @@ pub struct NowPlayingView {
     player: Entity<PlayerModel>,
     visible: bool,
     suspended: bool,
-    bands: [f32; BANDS],
-    hold: [f32; BANDS],
-    hold_age: [f32; BANDS],
-    peaks: [f32; 2],
-    last: Instant,
+    fft: Fft,
     wave_for: Option<String>,
     wave: Option<Vec<u8>>,
     wave_seek: SliderHandle,
@@ -51,11 +46,7 @@ impl NowPlayingView {
             player: player.clone(),
             visible: false,
             suspended: false,
-            bands: [0.0; BANDS],
-            hold: [0.0; BANDS],
-            hold_age: [0.0; BANDS],
-            peaks: [0.0; 2],
-            last: Instant::now(),
+            fft: Fft::default(),
             wave_for: None,
             wave: None,
             wave_seek: slider::new_handle(),
@@ -93,7 +84,7 @@ impl NowPlayingView {
             return;
         }
         self.visible = v;
-        self.last = Instant::now();
+        self.fft.reset_clock();
         self.sync_spectrum(cx);
         if v {
             self.on_track_change(cx);
@@ -107,7 +98,7 @@ impl NowPlayingView {
             self.wave = None;
             self.wave_for = None;
         } else {
-            self.last = Instant::now();
+            self.fft.reset_clock();
             self.on_track_change(cx);
         }
         self.sync_spectrum(cx);
@@ -141,69 +132,155 @@ impl NowPlayingView {
         }
         cx.notify();
     }
+}
 
-    /// Advance bar smoothing by `dt` seconds toward the latest frame; returns whether anything
-    /// is still moving (so animation can stop once the meters have decayed).
-    fn step(&mut self, target: Option<&SpectrumFrame>, playing: bool, dt: f32) -> bool {
-        let mut moving = false;
-        for i in 0..BANDS {
-            let t = if playing { target.and_then(|f| f.bands.get(i)).map(|v| *v as f32 / 255.0).unwrap_or(0.0) } else { 0.0 };
-            // fast attack, ~1.6/s release
-            self.bands[i] = if t > self.bands[i] { t } else { (self.bands[i] - 1.6 * dt).max(t) };
-            if self.bands[i] >= self.hold[i] {
-                self.hold[i] = self.bands[i];
-                self.hold_age[i] = 0.0;
-            } else {
-                self.hold_age[i] += dt;
-                if self.hold_age[i] > 0.45 {
-                    self.hold[i] = (self.hold[i] - 0.45 * dt).max(self.bands[i]);
-                }
-            }
-            moving |= self.bands[i] > 0.002 || self.hold[i] > 0.002;
-        }
-        let db = |d: f32| ((d + 60.0) / 60.0).clamp(0.0, 1.0);
-        let (l, r) = if playing { target.map(|f| (db(f.peak_l), db(f.peak_r))).unwrap_or((0.0, 0.0)) } else { (0.0, 0.0) };
-        for (p, t) in self.peaks.iter_mut().zip([l, r]) {
-            *p = if t > *p { t } else { (*p - 1.2 * dt).max(t) };
-            moving |= *p > 0.002;
-        }
-        moving
+/// Port of `np/FftPanel.svelte`'s dynamics (constants in `metrics::spectrum`, copied from the web source):
+/// the bars show the latest frame, a cap holds each band's peak and falls at 0.45 of full scale per second, the
+/// stereo meters fall at 30 dB/s with a 1.2 s peak hold, and a stalled stream (> 120 ms without a frame) lets the
+/// bars fall at 2.2 x full scale per second. Time is the shared clock; draws are at most 20 ms apart.
+pub struct Fft {
+    bands: Vec<f32>, // latest frame, 0..255
+    caps: Vec<f32>,  // peak hold, 0..1
+    level: [f32; 2], // smoothed L/R, dBFS
+    hold: [f32; 2],
+    hold_at: [f64; 2],
+    last_frame_at: f64,
+    last_draw: Option<f64>,
+    seen_seq: u64,
+}
+
+impl Default for Fft {
+    fn default() -> Self {
+        Self { bands: Vec::new(), caps: Vec::new(), level: [sp::FLOOR_DB; 2], hold: [sp::FLOOR_DB; 2], hold_at: [0.0; 2], last_frame_at: 0.0, last_draw: None, seen_seq: 0 }
     }
 }
 
-fn spectrum_canvas(th: Theme, bands: [f32; BANDS], hold: [f32; BANDS]) -> impl IntoElement {
+impl Fft {
+    fn reset_clock(&mut self) {
+        self.last_draw = None;
+    }
+
+    /// `clearAll()`: nothing audible.
+    fn clear(&mut self) {
+        *self = Self { seen_seq: self.seen_seq, ..Self::default() };
+    }
+
+    /// `onFrame`: copy the bands, raise the meters, restart the peak hold.
+    fn on_frame(&mut self, f: &SpectrumFrame, now: f64) {
+        if self.bands.len() != f.bands.len() {
+            self.bands = vec![0.0; f.bands.len()];
+            self.caps = vec![0.0; f.bands.len()];
+        }
+        for (d, s) in self.bands.iter_mut().zip(&f.bands) {
+            *d = *s as f32;
+        }
+        self.last_frame_at = now;
+        for (c, peak) in [f.peak_l, f.peak_r].into_iter().enumerate() {
+            let p = peak.max(sp::FLOOR_DB);
+            if p > self.level[c] {
+                self.level[c] = p;
+            }
+            if p >= self.hold[c] {
+                self.hold[c] = p;
+                self.hold_at[c] = now;
+            }
+        }
+    }
+
+    /// `frame(now)`: release step; returns whether anything is still moving (keep requesting frames).
+    fn frame(&mut self, now: f64) -> bool {
+        if let Some(last) = self.last_draw
+            && (now - last) * 1000.0 < sp::MIN_DRAW_MS as f64
+        {
+            return true;
+        }
+        let dt = self.last_draw.map(|l| ((now - l) as f32).min(sp::MAX_DT)).unwrap_or(0.016);
+        self.last_draw = Some(now);
+        let mut busy = false;
+        for (cap, band) in self.caps.iter_mut().zip(&self.bands) {
+            let target = band / 255.0;
+            *cap = if target >= *cap { target } else { target.max(*cap - sp::CAP_FALL_PER_S * dt) };
+            busy |= *cap > 0.002;
+        }
+        for c in 0..2 {
+            if self.level[c] > sp::FLOOR_DB {
+                self.level[c] = (self.level[c] - sp::METER_FALL_DB_PER_S * dt).max(sp::FLOOR_DB);
+                busy = true;
+            }
+            if self.hold[c] > sp::FLOOR_DB && (now - self.hold_at[c]) * 1000.0 > sp::PEAK_HOLD_MS as f64 {
+                self.hold[c] = self.level[c].max(self.hold[c] - sp::METER_FALL_DB_PER_S * dt);
+                busy = true;
+            }
+        }
+        if busy {
+            if (now - self.last_frame_at) * 1000.0 > sp::STALE_AFTER_MS as f64 {
+                for b in &mut self.bands {
+                    *b = (*b - 255.0 * sp::STALE_FALL_PER_S * dt).max(0.0);
+                }
+            }
+        } else {
+            self.last_draw = None;
+        }
+        busy
+    }
+}
+
+/// `FftPanel.drawSpectrum` on a canvas of the element's device-pixel size: bar gap `max(1, round(dpr))` device px,
+/// bar edges rounded to whole device px, cap line `round(2 * dpr)` px thick.
+fn spectrum_canvas(th: Theme, bands: Vec<f32>, caps: Vec<f32>) -> impl IntoElement {
     canvas(
         |_, _, _| (),
         move |b, _, window, _| {
-            let gap = 3.0f32;
-            let w = f32::from(b.size.width);
-            let h = f32::from(b.size.height);
-            let bw = ((w - gap * (BANDS as f32 - 1.0)) / BANDS as f32).max(1.0);
-            for i in 0..BANDS {
-                let x = f32::from(b.origin.x) + i as f32 * (bw + gap);
-                let bh = (bands[i] * h).max(1.0);
-                window.paint_quad(fill(Bounds::new(point(px(x), b.origin.y + px(h - bh)), size(px(bw), px(bh))), th.meter));
-                let hy = (hold[i] * h).max(2.0);
-                window.paint_quad(fill(Bounds::new(point(px(x), b.origin.y + px(h - hy - 2.0)), size(px(bw), px(2.0))), th.text));
+            let s = window.scale_factor();
+            let (ox, oy) = (f32::from(b.origin.x) * s, f32::from(b.origin.y) * s);
+            let (w, h) = ((f32::from(b.size.width) * s).round(), (f32::from(b.size.height) * s).round());
+            let n = caps.len();
+            if n == 0 {
+                return;
+            }
+            let gap = s.round().max(1.0);
+            let cap_h = (2.0 * s).round().max(1.0);
+            let bar_w = w / n as f32;
+            let dev = |x: f32, y: f32, ww: f32, hh: f32| Bounds::new(point(px((ox + x) / s), px((oy + y) / s)), size(px(ww / s), px(hh / s)));
+            for i in 0..n {
+                let x = (i as f32 * bar_w).round();
+                let bw = ((i as f32 + 1.0) * bar_w).round() - x - gap;
+                let v = (bands.get(i).copied().unwrap_or(0.0) / 255.0).clamp(0.0, 1.0);
+                let bh = (v * h).round().max(1.0);
+                window.paint_quad(fill(dev(x, h - bh, bw, bh), th.meter));
+                let ch = (caps[i] * h).round().max(1.0);
+                window.paint_quad(fill(dev(x, (h - ch - (2.0 * s).round()).max(0.0), bw, cap_h), th.text));
             }
         },
     )
     .size_full()
 }
 
-fn meter_canvas(th: Theme, level: f32) -> impl IntoElement {
+/// `FftPanel.drawMeters` (segments only; the L/R and value labels are separate elements here): 20 segments of 3 dB
+/// from -60 to 0 dBFS, lit up to the smoothed level, one segment of peak hold, red above -3 dB.
+fn meter_canvas(th: Theme, level: f32, hold: f32) -> impl IntoElement {
     canvas(
         |_, _, _| (),
         move |b, _, window, _| {
-            let segs = 20usize;
-            let gap = 2.0f32;
-            let w = f32::from(b.size.width);
-            let sw = ((w - gap * (segs as f32 - 1.0)) / segs as f32).max(1.0);
-            for i in 0..segs {
-                let on = (i as f32 + 0.5) / segs as f32 <= level;
-                let col = if i >= segs - 2 { th.clip } else if on { th.meter } else { th.highest };
-                let col = if on || i >= segs - 2 && level >= 0.9 { col } else { th.highest };
-                window.paint_quad(fill(Bounds::new(point(b.origin.x + px(i as f32 * (sw + gap)), b.origin.y), size(px(sw), b.size.height)), col));
+            let s = window.scale_factor();
+            let (ox, oy) = (f32::from(b.origin.x) * s, f32::from(b.origin.y) * s);
+            let (w, h) = ((f32::from(b.size.width) * s).round(), (f32::from(b.size.height) * s).round());
+            let seg_gap = s.round().max(1.0);
+            let seg_w = (w - seg_gap * (sp::SEGMENTS as f32 - 1.0)) / sp::SEGMENTS as f32;
+            let lit = (((level - sp::FLOOR_DB) / -sp::FLOOR_DB) * sp::SEGMENTS as f32).round() as i32;
+            let hold_seg = (((hold - sp::FLOOR_DB) / -sp::FLOOR_DB) * sp::SEGMENTS as f32).round() as i32 - 1;
+            for i in 0..sp::SEGMENTS as i32 {
+                let x = (i as f32 * (seg_w + seg_gap)).round();
+                let seg_db = sp::FLOOR_DB + ((i + 1) as f32 / sp::SEGMENTS as f32) * -sp::FLOOR_DB;
+                let hot = seg_db > sp::CLIP_FROM_DB;
+                let col = if i < lit {
+                    if hot { th.clip } else { th.meter }
+                } else if i == hold_seg && hold > sp::FLOOR_DB {
+                    if hot { th.clip } else { th.text }
+                } else {
+                    th.highest
+                };
+                window.paint_quad(fill(Bounds::new(point(px((ox + x) / s), px(oy / s)), size(px(seg_w.round().max(1.0) / s), px(h / s))), col));
             }
         },
     )
@@ -242,11 +319,23 @@ impl Render for NowPlayingView {
             (m.state.clone(), m.spectrum.clone())
         };
         let playing = ps.status == PlaybackStatus::Playing;
-        let now = Instant::now();
-        let dt = now.duration_since(self.last).as_secs_f32().min(0.1);
-        self.last = now;
-        let moving = if self.spectrum_wanted() { self.step(frame.as_ref(), playing, dt) } else { false };
-        if self.spectrum_wanted() && (playing || moving) {
+        let now = crate::clock::now();
+        let seq = self.player.read(cx).spectrum_seq;
+        let idle = !playing || ps.track.is_none();
+        let mut moving = false;
+        if self.spectrum_wanted() {
+            if idle && !self.fft.bands.is_empty() && ps.status == PlaybackStatus::Stopped {
+                self.fft.clear();
+            }
+            if seq != self.fft.seen_seq {
+                self.fft.seen_seq = seq;
+                if let Some(f) = frame.as_ref() {
+                    self.fft.on_frame(f, now);
+                }
+            }
+            moving = self.fft.frame(now);
+        }
+        if self.spectrum_wanted() && (playing || moving) && !crate::clock::frozen() {
             window.request_animation_frame();
         }
 
@@ -368,7 +457,7 @@ impl Render for NowPlayingView {
             .h(px(fft_h))
             .flex_none()
             .mt(px(8.))
-            .child(div().flex_1().h_full().child(spectrum_canvas(th, self.bands, self.hold)))
+            .child(div().flex_1().h_full().child(spectrum_canvas(th, self.fft.bands.clone(), self.fft.caps.clone())))
             .child(
                 div()
                     .flex()
@@ -376,8 +465,8 @@ impl Render for NowPlayingView {
                     .gap(px(6.))
                     .w(px(160.))
                     .flex_none()
-                    .child(div().flex().flex_row().items_center().gap(px(8.)).child(ts(&th, MONO_CODE).w(px(10.)).text_color(th.muted).child("L")).child(div().flex_1().h(px(10.)).child(meter_canvas(th, self.peaks[0]))))
-                    .child(div().flex().flex_row().items_center().gap(px(8.)).child(ts(&th, MONO_CODE).w(px(10.)).text_color(th.muted).child("R")).child(div().flex_1().h(px(10.)).child(meter_canvas(th, self.peaks[1])))),
+                    .child(div().flex().flex_row().items_center().gap(px(8.)).child(ts(&th, MONO_CODE).w(px(10.)).text_color(th.muted).child("L")).child(div().flex_1().h(px(10.)).child(meter_canvas(th, self.fft.level[0], self.fft.hold[0]))))
+                    .child(div().flex().flex_row().items_center().gap(px(8.)).child(ts(&th, MONO_CODE).w(px(10.)).text_color(th.muted).child("R")).child(div().flex_1().h(px(10.)).child(meter_canvas(th, self.fft.level[1], self.fft.hold[1])))),
             );
 
         // ---- deck: waveform seek + transport
@@ -527,3 +616,47 @@ pub enum NpEvent {
     Close,
 }
 impl gpui::EventEmitter<NpEvent> for NowPlayingView {}
+
+#[cfg(test)]
+mod fft_tests {
+    use super::*;
+
+    fn frame(v: u8, l: f32, r: f32) -> SpectrumFrame {
+        SpectrumFrame { bands: vec![v; sp::BANDS], peak_l: l, peak_r: r }
+    }
+
+    /// `FftPanel.svelte`: meters fall 30 dB/s, the 1.2 s peak hold only starts falling after that, caps fall 0.45/s.
+    #[test]
+    fn dynamics_follow_the_web_panel() {
+        let mut f = Fft::default();
+        f.on_frame(&frame(255, -3.0, -6.0), 0.0);
+        assert_eq!((f.level, f.hold), ([-3.0, -6.0], [-3.0, -6.0]));
+        let mut t = 0.0;
+        for _ in 0..10 {
+            t += 0.1;
+            f.frame(t); // dt = 0.1 each (the first draw uses the 16 ms default)
+        }
+        // first frame dt = 0.016, then nine of 0.1: 0.916 s of falling at 30 dB/s
+        assert!((f.level[0] - (-3.0 - 30.0 * 0.916)).abs() < 0.05, "{}", f.level[0]);
+        assert_eq!(f.hold[0], -3.0, "peak hold lasts 1.2 s");
+        // no frame for > 120 ms: the bars fall (2.2 x full scale / s) and the cap follows at most 0.45 / s
+        assert!(f.bands[0] < 255.0 && f.caps[0] < 1.0 && f.caps[0] > f.bands[0] / 255.0, "{} {}", f.bands[0], f.caps[0]);
+        for _ in 0..4 {
+            t += 0.1;
+            f.frame(t);
+        }
+        assert!(f.hold[0] < -3.0, "hold released after 1.2 s");
+        assert_eq!(f.bands[0], 0.0, "fully fallen after ~1.4 s of stall");
+    }
+
+    #[test]
+    fn draws_are_at_least_20ms_apart_and_idle_stops_the_loop() {
+        let mut f = Fft::default();
+        assert!(!f.frame(0.0), "nothing to animate");
+        f.on_frame(&frame(10, -60.0, -60.0), 0.0);
+        f.frame(1.0);
+        let caps = f.caps[0];
+        f.frame(1.005); // < 20 ms later: skipped
+        assert_eq!(f.caps[0], caps);
+    }
+}

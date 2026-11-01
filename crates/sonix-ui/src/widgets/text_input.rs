@@ -263,6 +263,8 @@ impl TextInput {
         cx: &mut Context<Self>,
     ) {
         window.focus(&self.focus_handle);
+        // a focusable ancestor (the shell root) would otherwise take the focus back on the same mouse-down
+        cx.stop_propagation();
         self.is_selecting = true;
 
         let at = self.index_for_mouse_position(event.position);
@@ -450,22 +452,6 @@ impl TextInput {
         self.col_sel = th.accent.opacity(0.35);
     }
 
-    pub fn set_text(&mut self, text: &str, cx: &mut Context<Self>) {
-        self.content = text.to_string().into();
-        self.selected_range = text.len()..text.len();
-        self.marked_range = None;
-        cx.notify();
-    }
-
-    pub fn reset(&mut self) {
-        self.content = "".into();
-        self.selected_range = 0..0;
-        self.selection_reversed = false;
-        self.marked_range = None;
-        self.last_layout = None;
-        self.last_bounds = None;
-        self.is_selecting = false;
-    }
 }
 
 impl EntityInputHandler for TextInput {

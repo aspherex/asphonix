@@ -67,6 +67,7 @@ impl<T> Pager<T> {
         self.pending.clear();
     }
 
+    #[cfg(test)]
     pub fn resident_pages(&self) -> usize {
         self.pages.len()
     }
@@ -82,8 +83,7 @@ mod tests {
 
     #[test]
     fn want_dedupes_and_respects_total() {
-        let mut p: Pager<u32> = Pager::default();
-        p.total = 250;
+        let mut p: Pager<u32> = Pager { total: 250, ..Pager::default() };
         assert!(p.want(0));
         assert!(!p.want(0), "pending");
         assert!(p.want(2));
@@ -97,8 +97,7 @@ mod tests {
 
     #[test]
     fn stale_epoch_is_dropped() {
-        let mut p: Pager<u32> = Pager::default();
-        p.total = 1000;
+        let mut p: Pager<u32> = Pager { total: 1000, ..Pager::default() };
         let e = p.epoch;
         assert!(p.want(1));
         p.reset();
@@ -109,8 +108,7 @@ mod tests {
 
     #[test]
     fn never_more_than_16_pages_and_farthest_goes_first() {
-        let mut p: Pager<u32> = Pager::default();
-        p.total = 54_515;
+        let mut p: Pager<u32> = Pager { total: 54_515, ..Pager::default() };
         for page in 0..40 {
             let e = p.epoch;
             p.insert(e, page, rows(100), 39 * PAGE);

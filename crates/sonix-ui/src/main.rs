@@ -1,11 +1,4 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
-#![allow(
-    dead_code, // the widget layer ships variants/methods later phases use (Danger button, set_text, ...)
-    clippy::collapsible_if,
-    clippy::type_complexity,
-    clippy::field_reassign_with_default,
-    clippy::assertions_on_constants
-)]
 //! SONIX native: the GPUI desktop UI. Phase 1 runs against `sonix-mock` through the
 //! `sonix_api::Backend` seam; phase 2 swaps in a real backend built on `sonix-core`.
 mod anim;
@@ -48,10 +41,10 @@ static T0: OnceLock<Instant> = OnceLock::new();
 pub fn log(msg: &str) {
     let ms = T0.get().map(|t| t.elapsed().as_secs_f64() * 1000.0).unwrap_or(0.0);
     let epoch = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_millis()).unwrap_or(0);
-    if let Ok(p) = std::env::var("SONIX_LOG") {
-        if let Ok(mut f) = std::fs::OpenOptions::new().create(true).append(true).open(p) {
-            let _ = writeln!(f, "{ms:.1} {msg} @{epoch}");
-        }
+    if let Ok(p) = std::env::var("SONIX_LOG")
+        && let Ok(mut f) = std::fs::OpenOptions::new().create(true).append(true).open(p)
+    {
+        let _ = writeln!(f, "{ms:.1} {msg} @{epoch}");
     }
 }
 
@@ -114,14 +107,13 @@ fn bind_keys(cx: &mut App) {
     cx.bind_keys([
         KeyBinding::new("up", shell::SelUp, Some("TrackList")),
         KeyBinding::new("down", shell::SelDown, Some("TrackList")),
-        KeyBinding::new("shift-up", shell::SelUpExtend, Some("TrackList")),
-        KeyBinding::new("shift-down", shell::SelDownExtend, Some("TrackList")),
-        KeyBinding::new("pageup", shell::PgUp, Some("TrackList")),
-        KeyBinding::new("pagedown", shell::PgDown, Some("TrackList")),
-        KeyBinding::new("home", shell::ListHome, Some("TrackList")),
-        KeyBinding::new("end", shell::ListEnd, Some("TrackList")),
+        // the web handler ignores Shift on arrows (plain single-selection move)
+        KeyBinding::new("shift-up", shell::SelUp, Some("TrackList")),
+        KeyBinding::new("shift-down", shell::SelDown, Some("TrackList")),
         KeyBinding::new("enter", shell::PlaySelected, Some("TrackList")),
-        KeyBinding::new("ctrl-a", shell::SelectAllRows, Some("TrackList")),
+        // `trackList.ts: trackListKeydown`: Up/Down move a single selection, Enter plays, Shift+Enter enqueues. The Tracks
+        // route passes no `selectAll`, so Ctrl+A, Shift+arrows, Home/End and Page keys do nothing there (parity-verified).
+        KeyBinding::new("shift-enter", shell::EnqueueSelected, Some("TrackList")),
         KeyBinding::new("menu", shell::OpenMenuKey, Some("TrackList")),
         KeyBinding::new("shift-f10", shell::OpenMenuKey, Some("TrackList")),
         KeyBinding::new("space", shell::PlayPause, Some("Root && !TextInput")),
