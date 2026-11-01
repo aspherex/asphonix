@@ -357,6 +357,9 @@ impl Shell {
         }
     }
     fn route_changed(&mut self, cx: &mut Context<Self>) {
+        if *self.router.current() != Route::Login {
+            self.lists.login = None;
+        }
         self.queue_drawer = false;
         let on_np = *self.router.current() == Route::NowPlaying;
         self.np.update(cx, |n, cx| n.set_visible(on_np, cx));
@@ -474,7 +477,7 @@ impl Shell {
     }
     /// Queue rail docked beside the stage (>= 1440 px, hidden on Now Playing).
     pub(crate) fn rail_docked(vw: f32, route: &Route) -> bool {
-        vw >= crate::metrics::bp::RAIL_DOCKED_FROM && *route != Route::NowPlaying
+        vw >= crate::metrics::bp::RAIL_DOCKED_FROM && *route != Route::NowPlaying && *route != Route::Login
     }
 }
 
@@ -524,14 +527,17 @@ impl Render for Shell {
         let top = crate::probe::pid("topbar", self.top_bar(window, cx));
         let side = crate::probe::pid("sidebar", self.sidebar(vw, &route, window, cx));
 
+        // `App.svelte`: the login route has only the title bar and its own stage (no top bar, sidebar, rail, dock)
+        let is_login = route == Route::Login;
+        let stage_id = if is_login { "login.stage" } else { "stage" };
         let body = div()
             .flex_1()
             .flex()
             .flex_row()
             .min_h_0()
             .relative()
-            .child(side)
-            .child(crate::probe::pid("stage", div().flex_1().min_w_0().h_full().overflow_hidden().child(stage)))
+            .children((!is_login).then(|| side))
+            .child(crate::probe::pid(stage_id, div().flex_1().min_w_0().h_full().overflow_hidden().child(stage)))
             .when(docked, |d| d.child(self.queue.clone()))
             .when(!docked && !on_np && self.queue_drawer, |d| {
                 d.child(div().absolute().top_0().right_0().bottom_0().child(self.queue.clone()))
@@ -583,7 +589,7 @@ impl Render for Shell {
             .text_size(px(13.))
             .line_height(px(18.))
             .child(title)
-            .child(top)
+            .children((!is_login).then(|| top))
             .child(
                 div()
                     .flex_1()
@@ -592,10 +598,11 @@ impl Render for Shell {
                     .flex()
                     .flex_col()
                     .children(self.backdrop.clone().map(|b| {
-                        div().absolute().top_0().left_0().size_full().child(img(ImageSource::Render(b)).size_full().object_fit(ObjectFit::Fill))
+                        // the canvas starts below title bar + top bar (`--chrome-top`): on the login route there is no top bar
+                        div().absolute().top(px(if is_login { crate::metrics::topbar::H } else { 0.0 })).left_0().right_0().bottom_0().child(img(ImageSource::Render(b)).size_full().object_fit(ObjectFit::Fill))
                     }))
-                    .child(crate::probe::pid("shell.body", body))
-                    .when(!on_np, |d| d.child(self.dock.clone())),
+                    .child(crate::probe::pid(if is_login { "login.body" } else { "shell.body" }, body))
+                    .when(!on_np && !is_login, |d| d.child(self.dock.clone())),
             )
             .child(self.menu.clone())
             .children(self.lists_modal_overlay());

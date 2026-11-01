@@ -3,6 +3,7 @@
 //! owned by [`ListsHost`] (created on first visit, so startup stays as lean as before); the shell only
 //! asks [`Shell::lists_stage`] for the element of a route.
 pub mod history;
+pub mod login;
 pub mod menus;
 pub mod modal;
 pub mod playlists;
@@ -32,6 +33,8 @@ pub enum ListsEvent {
     SmartChanged,
     /// open the smart-playlist editor (`None` = a new one)
     EditSmart(Option<Box<SmartSummary>>),
+    /// history back, else Home (`Login` "Cancel")
+    Back,
 }
 
 /// `--shadow-hot*`: accent in dark, ink in light.
@@ -47,12 +50,13 @@ pub struct ListsHost {
     playlists: Option<Entity<playlists::PlaylistsView>>,
     search: Option<Entity<search::SearchView>>,
     settings: Option<Entity<settings::SettingsView>>,
+    pub(crate) login: Option<Entity<login::LoginView>>,
     subs: Vec<Subscription>,
 }
 
 impl ListsHost {
     pub fn handles(r: &Route) -> bool {
-        matches!(r, Route::Playlists | Route::Playlist(_) | Route::Liked | Route::Smart(_) | Route::History | Route::Search | Route::Settings)
+        matches!(r, Route::Playlists | Route::Playlist(_) | Route::Liked | Route::Smart(_) | Route::History | Route::Search | Route::Settings | Route::Login)
     }
 }
 
@@ -113,6 +117,15 @@ impl Shell {
                     self.lists.history = Some(v);
                 }
                 self.lists.history.clone().unwrap().into_any_element()
+            }
+            Route::Login => {
+                // a fresh form on every visit (dropped again in `route_changed`)
+                if self.lists.login.is_none() {
+                    let v = cx.new(|cx| login::LoginView::new(backend, cx));
+                    self.lists.subs.push(cx.subscribe(&v, |sh: &mut Shell, _, ev: &ListsEvent, cx| sh.lists_event(ev, cx)));
+                    self.lists.login = Some(v);
+                }
+                self.lists.login.clone().unwrap().into_any_element()
             }
             Route::Settings => {
                 if self.lists.settings.is_none() {
@@ -190,6 +203,13 @@ impl Shell {
                 }
             }
             ListsEvent::EditSmart(_) => {}
+            ListsEvent::Back => {
+                if self.router.can_back() {
+                    self.go_back(cx);
+                } else {
+                    self.navigate(Route::Home, cx);
+                }
+            }
         }
     }
 
@@ -231,6 +251,7 @@ impl Shell {
             Route::Playlists => self.lists.playlists.as_ref().map(|p| p.read(cx).parity_state()).unwrap_or_default(),
             Route::Search => self.lists.search.as_ref().map(|p| p.read(cx).parity_state()).unwrap_or_default(),
             Route::Settings => self.lists.settings.as_ref().map(|p| p.read(cx).parity_state()).unwrap_or_default(),
+            Route::Login => self.lists.login.as_ref().map(|p| p.read(cx).parity_state()).unwrap_or_default(),
             _ => serde_json::Value::Null,
         }
     }
