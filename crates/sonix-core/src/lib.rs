@@ -5,3 +5,6 @@ pub mod library;
 pub mod secrets;
 pub mod subsonic;
 pub mod overlay;
+pub mod listen;
+pub mod rt;
+pub mod scrobble;
