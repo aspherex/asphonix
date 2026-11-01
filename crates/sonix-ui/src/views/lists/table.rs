@@ -35,7 +35,7 @@ use std::sync::Arc;
 /// One row of a table: a track (with an optional replacement for the index text, History's clock) or a day header.
 #[derive(Clone)]
 pub enum RowItem {
-    Track { t: Track, label: Option<String> },
+    Track { t: Box<Track>, label: Option<String> },
     Day { day: String, count: u32 },
 }
 
@@ -65,8 +65,6 @@ pub struct TableCfg {
     /// trailing action buttons the head reserves (`actionCount`)
     pub action_count: usize,
     pub empty: &'static str,
-#[allow(dead_code)]
-    pub aria_loading: &'static str,
 }
 
 pub enum TableEvent {
@@ -161,14 +159,6 @@ impl Table {
     }
 
     /// Re-read from page 0 (a like/unlike elsewhere, a clear): drops rows and selection, keeps nothing stale.
-#[allow(dead_code)]
-    pub fn reset(&mut self, cx: &mut Context<Self>) {
-        if let Data::Paged { fetch, .. } = &self.data {
-            let fetch = fetch.clone();
-            self.set_paged(fetch, cx);
-        }
-    }
-
     fn load_page(&mut self, page: usize, first: bool, cx: &mut Context<Self>) {
         let Data::Paged { pager, fetch, .. } = &mut self.data else { return };
         let epoch = if first { pager.reset() } else { pager.epoch };
@@ -213,7 +203,7 @@ impl Table {
     }
     pub fn track_at(&self, ix: usize) -> Option<&Track> {
         match self.item(ix)? {
-            RowItem::Track { t, .. } => Some(t),
+            RowItem::Track { t, .. } => Some(t.as_ref()),
             RowItem::Day { .. } => None,
         }
     }
@@ -241,8 +231,7 @@ impl Table {
             pager.release();
         }
     }
-#[allow(dead_code)]
-    pub fn refresh_visible(&mut self, cx: &mut Context<Self>) {
+pub fn refresh_visible(&mut self, cx: &mut Context<Self>) {
         if let Data::Paged { .. } = &self.data {
             let (a, z) = (self.vis.start / PAGE, self.vis.end.saturating_sub(1) / PAGE);
             for p in a..=z {
@@ -424,7 +413,7 @@ impl Table {
         };
         let (t, label) = match item {
             RowItem::Day { day, count } => return self.day_row(th, ix, &day, count, self.backend.now_ms()),
-            RowItem::Track { t, label } => (t, label),
+            RowItem::Track { t, label } => (*t, label),
         };
         let active = self.current_id.as_deref() == Some(t.id.as_str());
         let selected = self.sel.contains(ix);

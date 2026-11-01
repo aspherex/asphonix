@@ -40,7 +40,6 @@ impl HistoryView {
             arrows: Arrows::Select,
             action_count: 1,
             empty: "Nothing here yet. Tracks you listen to (past the scrobble threshold) appear here.",
-            aria_loading: "Listening history",
         };
         let table = cx.new(|cx| Table::new(backend.clone(), player, cfg, cx));
         let subs = vec![cx.subscribe(&table, Self::on_table)];
@@ -57,7 +56,7 @@ impl HistoryView {
                 .into_iter()
                 .map(|it| match it {
                     HistoryItem::Day { day, count } => RowItem::Day { day, count },
-                    HistoryItem::Track { track, played_at } => RowItem::Track { t: *track, label: Some(fmt::format_clock(played_at)) },
+                    HistoryItem::Track { track, played_at } => RowItem::Track { t: track, label: Some(fmt::format_clock(played_at)) },
                 })
                 .collect();
             Ok(Paged { items, total: p.total, offset: p.offset })
@@ -70,6 +69,11 @@ impl HistoryView {
         })
         .detach();
         cx.notify();
+    }
+
+    /// A like changed: re-read the resident pages in place (the scroll position stays, like `pager.reset()` on the web).
+    pub fn refresh(&mut self, cx: &mut Context<Self>) {
+        self.table.update(cx, |t, cx| t.refresh_visible(cx));
     }
 
     pub fn release(&mut self, cx: &mut Context<Self>) {
@@ -112,7 +116,7 @@ impl HistoryView {
                             let _ = if starred { b.star_remove(req) } else { b.star_add(req) };
                         })
                         .await;
-                    let _ = this.update(cx, |t, cx| t.reload(cx));
+                    let _ = this.update(cx, |t, cx| t.refresh(cx));
                 })
                 .detach();
             }

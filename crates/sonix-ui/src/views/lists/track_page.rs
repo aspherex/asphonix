@@ -67,7 +67,6 @@ fn table_cfg(kind: &PageKind, read_only: bool) -> TableCfg {
             arrows: Arrows::CursorOnly,
             action_count: if read_only { 3 } else { 4 },
             empty: if read_only { "No tracks right now. This playlist is read-only and fills itself." } else { "No tracks yet. Use \"Add to playlist\" from any track to fill this up." },
-            aria_loading: "Tracks",
         },
         PageKind::Liked => TableCfg {
             head: true,
@@ -79,7 +78,6 @@ fn table_cfg(kind: &PageKind, read_only: bool) -> TableCfg {
             arrows: Arrows::Select,
             action_count: 3,
             empty: "Nothing liked yet. Press L while a track plays, or tap the heart on any track.",
-            aria_loading: "Liked songs",
         },
         PageKind::Smart(_) => TableCfg {
             head: true,
@@ -91,7 +89,6 @@ fn table_cfg(kind: &PageKind, read_only: bool) -> TableCfg {
             arrows: Arrows::Select,
             action_count: 3,
             empty: "No tracks match these rules.",
-            aria_loading: "Tracks",
         },
     }
 }
@@ -156,7 +153,7 @@ impl TrackPage {
                         match r {
                             Ok(d) => {
                                 let ro = d.playlist.read_only;
-                                let rows: Vec<RowItem> = d.tracks.iter().cloned().map(|t| RowItem::Track { t, label: None }).collect();
+                                let rows: Vec<RowItem> = d.tracks.iter().cloned().map(|t| RowItem::Track { t: Box::new(t), label: None }).collect();
                                 t.table.update(cx, |tb, cx| {
                                     tb.cfg = table_cfg(&t.kind, ro);
                                     tb.set_local(rows, cx);
@@ -174,7 +171,7 @@ impl TrackPage {
             PageKind::Liked => {
                 let fetch: Fetch = Arc::new(|b, offset, limit| {
                     let p = b.liked_get(PageRequest { offset, limit })?;
-                    Ok(Paged { items: p.items.into_iter().map(|t| RowItem::Track { t, label: None }).collect(), total: p.total, offset: p.offset })
+                    Ok(Paged { items: p.items.into_iter().map(|t| RowItem::Track { t: Box::new(t), label: None }).collect(), total: p.total, offset: p.offset })
                 });
                 self.table.update(cx, |t, cx| t.set_paged(fetch, cx));
                 self.load = Load::Ready;
@@ -193,7 +190,7 @@ impl TrackPage {
                 let id2 = id.clone();
                 let fetch: Fetch = Arc::new(move |b, offset, limit| {
                     let p = b.smart_tracks(&id2, seed, PageRequest { offset, limit })?;
-                    Ok(Paged { items: p.items.into_iter().map(|t| RowItem::Track { t, label: None }).collect(), total: p.total, offset: p.offset })
+                    Ok(Paged { items: p.items.into_iter().map(|t| RowItem::Track { t: Box::new(t), label: None }).collect(), total: p.total, offset: p.offset })
                 });
                 self.table.update(cx, |t, cx| t.set_paged(fetch, cx));
                 cx.spawn(async move |this, cx| {
@@ -220,10 +217,34 @@ impl TrackPage {
 
     /// Stars/ratings changed elsewhere: Liked and Smart re-read (rows may appear/vanish), a playlist keeps its list.
     pub fn stars_changed(&mut self, cx: &mut Context<Self>) {
-        match self.kind {
-            PageKind::Playlist(_) => {}
-            _ => self.reload(cx),
+        let (b, seed, kind) = (self.backend.clone(), self.seed, self.kind.clone());
+        if matches!(kind, PageKind::Playlist(_)) {
+            return;
         }
+        // like `pager.reset()` + the summary re-read: rows and totals refresh, the scroll position stays
+        self.table.update(cx, |t, cx| t.refresh_visible(cx));
+        cx.spawn(async move |this, cx| {
+            let r = cx
+                .background_executor()
+                .spawn(async move {
+                    match kind {
+                        PageKind::Liked => (b.liked_summary().ok(), None),
+                        PageKind::Smart(id) => (None, b.smart_get(&id, seed).ok()),
+                        PageKind::Playlist(_) => (None, None),
+                    }
+                })
+                .await;
+            let _ = this.update(cx, |t, cx| {
+                if r.0.is_some() {
+                    t.liked = r.0;
+                }
+                if r.1.is_some() {
+                    t.smart = r.1;
+                }
+                cx.notify();
+            });
+        })
+        .detach();
     }
 
     pub fn release(&mut self, cx: &mut Context<Self>) {
@@ -254,34 +275,44 @@ impl TrackPage {
         });
     }
 
-    /// Tracks of the menu selection; pages the table has evicted (or never loaded, after Ctrl+A) are fetched
-    /// again (`resolveTracks`).
-    fn selected_tracks(&mut self, ix: usize, cx: &mut Context<Self>) -> Vec<Track> {
+    /// Tracks of the menu selection, handed to `then`. Rows the table has evicted (or never loaded, after Ctrl+A) are
+    /// fetched on a background task first (`resolveTracks`), so the UI never blocks on the backend.
+    fn with_selection(&mut self, ix: usize, cx: &mut Context<Self>, then: impl FnOnce(&mut Self, Vec<Track>, &mut Context<Self>) + 'static) {
         let (idx, have) = self.table.update(cx, |t, _| {
             let idx = t.menu_indices(ix);
             let have = t.tracks_at(&idx);
             (idx, have)
         });
         if have.len() == idx.len() || matches!(self.kind, PageKind::Playlist(_)) {
-            return have;
+            then(self, have, cx);
+            return;
         }
         let mut pages: Vec<usize> = idx.iter().map(|i| i / crate::pager::PAGE).collect();
         pages.sort_unstable();
         pages.dedup();
         let (b, kind, seed) = (self.backend.clone(), self.kind.clone(), self.seed);
-        let mut fetched: std::collections::HashMap<usize, Vec<Track>> = Default::default();
-        for p in pages {
-            let req = PageRequest { offset: p * crate::pager::PAGE, limit: crate::pager::PAGE };
-            let r = match &kind {
-                PageKind::Liked => b.liked_get(req),
-                PageKind::Smart(id) => b.smart_tracks(id, seed, req),
-                PageKind::Playlist(_) => continue,
-            };
-            if let Ok(r) = r {
-                fetched.insert(p, r.items);
-            }
-        }
-        idx.iter().filter_map(|i| fetched.get(&(i / crate::pager::PAGE)).and_then(|v| v.get(i % crate::pager::PAGE)).cloned()).collect()
+        cx.spawn(async move |this, cx| {
+            let tracks = cx
+                .background_executor()
+                .spawn(async move {
+                    let mut fetched: std::collections::HashMap<usize, Vec<Track>> = Default::default();
+                    for p in pages {
+                        let req = PageRequest { offset: p * crate::pager::PAGE, limit: crate::pager::PAGE };
+                        let r = match &kind {
+                            PageKind::Liked => b.liked_get(req),
+                            PageKind::Smart(id) => b.smart_tracks(id, seed, req),
+                            PageKind::Playlist(_) => continue,
+                        };
+                        if let Ok(r) = r {
+                            fetched.insert(p, r.items);
+                        }
+                    }
+                    idx.iter().filter_map(|i| fetched.get(&(i / crate::pager::PAGE)).and_then(|v| v.get(i % crate::pager::PAGE)).cloned()).collect::<Vec<Track>>()
+                })
+                .await;
+            let _ = this.update(cx, |t, cx| then(t, tracks, cx));
+        })
+        .detach();
     }
 
     fn read_only(&self) -> bool {
@@ -316,38 +347,40 @@ impl TrackPage {
                 }
             }
             TableEvent::Menu { ix, pos } => {
-                let tracks = self.selected_tracks(*ix, cx);
-                if tracks.is_empty() {
-                    return;
-                }
-                let items = self.track_menu(tracks, cx);
                 let pos = *pos;
-                self.show_menu(items, pos, cx);
+                self.with_selection(*ix, cx, move |t, tracks, cx| {
+                    if tracks.is_empty() {
+                        return;
+                    }
+                    let items = t.track_menu(tracks, cx);
+                    t.show_menu(items, pos, cx);
+                });
             }
             TableEvent::AddToPlaylist { ix, pos } => {
                 // TODO(player/dialogs agent): `openAddToPlaylistMenu` popover; until it exists the "..." menu's
                 // "Add to playlist" submenu is the way in.
-                let tracks = self.selected_tracks(*ix, cx);
-                if tracks.is_empty() {
-                    return;
-                }
-                let ids: Vec<String> = tracks.iter().map(|t| t.id.clone()).collect();
-                let items: Vec<MenuItem> = self
-                    .playlists
-                    .iter()
-                    .filter(|p| !p.read_only)
-                    .map(|p| {
-                        let (pid, ids) = (p.id.clone(), ids.clone());
-                        MenuItem::action(p.name.clone(), move |_, cx| {
-                            let (pid, ids) = (pid.clone(), ids.clone());
-                            app::call(cx, move |b| {
-                                let _ = b.playlists_add_tracks(AddToPlaylistRequest { id: pid, track_ids: ids });
-                            });
-                        })
-                    })
-                    .collect();
                 let pos = *pos;
-                self.show_menu(items, pos, cx);
+                self.with_selection(*ix, cx, move |t, tracks, cx| {
+                    if tracks.is_empty() {
+                        return;
+                    }
+                    let ids: Vec<String> = tracks.iter().map(|t| t.id.clone()).collect();
+                    let items: Vec<MenuItem> = t
+                        .playlists
+                        .iter()
+                        .filter(|p| !p.read_only)
+                        .map(|p| {
+                            let (pid, ids) = (p.id.clone(), ids.clone());
+                            MenuItem::action(p.name.clone(), move |_, cx| {
+                                let (pid, ids) = (pid.clone(), ids.clone());
+                                app::call(cx, move |b| {
+                                    let _ = b.playlists_add_tracks(AddToPlaylistRequest { id: pid, track_ids: ids });
+                                });
+                            })
+                        })
+                        .collect();
+                    t.show_menu(items, pos, cx);
+                });
             }
             TableEvent::Remove(ix) => self.remove_indices(vec![*ix], cx),
             TableEvent::Reorder { from, to } => self.reorder(*from, *to, cx),
@@ -382,7 +415,7 @@ impl TrackPage {
                 });
             }
         });
-        let remove: Option<Rc<dyn Fn(&mut gpui::App)>> = if matches!(self.kind, PageKind::Playlist(_)) && !self.read_only() {
+        let remove: Option<menus::Action> = if matches!(self.kind, PageKind::Playlist(_)) && !self.read_only() {
             let t3 = this.clone();
             let sel = self.table.read(cx).sel.indices();
             Some(Rc::new(move |cx| {
@@ -416,7 +449,7 @@ impl TrackPage {
             });
             d.playlist.song_count = d.tracks.len() as u32;
             d.playlist.duration = d.tracks.iter().map(|t| t.duration).sum();
-            let rows: Vec<RowItem> = d.tracks.iter().cloned().map(|t| RowItem::Track { t, label: None }).collect();
+            let rows: Vec<RowItem> = d.tracks.iter().cloned().map(|t| RowItem::Track { t: Box::new(t), label: None }).collect();
             self.table.update(cx, |t, cx| {
                 t.clear_selection(cx);
                 t.set_local_keep_scroll(rows, cx);
@@ -438,7 +471,7 @@ impl TrackPage {
         let moved = d.tracks.remove(from);
         d.tracks.insert(to, moved);
         let ids: Vec<String> = d.tracks.iter().map(|t| t.id.clone()).collect();
-        let rows: Vec<RowItem> = d.tracks.iter().cloned().map(|t| RowItem::Track { t, label: None }).collect();
+        let rows: Vec<RowItem> = d.tracks.iter().cloned().map(|t| RowItem::Track { t: Box::new(t), label: None }).collect();
         self.table.update(cx, |t, cx| t.set_local_keep_scroll(rows, cx));
         app::call(cx, move |b| {
             let _ = b.playlists_reorder(ReorderPlaylistRequest { id, track_ids: ids });

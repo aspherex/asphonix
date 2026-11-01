@@ -9,8 +9,6 @@ use gpui::{App, CursorStyle, Div, Hsla, Stateful, Window, div, prelude::*, px};
 pub enum Tone {
     Default,
     Accent,
-#[allow(dead_code)]
-    Clip,
 }
 
 /// `Badge.svelte`: inline-flex, `padding: 0 4px`, 16 px line box, upper case, weight 700, mono-code.
@@ -18,7 +16,6 @@ pub fn badge(th: &Theme, tone: Tone, label: &str) -> Div {
     let (bg, fg): (Hsla, Hsla) = match tone {
         Tone::Default => (th.high, th.muted),
         Tone::Accent => (th.highest, th.accent_fg),
-        Tone::Clip => (th.clip, th.text),
     };
     let spec = TypeSpec { line: m::BADGE_LINE, weight: 700.0, caps: true, ..MONO_CODE };
     div().flex().flex_row().items_center().flex_none().px(px(m::BADGE_PAD_X)).bg(bg).text_color(fg).child(txt(th, spec, label.to_string()).color(fg))

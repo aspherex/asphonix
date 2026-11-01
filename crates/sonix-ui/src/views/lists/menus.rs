@@ -10,11 +10,13 @@ use gpui::{App, ClipboardItem, EventEmitter, WeakEntity};
 use sonix_api::*;
 use std::rc::Rc;
 
+pub type Action = Rc<dyn Fn(&mut App)>;
+
 pub struct TrackMenu {
     pub tracks: Vec<Track>,
     pub playlists: Vec<Playlist>,
-    pub play_now: Rc<dyn Fn(&mut App)>,
-    pub remove_from_playlist: Option<Rc<dyn Fn(&mut App)>>,
+    pub play_now: Action,
+    pub remove_from_playlist: Option<Action>,
 }
 
 fn enqueue(label: String, pos: EnqueuePosition, ids: Vec<String>, icon: &'static str) -> MenuItem {
@@ -274,15 +276,18 @@ pub fn smart_menu_items<V: EventEmitter<ListsEvent> + 'static>(this: WeakEntity<
         let this = this_d.clone();
         // the copy opens right away (SmartPlaylistDetail's `onChanged` navigates to it)
         let b = app::backend(cx);
-        let copy = b.smart_duplicate(&id);
-        if let (Some(t), Ok(c)) = (this.upgrade(), copy) {
-            t.update(cx, |_, cx| {
-                cx.emit(ListsEvent::SmartChanged);
-                if delete_nav {
-                    cx.emit(ListsEvent::Navigate(Route::Smart(c.id)));
-                }
-            });
-        }
+        cx.spawn(async move |cx| {
+            let copy = cx.background_executor().spawn(async move { b.smart_duplicate(&id) }).await;
+            if let (Some(t), Ok(c)) = (this.upgrade(), copy) {
+                let _ = t.update(cx, |_, cx| {
+                    cx.emit(ListsEvent::SmartChanged);
+                    if delete_nav {
+                        cx.emit(ListsEvent::Navigate(Route::Smart(c.id)));
+                    }
+                });
+            }
+        })
+        .detach();
     })
     .icon("add");
     let (sp_x, this_x) = (sp.clone(), this);

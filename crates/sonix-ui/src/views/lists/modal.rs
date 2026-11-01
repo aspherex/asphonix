@@ -40,7 +40,9 @@ pub fn prompt(cx: &mut App, title: &str, value: &str, placeholder: &str, confirm
     cx.defer(move |cx| {
         let Some(w) = cx.active_window() else { return };
         let _ = w.update(cx, |_, window, cx| {
-            h.update(cx, |m, cx| m.open(true, title, None, confirm_label, false, Box::new(then), Some((value, placeholder)), window, cx));
+            let _ = placeholder; // the web dialog passes it to the Input, which shows no placeholder in the native field
+            let req = Req { prompt: true, title, message: None, confirm_label, danger: false, cb: Some(Box::new(then)), prev_focus: None };
+            h.update(cx, |m, cx| m.open(req, Some(value), window, cx));
         });
     });
 }
@@ -52,7 +54,8 @@ pub fn confirm(cx: &mut App, title: &str, message: &str, confirm_label: &str, da
     cx.defer(move |cx| {
         let Some(w) = cx.active_window() else { return };
         let _ = w.update(cx, |_, window, cx| {
-            h.update(cx, |m, cx| m.open(false, title, Some(message), confirm_label, danger, Box::new(then), None, window, cx));
+            let req = Req { prompt: false, title, message: Some(message), confirm_label, danger, cb: Some(Box::new(then)), prev_focus: None };
+            h.update(cx, |m, cx| m.open(req, None, window, cx));
         });
     });
 }
@@ -76,15 +79,15 @@ impl Modal {
         self.req.is_some()
     }
 
-    #[allow(clippy::too_many_arguments)]
-    fn open(&mut self, prompt: bool, title: SharedString, message: Option<SharedString>, confirm_label: SharedString, danger: bool, cb: Callback, init: Option<(String, String)>, window: &mut Window, cx: &mut Context<Self>) {
+    fn open(&mut self, mut req: Req, init: Option<String>, window: &mut Window, cx: &mut Context<Self>) {
         // only one dialog at a time: a newer request cancels the older one
         self.close(None, window, cx);
-        let prev_focus = window.focused(cx);
-        if let Some((v, _ph)) = init {
+        req.prev_focus = window.focused(cx);
+        let prompt = req.prompt;
+        if let Some(v) = init {
             self.input.update(cx, |i, cx| i.set_content(&v, cx));
         }
-        self.req = Some(Req { prompt, title, message, confirm_label, danger, cb: Some(cb), prev_focus });
+        self.req = Some(req);
         if prompt {
             let f = self.input.read(cx).focus_handle.clone();
             window.focus(&f);

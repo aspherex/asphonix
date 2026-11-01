@@ -166,6 +166,8 @@ pub struct TextInput {
     selection_reversed: bool,
     marked_range: Option<Range<usize>>,
     last_layout: Option<ShapedLine>,
+    /// password mode: the input itself shows one bullet per grapheme (selection and caret follow the bullets)
+    pub mask: bool,
     last_bounds: Option<Bounds<Pixels>>,
     is_selecting: bool,
 }
@@ -311,14 +313,14 @@ impl TextInput {
     }
 
     fn copy(&mut self, _: &Copy, _: &mut Window, cx: &mut Context<Self>) {
-        if !self.selected_range.is_empty() {
+        if !self.selected_range.is_empty() && !self.mask {
             cx.write_to_clipboard(ClipboardItem::new_string(
                 self.content[self.selected_range.clone()].to_string(),
             ));
         }
     }
     fn cut(&mut self, _: &Cut, window: &mut Window, cx: &mut Context<Self>) {
-        if !self.selected_range.is_empty() {
+        if !self.selected_range.is_empty() && !self.mask {
             cx.write_to_clipboard(ClipboardItem::new_string(
                 self.content[self.selected_range.clone()].to_string(),
             ));
@@ -339,6 +341,22 @@ impl TextInput {
         }
     }
 
+    const BULLET: &str = "•";
+
+    /// content byte offset -> offset in the displayed (masked) text
+    fn disp(&self, off: usize) -> usize {
+        if self.mask { self.content[..off.min(self.content.len())].graphemes(true).count() * Self::BULLET.len() } else { off }
+    }
+
+    /// offset in the displayed text -> content byte offset
+    fn undisp(&self, d: usize) -> usize {
+        if !self.mask {
+            return d;
+        }
+        let n = d / Self::BULLET.len();
+        self.content.grapheme_indices(true).nth(n).map(|(i, _)| i).unwrap_or(self.content.len())
+    }
+
     fn index_for_mouse_position(&self, position: Point<Pixels>) -> usize {
         if self.content.is_empty() {
             return 0;
@@ -354,7 +372,7 @@ impl TextInput {
         if position.y > bounds.bottom() {
             return self.content.len();
         }
-        line.closest_index_for_x(position.x - bounds.left())
+        self.undisp(line.closest_index_for_x(position.x - bounds.left()))
     }
 
     fn select_to(&mut self, offset: usize, cx: &mut Context<Self>) {
@@ -440,6 +458,7 @@ impl TextInput {
             selection_reversed: false,
             marked_range: None,
             last_layout: None,
+            mask: false,
             last_bounds: None,
             is_selecting: false,
         }
@@ -567,11 +586,11 @@ impl EntityInputHandler for TextInput {
         let range = self.range_from_utf16(&range_utf16);
         Some(Bounds::from_corners(
             point(
-                bounds.left() + last_layout.x_for_index(range.start),
+                bounds.left() + last_layout.x_for_index(self.disp(range.start)),
                 bounds.top(),
             ),
             point(
-                bounds.left() + last_layout.x_for_index(range.end),
+                bounds.left() + last_layout.x_for_index(self.disp(range.end)),
                 bounds.bottom(),
             ),
         ))
@@ -586,8 +605,7 @@ impl EntityInputHandler for TextInput {
         let line_point = self.last_bounds?.localize(&point)?;
         let last_layout = self.last_layout.as_ref()?;
 
-        assert_eq!(last_layout.text, self.content);
-        let utf8_index = last_layout.index_for_x(point.x - line_point.x)?;
+        let utf8_index = self.undisp(last_layout.index_for_x(point.x - line_point.x)?);
         Some(self.offset_to_utf16(utf8_index))
     }
 }
@@ -651,8 +669,11 @@ impl Element for TextElement {
         let style = window.text_style();
         let weight = input.font_weight;
 
+        let masked = input.mask && !content.is_empty();
         let (display_text, text_color) = if content.is_empty() {
             (input.placeholder.clone(), input.col_muted)
+        } else if masked {
+            (SharedString::from(TextInput::BULLET.repeat(content.graphemes(true).count())), input.col_text)
         } else {
             (content, input.col_text)
         };
@@ -669,7 +690,7 @@ impl Element for TextElement {
             underline: None,
             strikethrough: None,
         };
-        let runs = if let Some(marked_range) = input.marked_range.as_ref() {
+        let runs = if let (false, Some(marked_range)) = (masked, input.marked_range.as_ref()) {
             vec![
                 TextRun {
                     len: marked_range.start,
@@ -701,7 +722,7 @@ impl Element for TextElement {
             .text_system()
             .shape_line(display_text, font_size, &runs, None);
 
-        let cursor_pos = line.x_for_index(cursor);
+        let cursor_pos = line.x_for_index(if masked { input.disp(cursor) } else { cursor });
         let (selection, cursor) = if selected_range.is_empty() {
             (
                 None,
@@ -718,11 +739,11 @@ impl Element for TextElement {
                 Some(fill(
                     Bounds::from_corners(
                         point(
-                            bounds.left() + line.x_for_index(selected_range.start),
+                            bounds.left() + line.x_for_index(if masked { input.disp(selected_range.start) } else { selected_range.start }),
                             bounds.top(),
                         ),
                         point(
-                            bounds.left() + line.x_for_index(selected_range.end),
+                            bounds.left() + line.x_for_index(if masked { input.disp(selected_range.end) } else { selected_range.end }),
                             bounds.bottom(),
                         ),
                     ),

@@ -131,7 +131,7 @@ impl Shell {
                             };
                             for k in seq {
                                 // Not inside an app update: SendMessage re-enters GPUI's window procedure.
-                                crate::winffi::send_mouse(hwnd, k, x, y, &button, (m.control, m.shift, m.alt), -g("dy") / 100.0);
+                                crate::winffi::send_mouse(hwnd, k, x, y, &button, (m.control, m.shift, m.alt), -g("dy") / 53.9); // one Win32 notch scrolls 53.9 px in GPUI (measured)
                             }
                             let _ = this.update_in(cx, |_, w, _| w.refresh());
                             json!({"ok": true})

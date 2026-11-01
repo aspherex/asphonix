@@ -538,7 +538,7 @@ impl Render for Shell {
             .flex_row()
             .min_h_0()
             .relative()
-            .children((!is_login).then(|| side))
+            .children((!is_login).then_some(side))
             .child(crate::probe::pid(stage_id, div().flex_1().min_w_0().h_full().overflow_hidden().child(stage)))
             .when(docked, |d| d.child(self.queue.clone()))
             .when(!docked && !on_np && self.queue_drawer, |d| {
@@ -593,7 +593,7 @@ impl Render for Shell {
             .text_size(px(13.))
             .line_height(px(18.))
             .child(title)
-            .children((!is_login).then(|| top))
+            .children((!is_login).then_some(top))
             .child(
                 div()
                     .flex_1()

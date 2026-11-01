@@ -34,8 +34,25 @@ pub struct SettingsView {
     copied: bool,
     threshold: Entity<TextInput>,
     window_size: Entity<TextInput>,
+    /// number inputs fire `change` on Enter or when they lose focus
+    focused: [bool; 2],
     scroll: ScrollHandle,
     _subs: Vec<Subscription>,
+}
+
+/// `<input type=number>` accepts only digits (and a sign / dot, which these integer settings never use).
+fn digits_only(i: &Entity<TextInput>, cx: &mut Context<SettingsView>) {
+    let c = i.read(cx).content.to_string();
+    let f: String = c.chars().filter(|ch| ch.is_ascii_digit()).collect();
+    if f != c {
+        i.update(cx, |i, cx| i.set_content(&f, cx));
+    }
+}
+
+/// `Number(text)`: an empty box is 0 (then clamped), garbage is NaN (ignored).
+fn js_number(t: &str) -> f64 {
+    let t = t.trim();
+    if t.is_empty() { 0.0 } else { t.parse().unwrap_or(f64::NAN) }
 }
 
 fn onoff() -> [(&'static str, &'static str); 2] {
@@ -49,14 +66,20 @@ impl SettingsView {
         let (threshold, window_size) = (mk(cx), mk(cx));
         let subs = vec![
             cx.subscribe(&threshold, |this: &mut Self, i, ev: &InputEvent, cx| {
+                if *ev == InputEvent::Changed {
+                    digits_only(&i, cx);
+                }
                 if *ev == InputEvent::Submit {
-                    let v: f64 = i.read(cx).content.trim().parse().unwrap_or(f64::NAN);
+                    let v: f64 = js_number(&i.read(cx).content);
                     this.set_threshold(v, cx);
                 }
             }),
             cx.subscribe(&window_size, |this: &mut Self, i, ev: &InputEvent, cx| {
+                if *ev == InputEvent::Changed {
+                    digits_only(&i, cx);
+                }
                 if *ev == InputEvent::Submit {
-                    let v: f64 = i.read(cx).content.trim().parse().unwrap_or(f64::NAN);
+                    let v: f64 = js_number(&i.read(cx).content);
                     this.set_window(v, cx);
                 }
             }),
@@ -89,6 +112,7 @@ impl SettingsView {
             copied: false,
             threshold,
             window_size,
+            focused: [false; 2],
             scroll: ScrollHandle::new(),
             _subs: subs,
         };
@@ -120,9 +144,6 @@ impl SettingsView {
         })
         .detach();
     }
-
-#[allow(dead_code)]
-    pub fn release(&mut self) {}
 
     #[cfg(feature = "parity")]
     pub(crate) fn parity_state(&self) -> serde_json::Value {
@@ -267,6 +288,20 @@ impl SettingsView {
 impl Render for SettingsView {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let th = app::theme(cx);
+        // blur commits (`onchange`)
+        for (k, ent) in [self.threshold.clone(), self.window_size.clone()].into_iter().enumerate() {
+            let f = ent.read(cx).focus_handle.is_focused(window);
+            if self.focused[k] && !f {
+                let v: f64 = js_number(&ent.read(cx).content);
+                let this = cx.entity().downgrade();
+                cx.defer(move |cx| {
+                    if let Some(t) = this.upgrade() {
+                        t.update(cx, |t, cx| if k == 0 { t.set_threshold(v, cx) } else { t.set_window(v, cx) });
+                    }
+                });
+            }
+            self.focused[k] = f;
+        }
         let handle = self.scroll.clone();
         scroll_page(th, "settings-scroll", &handle, |_| {
             let this: WeakEntity<Self> = cx.entity().downgrade();
@@ -281,7 +316,7 @@ impl Render for SettingsView {
             let dev_w = crate::text::natural_width(window, &dev_label, MONO, MONO_DATA.size, MONO_DATA.weight, MONO_DATA.tracking_px()) + 2.0 * space::SM + 2.0 + 20.0;
             let device_sel = pid(
                 "set.device",
-                Self::select_box(&th, "set-device", div().flex().flex_1().justify_start().child(txt(&th, MONO_DATA, dev_label).color(th.text)).child(div().w(px(20.)).h(px(1.)).flex_none()).into_any_element()).h(px(28.)).w(px(dev_w.max(220.))).on_click(cx.listener(move |t, ev: &ClickEvent, _, cx| {
+                Self::select_box(&th, "set-device", div().flex().flex_1().justify_start().child(txt(&th, MONO_DATA, dev_label).color(th.text)).child(super::ui::select_arrow(th.text)).into_any_element()).h(px(28.)).w(px(dev_w.max(220.))).on_click(cx.listener(move |t, ev: &ClickEvent, _, cx| {
                     let items: Vec<MenuItem> = devs
                         .iter()
                         .map(|d| {

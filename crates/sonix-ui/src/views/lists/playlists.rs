@@ -55,9 +55,6 @@ impl PlaylistsView {
         .detach();
     }
 
-#[allow(dead_code)]
-    pub fn release(&mut self) {}
-
     #[cfg(feature = "parity")]
     pub(crate) fn parity_state(&self) -> serde_json::Value {
         serde_json::json!({ "playlists": self.lists.len(), "smart": self.smart.len(), "hover": self.hover.map(|h| format!("{}{}", if h.0 { "s" } else { "p" }, h.1)) })

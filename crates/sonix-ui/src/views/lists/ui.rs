@@ -100,14 +100,14 @@ pub fn field(th: &Theme, input: &Entity<TextInput>, prefix: Option<&str>, placeh
             d.child(
                 div()
                     .absolute()
-                    .left(px(ctl::FIELD_PAD_X + if prefix.is_some() { 0.0 } else { 0.0 }))
+                    .left(px(ctl::FIELD_PAD_X))
                     .right(px(ctl::FIELD_PAD_X))
                     .top_0()
                     .bottom_0()
                     .overflow_hidden()
                     .flex()
                     .items_center()
-                    .child(div().flex_none().ml(px(prefix.map(|p| prefix_w(p)).unwrap_or(0.0))).child(txt(&th, MONO_DATA, ph).color(th.muted))),
+                    .child(div().flex_none().ml(px(prefix.map(prefix_w).unwrap_or(0.0))).child(txt(&th, MONO_DATA, ph).color(th.muted))),
             )
         })
 }
@@ -142,11 +142,6 @@ pub fn panel(th: &Theme, title: &str, body: impl IntoElement) -> Div {
                 .child(txt(&th, crate::tracking::TypeSpec { weight: 700.0, caps: true, ..MONO_DATA }, title.to_string()).color(th.text)),
         )
         .child(div().min_h_0().child(body))
-}
-
-#[allow(dead_code)]
-pub fn any(e: impl IntoElement) -> AnyElement {
-    e.into_any_element()
 }
 
 pub type Callback = Box<dyn FnOnce(Option<String>, &mut Window, &mut App)>;
@@ -187,4 +182,24 @@ pub fn wrap_text(th: &Theme, window: &Window, text: &str, spec: crate::tracking:
     }
     lines.push(cur);
     lines
+}
+
+/// Chromium's `<select>` arrow: a 1.6 px chevron in the text colour, centred in a 20 px slot.
+pub fn select_arrow(color: gpui::Hsla) -> impl IntoElement {
+    gpui::canvas(
+        |_, _, _| (),
+        move |b, _, window, _| {
+            let c = b.center();
+            let mut p = gpui::PathBuilder::stroke(px(1.6));
+            p.move_to(gpui::point(c.x - px(4.5), c.y - px(2.2)));
+            p.line_to(gpui::point(c.x, c.y + px(2.3)));
+            p.line_to(gpui::point(c.x + px(4.5), c.y - px(2.2)));
+            if let Ok(path) = p.build() {
+                window.paint_path(path, color);
+            }
+        },
+    )
+    .w(px(20.))
+    .h(px(16.))
+    .flex_none()
 }

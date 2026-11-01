@@ -122,9 +122,6 @@ impl SearchView {
         cx.notify();
     }
 
-#[allow(dead_code)]
-    pub fn release(&mut self) {}
-
     fn flat(&self) -> Vec<Flat> {
         let Some(r) = &self.results else { return vec![] };
         let t = (0..r.tracks.items.len()).map(Flat::Track);

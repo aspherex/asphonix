@@ -401,7 +401,7 @@ impl Shell {
             p.update(cx, |p, cx| p.stars_changed(cx));
         }
         if let Some(h) = self.lists.history.clone() {
-            h.update(cx, |h, cx| h.reload(cx));
+            h.update(cx, |h, cx| h.refresh(cx));
         }
         self.load_static(cx);
     }

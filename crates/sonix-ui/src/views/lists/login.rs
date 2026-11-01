@@ -51,6 +51,7 @@ impl LoginView {
                 InputEvent::Changed => cx.notify(),
             }));
         }
+        pass.update(cx, |i, _| i.mask = true);
         let mut this = Self { backend: backend.clone(), url, user, pass, show_pw: false, phase: Phase::Idle, caps: None, error: None, signed_in: false, scroll: ScrollHandle::new(), _subs: subs };
         cx.spawn(async move |t, cx| {
             let s = cx.background_executor().spawn(async move { backend.auth_session_status() }).await;
@@ -63,9 +64,6 @@ impl LoginView {
         this.phase = Phase::Idle;
         this
     }
-
-#[allow(dead_code)]
-    pub fn release(&mut self) {}
 
     #[cfg(feature = "parity")]
     pub(crate) fn parity_state(&self) -> serde_json::Value {
@@ -129,25 +127,7 @@ impl Render for LoginView {
             let card_w = avail.min(700.0);
             let url_f = field(&th, &self.url, None, "https://music.example.com:4533", window, cx).into_any_element();
             let user_f = field(&th, &self.user, None, "username", window, cx).into_any_element();
-            // password: the real input sits under an opaque bullet overlay while "hidden"
-            let masked = !self.show_pw && !self.pass.read(cx).content.is_empty();
-            let n = self.pass.read(cx).content.chars().count();
-            let pw_input = field(&th, &self.pass, None, "••••••••••", window, cx);
-            let pw_field = div().relative().flex_1().min_w_0().flex().flex_col().child(pw_input.h(px(crate::metrics::controls::FIELD_H))).when(masked, |d| {
-                d.child(
-                    div()
-                        .absolute()
-                        .top(px(1.))
-                        .bottom(px(1.))
-                        .left(px(1.))
-                        .right(px(1.))
-                        .bg(th.low)
-                        .px(px(crate::metrics::controls::FIELD_PAD_X - 1.0))
-                        .flex()
-                        .items_center()
-                        .child(txt(&th, MONO_DATA, "•".repeat(n)).color(th.text)),
-                )
-            });
+            let pw_field = div().flex_1().min_w_0().flex().flex_col().child(field(&th, &self.pass, None, "••••••••••", window, cx).h(px(crate::metrics::controls::FIELD_H)));
             let eye = div()
                 .id("login-eye")
                 .group("hv")
@@ -165,6 +145,11 @@ impl Render for LoginView {
                 .child(icon_g("eye", 14., th.muted, th.accent_fg))
                 .on_click(cx.listener(|t, _, _, cx| {
                     t.show_pw = !t.show_pw;
+                    let m = !t.show_pw;
+                    t.pass.update(cx, |i, cx| {
+                        i.mask = m;
+                        cx.notify();
+                    });
                     cx.notify();
                 }));
             let pw_row = div().flex().flex_row().gap(px(space::XS)).child(pw_field).child(eye).into_any_element();
