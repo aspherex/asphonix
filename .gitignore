@@ -4,3 +4,5 @@ perf-out/
 *.log
 parity/out/
 target-*.log
+parity/out-before/
+parity/*.log

@@ -43,3 +43,26 @@ Caveats, stated plainly:
 * Backdrop on/off private-WS delta was **not measured**; the two PNGs are 480x270 (0.5 MB each decoded)
   and are dropped on minimize.
 * Not measured: first launch on a cold disk/shader cache, an iGPU-only machine, text-fidelity numbers.
+
+## Re-run after the parity work (2026-11-01, release build WITHOUT the `parity` feature)
+
+`scripts/perf.ps1 -Runs 3` after the metrics table, `Txt` text primitive, animated bars/transitions, queue rail and menu
+rework (exe 7.19 MB, was 7.16; the release binary contains none of the hook's strings, checked with `grep -a`).
+**Not a pristine idle desktop**: the machine was used for polling/builds-adjacent commands during the run, which is visible
+in run 2's Now Playing frame pacing (234 frames over 16.7 ms), so treat that row as noisy.
+
+| Metric | run 1 | run 2 | run 3 | target |
+|---|---|---|---|---|
+| time to visible (ms) | 436 | 273 | 296 | n/a |
+| private WS idle, Tracks (MB) | 32.5 | 32.1 | 31.1 | <= 40 |
+| Now Playing animating 60 s (MB) | 39.4 | 43.0 | 43.8 | <= 40 (**2 of 3 runs over**; was 40.2-40.6 before, partly noise: run 1 is under) |
+| minimized 5 s / 35 s (MB) | 0.6 / 1.9 | 0.6 / 1.6 | 0.6 / 1.9 | < 8.4 |
+| CPU minimized | 1.17 % | 0 % | 2.34 % | ~0 (vsync thread, see GPUI-GAPS) |
+| restore -> first rendered frame (ms) | 15 | 11 | 14 | ~15 |
+| frame pacing scroll p50 / p95 | 8.3 / 8.8 | 8.3 / 8.7 | 8.3 / 8.8 | 120 Hz = 8.3 |
+| frame pacing Now Playing p50 / p95 | 8.3 / 8.8 | 8.3 / 16.7 (noisy run) | 8.3 / 8.8 | 120 Hz |
+
+Median: idle 32.1 MB, minimized 1.9 MB, restore 14 ms, Now Playing 43.0 MB. New cost to watch: the now-playing bars and hover
+transitions request frames while active (one repaint per vsync only while an active row is visible and playing), and the
+Now Playing view clones the 28 band values per frame; neither shows up in idle/minimized, Now Playing needs an idle-desktop
+re-measure before it is judged against the 40 MB target.

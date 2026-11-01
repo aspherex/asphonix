@@ -18,6 +18,7 @@ use std::cell::Cell;
 use std::rc::Rc;
 use std::sync::Arc;
 use crate::metrics::spectrum as sp;
+use crate::probe::pid;
 
 
 pub struct NowPlayingView {
@@ -365,7 +366,7 @@ impl Render for NowPlayingView {
             "SHARED MODE"
         };
         let line = format!("{} · {mode}{}", fmt::source_line(&t.format), if self.device.is_empty() { String::new() } else { format!(" · {}", self.device) });
-        let strip = div()
+        let strip = pid("np.strip", div()
             .flex()
             .flex_row()
             .items_center()
@@ -383,7 +384,7 @@ impl Render for NowPlayingView {
                     let _ = cx;
                     window_back(cx)
                 })),
-            );
+            ));
 
         // ---- cover (sized from the measured area, one-frame lag)
         let area_h = self.cover_area_h.get();
@@ -434,7 +435,7 @@ impl Render for NowPlayingView {
             (Some(a), None) => format!("{} · {a}", t.artist),
             _ => t.artist.clone(),
         };
-        let title_block = div()
+        let title_block = pid("np.titleblock", div()
             .flex()
             .flex_col()
             .items_center()
@@ -443,11 +444,11 @@ impl Render for NowPlayingView {
             .pt(px(8.))
             .flex_none()
             .child(div().max_w(px(vw - 80.)).overflow_hidden().child(tracked(&t.title, spec, th.body_font, th.text, window)))
-            .child(ts(&th, MONO_DATA).text_color(th.muted).child(SharedString::from(sub)));
+            .child(ts(&th, MONO_DATA).text_color(th.muted).child(SharedString::from(sub))));
 
         // ---- FFT + meters
         let fft_h = (vh * 0.085).clamp(68.0, 84.0);
-        let fft = div()
+        let fft = pid("np.fft", div()
             .flex()
             .flex_row()
             .items_center()
@@ -467,7 +468,7 @@ impl Render for NowPlayingView {
                     .flex_none()
                     .child(div().flex().flex_row().items_center().gap(px(8.)).child(ts(&th, MONO_CODE).w(px(10.)).text_color(th.muted).child("L")).child(div().flex_1().h(px(10.)).child(meter_canvas(th, self.fft.level[0], self.fft.hold[0]))))
                     .child(div().flex().flex_row().items_center().gap(px(8.)).child(ts(&th, MONO_CODE).w(px(10.)).text_color(th.muted).child("R")).child(div().flex_1().h(px(10.)).child(meter_canvas(th, self.fft.level[1], self.fft.hold[1])))),
-            );
+            ));
 
         // ---- deck: waveform seek + transport
         let dur = ps.duration_sec;
@@ -496,7 +497,7 @@ impl Render for NowPlayingView {
             Some(b) => div().size_full().child(wave_canvas(th, b.clone(), seek_ratio)).into_any_element(),
             None => div().size_full().flex().items_center().child(div().w_full().h(px(2.)).bg(th.highest)).into_any_element(),
         };
-        let seek_row = div()
+        let seek_row = pid("np.seek", div()
             .flex()
             .flex_row()
             .items_center()
@@ -514,7 +515,7 @@ impl Render for NowPlayingView {
                     .flex_none()
                     .child(tracked("REMAINING", LABEL_CAPS, th.body_font, th.muted, window))
                     .child(ts(&th, MONO_DATA).text_color(th.text).child(SharedString::from(format!("-{}", fmt::format_duration(Some((dur - shown_pos).max(0.0))))))),
-            );
+            ));
         let vol_cb: OnChange = {
             let this = cx.entity().downgrade();
             Rc::new(move |f, _c, _w, cx| {
@@ -545,7 +546,7 @@ impl Render for NowPlayingView {
                     let _ = b.player_play_pause();
                 })
             }));
-        let transport = div()
+        let transport = pid("np.transport", div()
             .flex()
             .flex_row()
             .items_center()
@@ -580,8 +581,8 @@ impl Render for NowPlayingView {
                 });
             })))
             .child(div().w(px(24.)))
-            .child(div().flex().flex_row().items_center().gap(px(8.)).text_color(th.muted).child(icon("volume", 15., th.muted)).child(div().w(px(120.)).child(slider("np-vol", th, &self.vol, ps.volume as f32, None, vol_cb))).child(ts(&th, MONO_CODE).w(px(52.)).text_right().whitespace_nowrap().text_color(th.muted).child(SharedString::from(fmt::volume_label(&ps)))));
-        let deck = div().flex().flex_col().gap(px(8.)).w_full().flex_none().pt(px(12.)).bg(th.chrome).border_t_1().border_color(th.frame).child(seek_row).child(transport);
+            .child(div().flex().flex_row().items_center().gap(px(8.)).text_color(th.muted).child(icon("volume", 15., th.muted)).child(div().w(px(120.)).child(slider("np-vol", th, &self.vol, ps.volume as f32, None, vol_cb))).child(ts(&th, MONO_CODE).w(px(52.)).text_right().whitespace_nowrap().text_color(th.muted).child(SharedString::from(fmt::volume_label(&ps))))));
+        let deck = pid("np.deck", div().flex().flex_col().gap(px(8.)).w_full().flex_none().pt(px(12.)).bg(th.chrome).border_t_1().border_color(th.frame).child(seek_row).child(transport));
         let legend = div()
             .h(px(24.))
             .flex_none()
