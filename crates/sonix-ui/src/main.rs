@@ -115,6 +115,8 @@ fn bind_keys(cx: &mut App) {
         // route passes no `selectAll`, so Ctrl+A, Shift+arrows, Home/End and Page keys do nothing there (parity-verified).
         KeyBinding::new("shift-enter", shell::EnqueueSelected, Some("TrackList")),
         KeyBinding::new("menu", shell::OpenMenuKey, Some("TrackList")),
+        KeyBinding::new("ctrl-a", views::lists::SelectAllRows, Some("TrackList")),
+        KeyBinding::new("cmd-a", views::lists::SelectAllRows, Some("TrackList")),
         KeyBinding::new("shift-f10", shell::OpenMenuKey, Some("TrackList")),
         KeyBinding::new("space", shell::PlayPause, Some("Root && !TextInput")),
         KeyBinding::new("n", shell::ToggleNowPlaying, Some("Root && !TextInput")),

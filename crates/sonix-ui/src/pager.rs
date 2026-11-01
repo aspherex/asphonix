@@ -33,6 +33,10 @@ impl<T> Pager<T> {
         self.pages.get(&(ix / PAGE))?.get(ix % PAGE)
     }
 
+    pub fn get_mut(&mut self, ix: usize) -> Option<&mut T> {
+        self.pages.get_mut(&(ix / PAGE))?.get_mut(ix % PAGE)
+    }
+
     pub fn has_page(&self, p: usize) -> bool {
         self.pages.contains_key(&p)
     }

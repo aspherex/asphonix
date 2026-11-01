@@ -18,6 +18,10 @@ pub enum Route {
     Album(String),
     Artist(String),
     Genre(String),
+    /// `smart/:id` (local smart playlist)
+    Smart(String),
+    Favorites,
+    Login,
 }
 
 impl Route {
@@ -39,6 +43,9 @@ impl Route {
             Route::Album(id) => format!("album/{id}"),
             Route::Artist(id) => format!("artist/{id}"),
             Route::Genre(n) => format!("genre/{n}"),
+            Route::Smart(id) => format!("smart/{id}"),
+            Route::Favorites => "favorites".into(),
+            Route::Login => "login".into(),
         }
     }
 
@@ -60,6 +67,9 @@ impl Route {
             ("settings", None) => Route::Settings,
             ("search", None) => Route::Search,
             ("nowplaying", None) => Route::NowPlaying,
+            ("favorites", None) => Route::Favorites,
+            ("login", None) => Route::Login,
+            ("smart", Some(id)) if !id.is_empty() => Route::Smart(id.into()),
             ("playlist", Some(id)) if !id.is_empty() => Route::Playlist(id.into()),
             ("album", Some(id)) if !id.is_empty() => Route::Album(id.into()),
             ("artist", Some(id)) if !id.is_empty() => Route::Artist(id.into()),

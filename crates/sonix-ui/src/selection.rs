@@ -54,7 +54,6 @@ impl Selection {
         }
     }
 
-    #[cfg(test)]
     pub fn select_all(&mut self, total: usize) {
         self.set = (0..total).collect();
         if total > 0 {
@@ -73,6 +72,11 @@ impl Selection {
         let n = (cur + delta).clamp(0, total as isize - 1) as usize;
         self.move_to(n, extend);
         Some(n)
+    }
+
+    /// Move only the keyboard cursor (`selectedIndex`), leaving the selected set alone (PlaylistDetail's arrows).
+    pub fn set_cursor(&mut self, n: usize) {
+        self.cursor = Some(n);
     }
 
     pub fn move_to(&mut self, n: usize, extend: bool) {

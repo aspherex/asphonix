@@ -20,7 +20,9 @@ pub mod backend;
 pub mod error;
 pub mod format;
 pub mod types;
+pub mod types_lists;
 
 pub use backend::*;
 pub use error::*;
 pub use types::*;
+pub use types_lists::*;

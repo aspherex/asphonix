@@ -160,3 +160,162 @@ mod tests {
         assert_eq!(short_count(50000), "50K");
     }
 }
+
+// ------------------------------------------------------------ local time (History, `format.ts`)
+
+/// `(year, month, day, hour, minute, weekday 0=Sun)` of a unix-ms timestamp in the OS time zone
+/// (DST applied per timestamp, like JS `new Date(ms).getHours()`; UTC off Windows).
+pub fn local_parts(ms: i64) -> (i32, u32, u32, u32, u32, u32) {
+    #[cfg(windows)]
+    {
+        #[repr(C)]
+        #[derive(Default, Clone, Copy)]
+        struct SystemTime {
+            y: u16,
+            mo: u16,
+            dow: u16,
+            d: u16,
+            h: u16,
+            mi: u16,
+            s: u16,
+            ms: u16,
+        }
+        #[repr(C)]
+        struct FileTime {
+            lo: u32,
+            hi: u32,
+        }
+        #[link(name = "kernel32")]
+        unsafe extern "system" {
+            fn FileTimeToSystemTime(f: *const FileTime, s: *mut SystemTime) -> i32;
+            fn SystemTimeToTzSpecificLocalTime(tz: *const u8, utc: *const SystemTime, local: *mut SystemTime) -> i32;
+        }
+        let ft = ms as i128 * 10_000 + 116_444_736_000_000_000i128;
+        if ft > 0 {
+            let f = FileTime { lo: (ft & 0xffff_ffff) as u32, hi: (ft >> 32) as u32 };
+            let (mut utc, mut loc) = (SystemTime::default(), SystemTime::default());
+            // SAFETY: plain out-parameters of two kernel32 calls.
+            let ok = unsafe { FileTimeToSystemTime(&f, &mut utc) != 0 && SystemTimeToTzSpecificLocalTime(std::ptr::null(), &utc, &mut loc) != 0 };
+            if ok {
+                return (loc.y as i32, loc.mo as u32, loc.d as u32, loc.h as u32, loc.mi as u32, loc.dow as u32);
+            }
+        }
+    }
+    utc_parts(ms)
+}
+
+/// Civil date from days since 1970-01-01 (Howard Hinnant's algorithm).
+fn civil(days: i64) -> (i32, u32, u32) {
+    let z = days + 719_468;
+    let era = z.div_euclid(146_097);
+    let doe = z.rem_euclid(146_097);
+    let yoe = (doe - doe / 1460 + doe / 36_524 - doe / 146_096) / 365;
+    let y = yoe + era * 400;
+    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
+    let mp = (5 * doy + 2) / 153;
+    let d = (doy - (153 * mp + 2) / 5 + 1) as u32;
+    let m = if mp < 10 { mp + 3 } else { mp - 9 } as u32;
+    ((y + (m <= 2) as i64) as i32, m, d)
+}
+
+pub fn utc_parts(ms: i64) -> (i32, u32, u32, u32, u32, u32) {
+    let secs = ms.div_euclid(1000);
+    let days = secs.div_euclid(86_400);
+    let rem = secs.rem_euclid(86_400);
+    let (y, m, d) = civil(days);
+    (y, m, d, (rem / 3600) as u32, ((rem % 3600) / 60) as u32, ((days + 4).rem_euclid(7)) as u32)
+}
+
+/// `formatClock`: local `HH:MM`.
+pub fn format_clock(ms: i64) -> String {
+    let (_, _, _, h, m, _) = local_parts(ms);
+    format!("{h:02}:{m:02}")
+}
+
+/// Local `YYYY-MM-DD` (the history day key).
+pub fn local_day(ms: i64) -> String {
+    let (y, m, d, ..) = local_parts(ms);
+    format!("{y:04}-{m:02}-{d:02}")
+}
+
+/// `formatDayHeader(day, now)`: TODAY / YESTERDAY / `THU 15 JAN 2026` (en-GB, commas dropped, upper case).
+pub fn format_day_header(day: &str, now_ms: i64) -> String {
+    let mut it = day.split('-').filter_map(|p| p.parse::<i64>().ok());
+    let (Some(y), Some(m), Some(d)) = (it.next(), it.next(), it.next()) else { return day.to_string() };
+    // days since epoch of a civil date
+    let days_from = |y: i64, m: i64, d: i64| {
+        let y = if m <= 2 { y - 1 } else { y };
+        let era = y.div_euclid(400);
+        let yoe = y.rem_euclid(400);
+        let mp = if m > 2 { m - 3 } else { m + 9 };
+        let doy = (153 * mp + 2) / 5 + d - 1;
+        let doe = yoe * 365 + yoe / 4 - yoe / 100 + doy;
+        era * 146_097 + doe - 719_468
+    };
+    let this = days_from(y, m, d);
+    let (ny, nm, nd, ..) = local_parts(now_ms);
+    let diff = days_from(ny as i64, nm as i64, nd as i64) - this;
+    match diff {
+        0 => "TODAY".into(),
+        1 => "YESTERDAY".into(),
+        _ => {
+            const DOW: [&str; 7] = ["SUN", "MON", "TUE", "WED", "THU", "FRI", "SAT"];
+            const MON: [&str; 12] = ["JAN", "FEB", "MAR", "APR", "MAY", "JUN", "JUL", "AUG", "SEPT", "OCT", "NOV", "DEC"];
+            let dow = (this + 4).rem_euclid(7) as usize;
+            format!("{} {} {} {}", DOW[dow], d, MON[(m - 1).clamp(0, 11) as usize], y)
+        }
+    }
+}
+
+/// `formatTotalDuration`: `2 HR 5 MIN` / `37 MIN`.
+pub fn format_total_duration(total_seconds: f64) -> String {
+    let total_min = (total_seconds / 60.0).round() as i64;
+    let (h, m) = (total_min / 60, total_min % 60);
+    if h > 0 { format!("{h} HR {m} MIN") } else { format!("{m} MIN") }
+}
+
+/// `summarizeFormats`
+pub fn summarize_formats(tracks: &[Track]) -> String {
+    if tracks.is_empty() {
+        return "—".into();
+    }
+    let mut labels: Vec<String> = Vec::new();
+    for t in tracks {
+        let l = format_track_format(&t.format);
+        if !labels.contains(&l) {
+            labels.push(l);
+        }
+    }
+    if labels.len() == 1 {
+        return labels.remove(0);
+    }
+    let mut suffixes: Vec<String> = Vec::new();
+    for t in tracks {
+        let s = t.format.suffix.to_uppercase();
+        if !suffixes.contains(&s) {
+            suffixes.push(s);
+        }
+    }
+    if suffixes.len() == 1 { format!("{} · MIXED RATES", suffixes[0]) } else { suffixes.join(" · ") }
+}
+
+#[cfg(test)]
+mod time_tests {
+    use super::*;
+    #[test]
+    fn civil_and_headers() {
+        // 2026-10-31T12:00:00Z = Saturday
+        let (y, m, d, h, mi, dow) = utc_parts(1_793_448_000_000);
+        assert_eq!((y, m, d, h, mi, dow), (2026, 10, 31, 12, 0, 6));
+        assert_eq!(format_day_header("2026-10-31", 1_793_448_000_000), if local_parts(1_793_448_000_000).2 == 31 { "TODAY" } else { "YESTERDAY" });
+        assert_eq!(format_day_header("2026-10-18", 1_793_448_000_000), "SUN 18 OCT 2026");
+        assert_eq!(format_total_duration(3725.0), "1 HR 2 MIN");
+    }
+}
+
+/// ISO 8601 UTC timestamp (`2026-10-31T12:00:00.000Z`) of a unix-ms value.
+pub fn utc_iso(ms: i64) -> String {
+    let (y, mo, d, h, mi, _) = utc_parts(ms);
+    let s = ms.div_euclid(1000).rem_euclid(60);
+    format!("{y:04}-{mo:02}-{d:02}T{h:02}:{mi:02}:{s:02}.{:03}Z", ms.rem_euclid(1000))
+}

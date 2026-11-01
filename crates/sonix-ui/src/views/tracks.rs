@@ -638,7 +638,7 @@ impl TracksView {
 }
 
 /// `flex: <grow> 1 0` (basis 0), the columns' proportional widths.
-fn flex_cell(grow: f32) -> Div {
+pub(crate) fn flex_cell(grow: f32) -> Div {
     let mut d = div().min_w_0();
     let s = d.style();
     s.flex_grow = Some(grow);
@@ -650,7 +650,7 @@ fn flex_cell(grow: f32) -> Div {
 /// The three "now playing" bars of an active row (`TrackRow.svelte:.now-playing`): `scaleY` keyframes on the
 /// shared clock (0.9 s ease-in-out infinite, delays -0.6/-0.3 s) while playing, static `scaleY(.33)` when paused.
 /// Repaints every frame only while playing, visible and not suspended (the row exists only while on screen).
-fn now_playing_bars(th: &Theme, playing: bool) -> impl IntoElement {
+pub(crate) fn now_playing_bars(th: &Theme, playing: bool) -> impl IntoElement {
     let color = th.accent;
     gpui::canvas(
         |_, _, _| (),

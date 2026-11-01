@@ -7,6 +7,7 @@ pub mod scrollbar;
 pub mod slider;
 pub mod text_input;
 pub mod tooltip;
+pub mod ui;
 
 use crate::theme::Theme;
 use gpui::{BoxShadow, Hsla, Svg, point, prelude::*, px, svg};

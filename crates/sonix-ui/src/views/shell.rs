@@ -41,6 +41,8 @@ pub struct Shell {
     pub(crate) backend: Arc<dyn Backend>,
     pub(crate) player: Entity<PlayerModel>,
     pub(crate) tracks: Entity<TracksView>,
+    /// list routes (Playlists, PlaylistDetail, Liked, Smart, History, ...): see `views/lists`
+    pub(crate) lists: super::lists::ListsHost,
     pub(crate) np: Entity<NowPlayingView>,
     pub(crate) dock: Entity<DockView>,
     pub(crate) queue: Entity<QueueRail>,
@@ -114,6 +116,7 @@ impl Shell {
             backend: backend.clone(),
             player,
             tracks,
+            lists: Default::default(),
             np,
             dock,
             queue,
@@ -135,6 +138,7 @@ impl Shell {
             fs: FrameStats::new(std::env::var("SONIX_FPSLOG").is_ok() || std::env::var("SONIX_SCRIPT").is_ok()),
             _subs: subs,
         };
+        this.lists_init(cx);
         this.load_backdrop();
         this.start_event_pump(cx);
         this.load_static(cx);
@@ -286,13 +290,14 @@ impl Shell {
             Event::LibraryChanged => {
                 if !self.suspended {
                     self.tracks.update(cx, |t, cx| t.refresh_rows(cx));
+                    self.lists_library_changed(cx);
                 }
             }
             Event::SyncProgress(_) | Event::Connection(_) => {}
         }
     }
 
-    fn load_static(&mut self, cx: &mut Context<Self>) {
+    pub(crate) fn load_static(&mut self, cx: &mut Context<Self>) {
         let b = self.backend.clone();
         cx.spawn(async move |this, cx| {
             let (pl, st, albums, artists, liked) = cx
@@ -429,6 +434,7 @@ impl Shell {
         });
         self.np.update(cx, |n, cx| n.set_suspended(true, cx));
         self.tracks.update(cx, |t, _| t.release());
+        self.lists_release(cx);
         self.queue.update(cx, |q, _| q.release());
         let handle = cx.global::<Services>().art.clone();
         for im in handle.borrow_mut().drain_all() {
@@ -456,6 +462,7 @@ impl Shell {
         }
         self.np.update(cx, |n, cx| n.set_suspended(false, cx));
         self.tracks.update(cx, |t, cx| t.restore(cx));
+        self.lists_restore(cx);
         self.queue.update(cx, |q, cx| q.refresh(cx));
         window.refresh();
         cx.notify();
@@ -509,6 +516,7 @@ impl Render for Shell {
         let stage: AnyElement = match &route {
             Route::Tracks => self.tracks.clone().into_any_element(),
             Route::NowPlaying => self.np.clone().into_any_element(),
+            r if super::lists::ListsHost::handles(r) => self.lists_stage(r, window, cx),
             other => self.placeholder(other, window),
         };
 
@@ -547,7 +555,9 @@ impl Render for Shell {
                 window.focus(&f);
             }))
             .on_action(cx.listener(|this, _: &Escape, window, cx| {
-                if this.menu.read(cx).is_open() {
+                if this.lists_modal_open(cx) {
+                    this.lists_modal_cancel(window, cx);
+                } else if this.menu.read(cx).is_open() {
                     this.menu.update(cx, |m, cx| m.close(window, cx));
                 } else if *this.router.current() == Route::NowPlaying {
                     this.go_back(cx);
@@ -582,7 +592,8 @@ impl Render for Shell {
                     .child(crate::probe::pid("shell.body", body))
                     .when(!on_np, |d| d.child(self.dock.clone())),
             )
-            .child(self.menu.clone());
+            .child(self.menu.clone())
+            .children(self.lists_modal_overlay());
         #[cfg(feature = "parity")]
         let root = root.child(crate::probe::frame_marker());
         root

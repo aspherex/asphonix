@@ -66,7 +66,9 @@ struct Inner {
     spectrum_active: AtomicBool,
     shutdown: AtomicBool,
     starred: Mutex<HashMap<String, String>>,
-    playlists: Vec<(Playlist, Vec<u32>)>,
+    pub(crate) playlists: Mutex<Vec<(Playlist, Vec<u32>)>>,
+    pub(crate) lists: Mutex<crate::lists::ListState>,
+    pub(crate) pl_seq: std::sync::atomic::AtomicU32,
 }
 
 pub struct MockBackend {
@@ -120,8 +122,10 @@ impl MockBackend {
             playlists.push((Self::playlist_meta(&lib, format!("pl_{i}"), name, &ids), ids));
         }
         // The big one that exercises the rolling queue window (SoniX mocks it as "Spotify Import (1,980)").
-        let big: Vec<u32> = (0..1980usize).map(|j| ((j * 27 + 5) % total) as u32).collect();
-        playlists.push((Self::playlist_meta(&lib, "pl_big".into(), "Spotify Import (1,980)", &big), big));
+        let big: Vec<u32> = (0..1980usize).map(|j| ((j * 311 + 17) % total) as u32).collect();
+        let mut meta = Self::playlist_meta(&lib, "pl_5".into(), "Spotify Import (1,980)", &big);
+        meta.duration = 1980.0 * 215.0; // mock.ts avoids resolving 1,980 tracks for a duration
+        playlists.push((meta, big));
         // mock.ts: a server smart (.nsp) playlist and another user's public list (both read-only).
         let smart: Vec<u32> = (0..50usize).map(|j| ((j * 977 + 123) % total) as u32).collect();
         let mut meta = Self::playlist_meta(&lib, "pl_6".into(), "Recently Added (smart)", &smart);
@@ -162,7 +166,9 @@ impl MockBackend {
             spectrum_active: AtomicBool::new(false),
             shutdown: AtomicBool::new(false),
             starred: Mutex::new(stars),
-            playlists,
+            playlists: Mutex::new(playlists),
+            lists: Mutex::new(crate::lists::ListState::new(total)),
+            pl_seq: std::sync::atomic::AtomicU32::new(8),
         });
         if !manual {
             let weak = Arc::downgrade(&inner);
@@ -211,9 +217,9 @@ impl MockBackend {
             public: false,
             song_count: ids.len() as u32,
             duration: ids.iter().map(|i| lib.sort_fields(*i as usize).duration as f64).sum(),
-            cover_art: None,
-            created_at: None,
-            updated_at: None,
+            cover_art: ids.first().map(|i| format!("tr_{i}")),
+            created_at: Some(crate::library::iso_from_ms(crate::library::EPOCH_MS)),
+            updated_at: Some(crate::library::iso_from_ms(crate::library::EPOCH_MS)),
             smart: false,
             read_only: false,
         }
@@ -276,6 +282,9 @@ impl Inner {
         let mut t = self.lib.track(ix as usize);
         if let Some(s) = self.starred.lock().unwrap().get(&t.id) {
             t.starred = Some(s.clone());
+        }
+        if let Some(r) = self.lists.lock().unwrap().ratings.get(&ix) {
+            t.rating = Some(*r);
         }
         t
     }
@@ -478,27 +487,79 @@ pub fn synth_spectrum(t: f64, mut noise: Option<&mut u64>) -> SpectrumFrame {
 }
 
 // ------------------------------------------------------------------ trait impls
+fn mock_caps() -> ServerCapabilities {
+    ServerCapabilities {
+        server_name: "navidrome".into(),
+        server_version: crate::lists::MOCK_VERSION.into(),
+        api_version: "1.16.1".into(),
+        open_subsonic_extensions: vec!["transcodeOffset".into(), "songLyrics".into()],
+        ping_ms: 8,
+    }
+}
+
 impl AuthApi for MockBackend {
     fn auth_session_status(&self) -> ApiResult<SessionStatus> {
+        let l = self.inner.lists.lock().unwrap();
+        let Some((url, user)) = l.active.and_then(|i| l.profiles.get(i)) else {
+            return Ok(SessionStatus { state: ConnectionState::Disconnected, server_url: None, username: None, server_version: None, api_version: None, ping_ms: None, last_sync_at: None, track_count: None });
+        };
         Ok(SessionStatus {
             state: ConnectionState::Connected,
-            server_url: Some("https://music.monolith.internal:4533".into()),
-            username: Some("architect".into()),
-            server_version: Some("mock".into()),
+            server_url: Some(url.clone()),
+            username: Some(user.clone()),
+            server_version: Some(crate::lists::MOCK_VERSION.into()),
             api_version: Some("1.16.1".into()),
             ping_ms: Some(8),
-            last_sync_at: None,
+            last_sync_at: Some(crate::library::iso_from_ms(crate::library::EPOCH_MS)),
             track_count: Some(self.inner.lib.total_tracks() as u64),
         })
     }
     fn auth_probe(&self) -> ApiResult<ServerCapabilities> {
-        Ok(ServerCapabilities {
-            server_name: "SONIX mock".into(),
-            server_version: "mock".into(),
-            api_version: "1.16.1".into(),
-            open_subsonic_extensions: vec![],
-            ping_ms: 12,
-        })
+        Ok(mock_caps())
+    }
+    fn auth_connect(&self, req: ConnectRequest) -> ApiResult<ServerCapabilities> {
+        if req.url.is_empty() {
+            return Err(ApiError::new(ErrorCode::AuthFailed, "Server URL required"));
+        }
+        self.inner.lists.lock().unwrap().upsert_profile(&req.url, &req.username);
+        self.inner.emit(Event::Connection(ConnectionStatusEvent { state: ConnectionState::Connected, ping_ms: Some(8), message: None }));
+        Ok(mock_caps())
+    }
+    fn auth_logout(&self) -> ApiResult<()> {
+        let mut l = self.inner.lists.lock().unwrap();
+        if let Some(i) = l.active {
+            l.profiles.remove(i);
+        }
+        l.active = None;
+        drop(l);
+        self.inner.emit(Event::Connection(ConnectionStatusEvent { state: ConnectionState::Disconnected, ping_ms: None, message: None }));
+        Ok(())
+    }
+    fn profiles_list(&self) -> ApiResult<Vec<Profile>> {
+        Ok(self.inner.lists.lock().unwrap().profile_list())
+    }
+    fn profiles_switch(&self, id: &str) -> ApiResult<ServerCapabilities> {
+        let mut l = self.inner.lists.lock().unwrap();
+        let p = l.profiles.iter().find(|(u, n)| crate::lists::ListState::profile_id(u, n) == id).cloned();
+        let Some((u, n)) = p else { return Err(ApiError::not_found("profile")) };
+        l.upsert_profile(&u, &n);
+        drop(l);
+        self.inner.emit(Event::Connection(ConnectionStatusEvent { state: ConnectionState::Connected, ping_ms: Some(8), message: None }));
+        Ok(mock_caps())
+    }
+    fn profiles_remove(&self, id: &str) -> ApiResult<()> {
+        let mut l = self.inner.lists.lock().unwrap();
+        let Some(i) = l.profiles.iter().position(|(u, n)| crate::lists::ListState::profile_id(u, n) == id) else { return Err(ApiError::not_found("profile")) };
+        if l.active == Some(i) {
+            return Err(ApiError::new(ErrorCode::InvalidRequest, "cannot remove the active profile; sign out instead"));
+        }
+        l.profiles.remove(i);
+        if let Some(a) = l.active.as_mut()
+            && *a > i
+        {
+            *a -= 1;
+        }
+        Ok(())
     }
 }
 
@@ -506,20 +567,179 @@ impl LibraryApi for MockBackend {
     fn liked_count(&self) -> ApiResult<u32> {
         Ok(self.inner.starred.lock().unwrap().keys().filter(|k| k.starts_with("tr_")).count() as u32)
     }
+    fn liked_get(&self, req: PageRequest) -> ApiResult<Paged<Track>> {
+        let ids = self.liked_ids();
+        let end = (req.offset + req.limit).min(ids.len());
+        let items = ids[req.offset.min(end)..end].iter().map(|i| self.inner.track(*i)).collect();
+        Ok(Paged { items, total: ids.len(), offset: req.offset })
+    }
+    fn liked_summary(&self) -> ApiResult<LikedSummary> {
+        let ids = self.liked_ids();
+        let duration = ids.iter().map(|i| self.inner.lib.sort_fields(*i as usize).duration as f64).sum();
+        Ok(LikedSummary { count: ids.len(), duration })
+    }
+    fn history_get(&self, req: PageRequest) -> ApiResult<Paged<HistoryItem>> {
+        let hist = self.inner.lists.lock().unwrap().history.clone(); // track() locks the list state too
+        let flat = crate::lists::history_items(&hist, &|ix| self.inner.track(ix));
+        let end = (req.offset + req.limit).min(flat.len());
+        let total = flat.len();
+        Ok(Paged { items: flat[req.offset.min(end)..end].to_vec(), total, offset: req.offset })
+    }
+    fn history_clear(&self) -> ApiResult<()> {
+        self.inner.lists.lock().unwrap().history.clear();
+        Ok(())
+    }
+    fn smart_list(&self) -> ApiResult<Vec<SmartSummary>> {
+        let ids: Vec<String> = {
+            let l = self.inner.lists.lock().unwrap();
+            let mut v: Vec<(&str, &str)> = l.smart.iter().map(|p| (p.input.name.as_str(), p.id.as_str())).collect();
+            v.sort_by_key(|(n, _)| n.to_lowercase());
+            v.into_iter().map(|(_, id)| id.to_string()).collect()
+        };
+        ids.iter().map(|id| self.smart_get(id, 0)).collect()
+    }
+    fn smart_get(&self, id: &str, seed: u32) -> ApiResult<SmartSummary> {
+        let starred = self.inner.starred.lock().unwrap().clone();
+        let mut l = self.inner.lists.lock().unwrap();
+        let p = l.smart.iter().find(|p| p.id == id).ok_or_else(|| ApiError::not_found("smart playlist"))?;
+        let (id, ca, ua, input) = (p.id.clone(), p.created_at.clone(), p.updated_at.clone(), p.input.clone());
+        let idx = l.eval(&self.inner.lib, &starred, &input, seed);
+        let duration = l.duration_of(&self.inner.lib, &idx);
+        Ok(SmartSummary { id, created_at: ca, updated_at: ua, input, track_count: idx.len(), duration })
+    }
+    fn smart_create(&self, input: SmartInput) -> ApiResult<SmartSummary> {
+        crate::lists::validate(&input)?;
+        let now = crate::library::iso_from_ms(crate::library::EPOCH_MS);
+        let id = {
+            let mut l = self.inner.lists.lock().unwrap();
+            let id = format!("sp_{:x}", l.smart_seq);
+            l.smart_seq += 1;
+            let mut input = input;
+            input.name = input.name.trim().to_string();
+            l.smart.push(crate::lists::Stored { id: id.clone(), created_at: now.clone(), updated_at: now, input });
+            id
+        };
+        self.smart_get(&id, 0)
+    }
+    fn smart_update(&self, id: &str, input: SmartInput) -> ApiResult<SmartSummary> {
+        crate::lists::validate(&input)?;
+        {
+            let mut l = self.inner.lists.lock().unwrap();
+            let p = l.smart.iter_mut().find(|p| p.id == id).ok_or_else(|| ApiError::not_found("smart playlist"))?;
+            p.input = SmartInput { name: input.name.trim().to_string(), ..input };
+            p.updated_at = crate::library::iso_from_ms(crate::library::EPOCH_MS);
+        }
+        self.smart_get(id, 0)
+    }
+    fn smart_delete(&self, id: &str) -> ApiResult<()> {
+        self.inner.lists.lock().unwrap().smart.retain(|p| p.id != id);
+        Ok(())
+    }
+    fn smart_duplicate(&self, id: &str) -> ApiResult<SmartSummary> {
+        let new_id = {
+            let mut l = self.inner.lists.lock().unwrap();
+            let old = l.smart.iter().find(|p| p.id == id).ok_or_else(|| ApiError::not_found("smart playlist"))?;
+            let mut input = old.input.clone();
+            input.name = format!("{} (copy)", input.name);
+            let now = crate::library::iso_from_ms(crate::library::EPOCH_MS);
+            let nid = format!("sp_{:x}", l.smart_seq);
+            l.smart_seq += 1;
+            l.smart.push(crate::lists::Stored { id: nid.clone(), created_at: now.clone(), updated_at: now, input });
+            nid
+        };
+        self.smart_get(&new_id, 0)
+    }
+    fn smart_presets(&self) -> ApiResult<Vec<SmartPreset>> {
+        Ok(crate::lists::presets())
+    }
+    fn smart_tracks(&self, id: &str, seed: u32, req: PageRequest) -> ApiResult<Paged<Track>> {
+        let input = {
+            let l = self.inner.lists.lock().unwrap();
+            l.smart.iter().find(|p| p.id == id).ok_or_else(|| ApiError::not_found("smart playlist"))?.input.clone()
+        };
+        self.smart_preview(input, seed, req)
+    }
+    fn smart_preview(&self, input: SmartInput, seed: u32, req: PageRequest) -> ApiResult<Paged<Track>> {
+        crate::lists::validate(&input)?;
+        let starred = self.inner.starred.lock().unwrap().clone();
+        let idx = self.inner.lists.lock().unwrap().eval(&self.inner.lib, &starred, &input, seed);
+        let end = (req.offset + req.limit).min(idx.len());
+        let items = idx[req.offset.min(end)..end].iter().map(|i| self.inner.track(*i)).collect();
+        Ok(Paged { items, total: idx.len(), offset: req.offset })
+    }
 }
-impl SearchApi for MockBackend {}
+impl SearchApi for MockBackend {
+    fn search_run(&self, req: SearchRequest) -> ApiResult<SearchResults> {
+        let needle = req.text.trim().to_lowercase();
+        let limit = req.limit;
+        let all = req.search_type == SearchType::All;
+        let lib = &self.inner.lib;
+        let (mut artists, mut at) = (Vec::new(), 0usize);
+        let (mut albums, mut alt) = (Vec::new(), 0usize);
+        let (mut tracks, mut tt) = (Vec::new(), 0usize);
+        if all || req.search_type == SearchType::Artist {
+            for i in 0..crate::library::NUM_ARTISTS {
+                if needle.is_empty() || crate::library::artist_name(i).to_lowercase().contains(&needle) {
+                    at += 1;
+                    if artists.len() < limit {
+                        artists.push(lib.artist(i));
+                    }
+                }
+            }
+        }
+        if all || req.search_type == SearchType::Album {
+            for i in 0..crate::library::NUM_ALBUMS {
+                if needle.is_empty() || crate::library::album_title(i).to_lowercase().contains(&needle) {
+                    alt += 1;
+                    if albums.len() < limit {
+                        albums.push(lib.album(i));
+                    }
+                }
+            }
+        }
+        if all || req.search_type == SearchType::Track {
+            let total = lib.total_tracks().min(50_000);
+            for i in 0..total {
+                let (ai, ti) = lib.album_for_track(i);
+                if needle.is_empty() || crate::library::track_title(ai, ti).to_lowercase().contains(&needle) {
+                    tt += 1;
+                    if tracks.len() < limit {
+                        tracks.push(self.inner.track(i as u32));
+                    }
+                }
+                if tt >= limit && needle.is_empty() {
+                    break;
+                }
+            }
+        }
+        let pls: Vec<Playlist> =
+            self.inner.playlists.lock().unwrap().iter().filter(|(p, _)| needle.is_empty() || p.name.to_lowercase().contains(&needle)).map(|(p, _)| p.clone()).collect();
+        let pt = pls.len();
+        Ok(SearchResults {
+            tracks: Paged { items: tracks, total: tt, offset: req.offset },
+            albums: Paged { items: albums, total: alt, offset: req.offset },
+            artists: Paged { items: artists, total: at, offset: req.offset },
+            playlists: Paged { items: pls, total: pt, offset: req.offset },
+        })
+    }
+}
 impl SettingsApi for MockBackend {
     fn settings_get(&self) -> ApiResult<Settings> {
-        Ok(Settings {
-            scrobbling_enabled: false,
-            auto_check_updates: false,
-            spread_artists_in_shuffle: false,
-            queue_window_size: QUEUE_WINDOW as u32,
-            autoplay_enabled: false,
-            sync_play_queue: false,
-            play_threshold_sec: 30,
-            free_memory_when_minimized: true,
-        })
+        Ok(self.inner.lists.lock().unwrap().settings.clone())
+    }
+    fn settings_set(&self, change: SettingChange) -> ApiResult<()> {
+        self.inner.lists.lock().unwrap().apply(change);
+        Ok(())
+    }
+    fn mcp_status(&self) -> ApiResult<McpStatus> {
+        Ok(self.inner.lists.lock().unwrap().mcp_status())
+    }
+    fn art_cache_status(&self) -> ApiResult<ArtCacheStatus> {
+        let n = crate::library::NUM_ALBUMS as u64;
+        Ok(ArtCacheStatus { cached: n, total: n, bytes: n * 35_000 })
+    }
+    fn updates_check(&self) -> ApiResult<UpdateInfo> {
+        Ok(UpdateInfo { available: false, current_version: "0.6.1".into(), version: None, date: None, notes: None })
     }
 }
 
@@ -551,16 +771,135 @@ impl BrowseApi for MockBackend {
 }
 
 impl PlaylistsApi for MockBackend {
+    fn playlists_create(&self, req: CreatePlaylistRequest) -> ApiResult<Playlist> {
+        let id = format!("pl_{}", self.inner.pl_seq.fetch_add(1, Ordering::SeqCst));
+        let ids: Vec<u32> = req.track_ids.iter().filter_map(|t| track_index(t)).map(|i| i as u32).collect();
+        let mut p = Self::playlist_meta(&self.inner.lib, id, &req.name, &ids);
+        p.created_at = Some(crate::library::iso_from_ms(crate::library::EPOCH_MS));
+        self.inner.playlists.lock().unwrap().push((p.clone(), ids));
+        Ok(p)
+    }
+    fn playlists_rename(&self, req: RenamePlaylistRequest) -> ApiResult<()> {
+        self.playlist_check_writable(&req.id)?;
+        if let Some((p, _)) = self.inner.playlists.lock().unwrap().iter_mut().find(|(p, _)| p.id == req.id) {
+            p.name = req.name;
+        }
+        Ok(())
+    }
+    fn playlists_delete(&self, req: DeletePlaylistRequest) -> ApiResult<()> {
+        self.playlist_check_writable(&req.id)?;
+        self.inner.playlists.lock().unwrap().retain(|(p, _)| p.id != req.id);
+        Ok(())
+    }
+    fn playlists_add_tracks(&self, req: AddToPlaylistRequest) -> ApiResult<()> {
+        self.playlist_check_writable(&req.id)?;
+        let lib = &self.inner.lib;
+        if let Some((p, ids)) = self.inner.playlists.lock().unwrap().iter_mut().find(|(p, _)| p.id == req.id) {
+            ids.extend(req.track_ids.iter().filter_map(|t| track_index(t)).map(|i| i as u32));
+            p.song_count = ids.len() as u32;
+            p.duration = ids.iter().map(|i| lib.sort_fields(*i as usize).duration as f64).sum();
+        }
+        Ok(())
+    }
+    fn playlists_remove_tracks(&self, req: RemovePlaylistTracksRequest) -> ApiResult<()> {
+        self.playlist_check_writable(&req.id)?;
+        let lib = &self.inner.lib;
+        if let Some((p, ids)) = self.inner.playlists.lock().unwrap().iter_mut().find(|(p, _)| p.id == req.id) {
+            let drop: std::collections::HashSet<usize> = req.indices.iter().copied().collect();
+            let mut i = 0;
+            ids.retain(|_| {
+                i += 1;
+                !drop.contains(&(i - 1))
+            });
+            p.song_count = ids.len() as u32;
+            p.duration = ids.iter().map(|i| lib.sort_fields(*i as usize).duration as f64).sum();
+        }
+        Ok(())
+    }
+    fn playlists_reorder(&self, req: ReorderPlaylistRequest) -> ApiResult<()> {
+        self.playlist_check_writable(&req.id)?;
+        if let Some((_, ids)) = self.inner.playlists.lock().unwrap().iter_mut().find(|(p, _)| p.id == req.id) {
+            *ids = req.track_ids.iter().filter_map(|t| track_index(t)).map(|i| i as u32).collect();
+        }
+        Ok(())
+    }
+    fn playlists_duplicate(&self, id: &str) -> ApiResult<Playlist> {
+        let (src, ids) = {
+            let pls = self.inner.playlists.lock().unwrap();
+            let (p, ids) = pls.iter().find(|(p, _)| p.id == id).ok_or_else(|| ApiError::not_found("playlist"))?;
+            (p.clone(), ids.clone())
+        };
+        let nid = format!("pl_{}", self.inner.pl_seq.fetch_add(1, Ordering::SeqCst));
+        let mut p = Self::playlist_meta(&self.inner.lib, nid, &format!("{} (copy)", src.name), &ids);
+        p.owner = src.owner.clone();
+        self.inner.playlists.lock().unwrap().push((p.clone(), ids));
+        Ok(p)
+    }
     fn playlists_list(&self) -> ApiResult<Vec<Playlist>> {
-        Ok(self.inner.playlists.iter().map(|(p, _)| p.clone()).collect())
+        Ok(self.inner.playlists.lock().unwrap().iter().map(|(p, _)| p.clone()).collect())
     }
     fn playlists_get(&self, id: &str) -> ApiResult<PlaylistDetail> {
-        let (p, ids) = self.inner.playlists.iter().find(|(p, _)| p.id == id).ok_or_else(|| ApiError::not_found("playlist"))?;
+        let pls = self.inner.playlists.lock().unwrap();
+        let (p, ids) = pls.iter().find(|(p, _)| p.id == id).ok_or_else(|| ApiError::not_found("playlist"))?;
         Ok(PlaylistDetail { playlist: p.clone(), tracks: ids.iter().map(|i| self.inner.track(*i)).collect() })
     }
 }
 
+impl MockBackend {
+    /// `likedIds()`: starred tracks, newest like first, ties by id.
+    fn liked_ids(&self) -> Vec<u32> {
+        let st = self.inner.starred.lock().unwrap();
+        let mut v: Vec<(&String, &String)> = st.iter().filter(|(k, _)| k.starts_with("tr_")).collect();
+        v.sort_by(|a, b| b.1.cmp(a.1).then(a.0.cmp(b.0)));
+        v.into_iter().filter_map(|(k, _)| track_index(k)).map(|i| i as u32).collect()
+    }
+
+    fn playlist_check_writable(&self, id: &str) -> ApiResult<()> {
+        let pls = self.inner.playlists.lock().unwrap();
+        match pls.iter().find(|(p, _)| p.id == id) {
+            Some((p, _)) if p.read_only => Err(ApiError::new(ErrorCode::ServerError, "this playlist is read-only (smart or owned by another user)")),
+            Some(_) => Ok(()),
+            None => Err(ApiError::not_found("playlist")),
+        }
+    }
+
+    fn play_pool(&self, kind: SourceKind, label: String, pool: Vec<u32>, req: &PlaySourceRequest) -> ApiResult<()> {
+        let start = req.start_track_id.as_deref().and_then(track_index).map(|i| i as u32);
+        let mut pool: Vec<u32> = pool.into_iter().filter(|i| self.inner.lists.lock().unwrap().ratings.get(i) != Some(&1) || Some(*i) == start).collect();
+        if pool.is_empty() {
+            return Err(ApiError::not_found("tracks"));
+        }
+        let mut c = self.inner.core.lock().unwrap();
+        if req.shuffle {
+            let mut rng = c.rng;
+            shuffle(&mut pool, &mut rng);
+            c.rng = rng;
+        }
+        c.shuffle = req.shuffle;
+        let mode = if req.shuffle { SourceMode::Shuffle } else { SourceMode::InOrder };
+        self.inner.set_source(&mut c, kind, label, mode, pool, start);
+        self.inner.push_state(&c);
+        drop(c);
+        self.inner.cv.notify_all();
+        self.inner.emit(Event::QueueChanged);
+        Ok(())
+    }
+}
+
 impl StarsApi for MockBackend {
+    fn rating_set(&self, req: SetRatingRequest) -> ApiResult<()> {
+        if let Some(ix) = track_index(&req.id) {
+            let mut l = self.inner.lists.lock().unwrap();
+            if req.rating > 0 {
+                l.ratings.insert(ix as u32, req.rating);
+            } else {
+                l.ratings.remove(&(ix as u32));
+            }
+            l.rev += 1;
+        }
+        self.inner.emit(Event::LibraryChanged);
+        Ok(())
+    }
     fn star_add(&self, req: StarRequest) -> ApiResult<()> {
         self.inner.starred.lock().unwrap().insert(req.id, crate::library::iso_from_ms(crate::library::EPOCH_MS));
         let c = self.inner.core.lock().unwrap();
@@ -626,6 +965,28 @@ impl PlayerApi for MockBackend {
         self.inner.cv.notify_all();
         self.inner.emit(Event::QueueChanged);
         Ok(())
+    }
+
+    fn player_play_playlist(&self, req: PlaySourceRequest) -> ApiResult<()> {
+        let (name, pool) = {
+            let pls = self.inner.playlists.lock().unwrap();
+            let (p, ids) = pls.iter().find(|(p, _)| p.id == req.id).ok_or_else(|| ApiError::not_found("playlist"))?;
+            (p.name.clone(), ids.clone())
+        };
+        self.play_pool(SourceKind::Playlist, name, pool, &req)
+    }
+    fn player_play_liked(&self, req: PlaySourceRequest) -> ApiResult<()> {
+        self.play_pool(SourceKind::Liked, "Liked Songs".into(), self.liked_ids(), &req)
+    }
+    fn player_play_smart(&self, req: PlaySourceRequest) -> ApiResult<()> {
+        let (name, input) = {
+            let l = self.inner.lists.lock().unwrap();
+            let p = l.smart.iter().find(|p| p.id == req.id).ok_or_else(|| ApiError::not_found("smart playlist"))?;
+            (p.input.name.clone(), p.input.clone())
+        };
+        let starred = self.inner.starred.lock().unwrap().clone();
+        let idx = self.inner.lists.lock().unwrap().eval(&self.inner.lib, &starred, &input, req.seed);
+        self.play_pool(SourceKind::Smart, name, idx.to_vec(), &req)
     }
 
     fn player_play_pause(&self) -> ApiResult<()> {
@@ -816,8 +1177,8 @@ impl OutputApi for MockBackend {
         let c = self.inner.core.lock().unwrap();
         let st = self.inner.state(&c);
         Ok(OutputStatus {
-            device_id: Some("mock".into()),
-            device_name: Some("MOCK OUTPUT (no audio)".into()),
+            device_id: Some("dev_default".into()),
+            device_name: Some("Topping E30 II (USB Audio)".into()),
             mode: c.output_mode,
             sample_rate: st.sample_rate,
             bit_depth: st.bit_depth,
@@ -827,7 +1188,13 @@ impl OutputApi for MockBackend {
         })
     }
     fn output_list_devices(&self) -> ApiResult<Vec<OutputDevice>> {
-        Ok(vec![OutputDevice { id: "mock".into(), name: "MOCK OUTPUT (no audio)".into(), is_default: true }])
+        Ok(vec![
+            OutputDevice { id: "dev_default".into(), name: "Topping E30 II (USB Audio)".into(), is_default: true },
+            OutputDevice { id: "dev_speakers".into(), name: "Built-in Speakers".into(), is_default: false },
+        ])
+    }
+    fn output_set_device(&self, _id: &str) -> ApiResult<()> {
+        Ok(())
     }
     fn output_set_mode(&self, mode: OutputMode) -> ApiResult<()> {
         let mut c = self.inner.core.lock().unwrap();
@@ -849,6 +1216,9 @@ impl Backend for MockBackend {
         let (tx, rx) = channel();
         self.inner.subs.lock().unwrap().push(tx);
         rx
+    }
+    fn now_ms(&self) -> i64 {
+        crate::library::EPOCH_MS
     }
     fn mock_label(&self) -> Option<&'static str> {
         Some("MOCK")
@@ -972,5 +1342,21 @@ mod tests {
         assert_eq!((a.width, a.height, a.rgba.len()), (64, 64, 64 * 64 * 4));
         assert_eq!(a, b.art_get("al_5", 64).unwrap());
         assert_ne!(a.rgba, b.art_get("al_6", 64).unwrap().rgba);
+    }
+}
+
+#[cfg(test)]
+mod lists_tests {
+    use super::*;
+    #[test]
+    fn history_and_liked_pages() {
+        let b = MockBackend::new_manual();
+        let h = b.history_get(PageRequest { offset: 0, limit: 100 }).unwrap();
+        assert!(h.total > 100, "{}", h.total);
+        assert!(matches!(h.items[0], HistoryItem::Day { .. }));
+        let l = b.liked_summary().unwrap();
+        assert_eq!(l.count, 400);
+        let s = b.smart_preview(crate::lists::presets()[0].input.clone(), 0, PageRequest { offset: 0, limit: 5 }).unwrap();
+        assert!(s.total > 0);
     }
 }

@@ -54,7 +54,6 @@ impl MenuItem {
         self.danger = true;
         self
     }
-    #[cfg(test)]
     pub fn disabled(mut self, d: bool) -> Self {
         self.disabled = d;
         self

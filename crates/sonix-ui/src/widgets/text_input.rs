@@ -445,6 +445,15 @@ impl TextInput {
         }
     }
 
+    /// Replace the whole content and select it (`input.select()` after a prompt opens).
+    pub fn set_content(&mut self, text: &str, cx: &mut Context<Self>) {
+        self.content = text.to_string().into();
+        self.selected_range = 0..text.len();
+        self.selection_reversed = false;
+        self.marked_range = None;
+        cx.notify();
+    }
+
     pub fn set_theme(&mut self, th: &Theme) {
         self.col_text = th.text;
         self.col_muted = th.muted;
