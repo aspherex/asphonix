@@ -690,6 +690,16 @@ pub struct Settings {
     pub sync_play_queue: bool,
     pub play_threshold_sec: u32,
     pub free_memory_when_minimized: bool,
+    #[serde(default)]
+    pub replay_gain_mode: crate::types_lists::ReplayGainMode,
+    #[serde(default)]
+    pub track_overlay: bool,
+    #[serde(default)]
+    pub track_overlay_corner: crate::types_lists::OverlayCorner,
+    #[serde(default)]
+    pub mcp_enabled: bool,
+    #[serde(default)]
+    pub mcp_allow_control: bool,
 }
 
 // --------------------------------------------------------------- art

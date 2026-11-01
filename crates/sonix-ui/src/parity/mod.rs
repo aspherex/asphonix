@@ -131,7 +131,7 @@ impl Shell {
                             };
                             for k in seq {
                                 // Not inside an app update: SendMessage re-enters GPUI's window procedure.
-                                crate::winffi::send_mouse(hwnd, k, x, y, &button, (m.control, m.shift, m.alt), g("dy") / 100.0);
+                                crate::winffi::send_mouse(hwnd, k, x, y, &button, (m.control, m.shift, m.alt), -g("dy") / 53.9); // one Win32 notch scrolls 53.9 px in GPUI (measured)
                             }
                             let _ = this.update_in(cx, |_, w, _| w.refresh());
                             json!({"ok": true})
@@ -303,7 +303,18 @@ impl Shell {
     }
 
     fn parity_state(&self, window: &mut Window, cx: &mut Context<Self>) -> Value {
-        let tracks = self.tracks.read(cx).parity_state(window, cx);
+        let mut tracks = self.tracks.read(cx).parity_state(window, cx);
+        // list routes (port-lists): the visible table reports through the same fields as the Tracks route
+        let lp = self.lists_parity_state(window, cx);
+        if lp.get("selection").is_some() {
+            for k in ["selection", "selectionCount", "scrollTop"] {
+                tracks[k] = lp[k].clone();
+            }
+            tracks["sort"] = serde_json::Value::Null;
+            tracks["trackCount"] = serde_json::Value::Null;
+            tracks["titles"] = lp["titles"].clone();
+            tracks["focus"] = if lp["tableFocus"] == true { "tracklist".into() } else { "body".into() };
+        }
         let menu_open = self.menu.read(cx).is_open();
         let _ = menu_open;
         let focus = if menu_open && self.menu.read(cx).has_focus(window) {
@@ -329,6 +340,7 @@ impl Shell {
             "trackCount": tracks["trackCount"],
             "titles": tracks["titles"],
             "scrollTop": tracks["scrollTop"],
+            "lists": lp,
             "menu": self.menu.read(cx).parity_state(),
             "queueDrawer": self.queue_drawer,
             "player": {

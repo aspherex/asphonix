@@ -269,11 +269,34 @@ impl Shell {
                 .px(px(sb::TITLE_PAD_X))
                 .pt(px(sb::TITLE_PAD_TOP))
                 .pb(px(sb::TITLE_PAD_BOTTOM))
-                .child(div().flex().child(txt(&th, LABEL_CAPS, "Playlists").color(if *route == Route::Playlists { th.accent_fg } else { th.muted })))
-                .child(div().flex().flex_row().gap(px(sb::ADD_GAP)).child(icon("bolt", sb::ADD_ICON, th.muted)).child(icon("add", sb::ADD_ICON, th.muted))),
+                .child(div().id("pl-title").flex().cursor(CursorStyle::PointingHand).child(txt(&th, LABEL_CAPS, "Playlists").color(if *route == Route::Playlists { th.accent_fg } else { th.muted })).on_click(cx.listener(|this, _, _, cx| this.navigate(Route::Playlists, cx))))
+                .child(
+                    div()
+                        .flex()
+                        .flex_row()
+                        .gap(px(sb::ADD_GAP))
+                        .child(div().id("pl-add-smart").flex().cursor(CursorStyle::PointingHand).child(icon("bolt", sb::ADD_ICON, th.muted)).on_click(cx.listener(|this, _, _, cx| this.lists_new_smart(cx))))
+                        .child(div().id("pl-add").flex().cursor(CursorStyle::PointingHand).child(icon("add", sb::ADD_ICON, th.muted)).on_click(cx.listener(|this, _, _, cx| this.lists_new_playlist(cx)))),
+                ),
         ));
         let liked = self.counts.liked.map(|n| fmt::fmt_int(n as u64)).unwrap_or_else(|| "—".into());
-        lists = lists.child(pid("sidebar.pl.liked", pl_row("pl-liked".into(), *route == Route::Liked, "heart-filled", "Liked Songs".into(), liked).on_click(cx.listener(|this, _, _, cx| this.navigate(Route::Liked, cx)))));
+        lists = lists.child(pid(
+            "sidebar.pl.liked",
+            pl_row("pl-liked".into(), *route == Route::Liked, "heart-filled", "Liked Songs".into(), liked)
+                .on_click(cx.listener(|this, _, _, cx| this.navigate(Route::Liked, cx)))
+                .on_mouse_down(gpui::MouseButton::Right, cx.listener(|this, ev: &gpui::MouseDownEvent, window, cx| this.lists_liked_menu(ev.position, window, cx))),
+        ));
+        for (i, sp) in self.lists.smart_side.iter().enumerate() {
+            let active = *route == Route::Smart(sp.id.clone());
+            let id = sp.id.clone();
+            let spc = sp.clone();
+            lists = lists.child(pid(
+                format!("sidebar.pl.sm{i}"),
+                pl_row(SharedString::from(format!("sm-{}", sp.id)), active, "bolt", sp.input.name.clone(), fmt::fmt_int(sp.track_count as u64))
+                    .on_click(cx.listener(move |this, _, _, cx| this.navigate(Route::Smart(id.clone()), cx)))
+                    .on_mouse_down(gpui::MouseButton::Right, cx.listener(move |this, ev: &gpui::MouseDownEvent, window, cx| this.lists_smart_menu(&spc, ev.position, window, cx))),
+            ));
+        }
         lists = lists.child(div().h(px(layout::RULE)).flex_none().mx(px(sb::SEP_MARGIN_X)).my(px(sb::SEP_MARGIN_Y)).bg(th.border));
         for (i, p) in self.playlists.iter().enumerate() {
             let active = *route == Route::Playlist(p.id.clone());
@@ -281,7 +304,12 @@ impl Shell {
             let icon_name = if p.read_only { if p.smart { "bolt" } else { "lock" } } else { "playlist" };
             lists = lists.child(pid(
                 format!("sidebar.pl.s{i}"),
-                pl_row(SharedString::from(format!("pl-{}", p.id)), active, icon_name, p.name.clone(), p.song_count.to_string()).on_click(cx.listener(move |this, _, _, cx| this.navigate(Route::Playlist(id.clone()), cx))),
+                pl_row(SharedString::from(format!("pl-{}", p.id)), active, icon_name, p.name.clone(), p.song_count.to_string())
+                    .on_click(cx.listener(move |this, _, _, cx| this.navigate(Route::Playlist(id.clone()), cx)))
+                    .on_mouse_down(gpui::MouseButton::Right, {
+                        let pc = p.clone();
+                        cx.listener(move |this, ev: &gpui::MouseDownEvent, window, cx| this.lists_playlist_menu(&pc, ev.position, window, cx))
+                    }),
             ));
         }
 
@@ -303,6 +331,7 @@ impl Shell {
             .text_color(th.muted)
             .cursor(CursorStyle::PointingHand)
             .hover(move |s| s.bg(th.mid).text_color(th.text))
+            .on_click(cx.listener(|this, ev: &gpui::ClickEvent, window, cx| this.lists_profile_menu(ev.position(), window, cx)))
             .child(pid(
                 "sidebar.profile.avatar",
                 div()

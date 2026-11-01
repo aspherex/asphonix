@@ -42,6 +42,8 @@ pub struct Shell {
     pub(crate) backend: Arc<dyn Backend>,
     pub(crate) player: Entity<PlayerModel>,
     pub(crate) tracks: Entity<TracksView>,
+    /// list routes (Playlists, PlaylistDetail, Liked, Smart, History, ...): see `views/lists`
+    pub(crate) lists: super::lists::ListsHost,
     pub(crate) np: Entity<NowPlayingView>,
     pub(crate) dock: Entity<DockView>,
     pub(crate) queue: Entity<QueueRail>,
@@ -126,6 +128,7 @@ impl Shell {
             backend: backend.clone(),
             player,
             tracks,
+            lists: Default::default(),
             np,
             dock,
             queue,
@@ -149,6 +152,7 @@ impl Shell {
             fs: FrameStats::new(std::env::var("SONIX_FPSLOG").is_ok() || std::env::var("SONIX_SCRIPT").is_ok()),
             _subs: subs,
         };
+        this.lists_init(cx);
         this.load_backdrop();
         this.start_event_pump(cx);
         this.load_static(cx);
@@ -301,16 +305,17 @@ impl Shell {
                 if !self.suspended {
                     self.tracks.update(cx, |t, cx| t.refresh_rows(cx));
                     self.lib_ctx.nav.update(cx, |_, cx| cx.emit(LibEvent::Refresh));
+                    self.lists_library_changed(cx);
                 }
             }
             Event::SyncProgress(_) | Event::Connection(_) => {}
         }
     }
 
-    fn load_static(&mut self, cx: &mut Context<Self>) {
+    pub(crate) fn load_static(&mut self, cx: &mut Context<Self>) {
         let b = self.backend.clone();
         cx.spawn(async move |this, cx| {
-            let (pl, st, albums, artists, liked) = cx
+            let (pl, st, albums, artists, liked, smart) = cx
                 .background_executor()
                 .spawn(async move {
                     (
@@ -319,11 +324,13 @@ impl Shell {
                         b.browse_get_albums(sonix_api::GetAlbumsRequest { offset: 0, limit: 1, sort: sonix_api::AlbumSort::Alphabetical, filter: None }),
                         b.browse_get_artists(sonix_api::GetArtistsRequest { offset: 0, limit: 1, sort: None }),
                         b.liked_count(),
+                        b.smart_list(),
                     )
                 })
                 .await;
             let _ = this.update(cx, |sh, cx| {
                 sh.playlists = pl.unwrap_or_default();
+                sh.lists.smart_side = smart.unwrap_or_default();
                 sh.counts = Counts { tracks: st.as_ref().ok().and_then(|s| s.track_count).map(|n| n as usize), albums: albums.ok().map(|p| p.total), artists: artists.ok().map(|p| p.total), liked: liked.ok() };
                 sh.status = st.ok();
                 cx.notify();
@@ -367,6 +374,9 @@ impl Shell {
         }
     }
     fn route_changed(&mut self, cx: &mut Context<Self>) {
+        if *self.router.current() != Route::Login {
+            self.lists.login = None;
+        }
         self.queue_drawer = false;
         let route = self.router.current().clone();
         library::entity_link::set_current(&route);
@@ -448,6 +458,7 @@ impl Shell {
         });
         self.np.update(cx, |n, cx| n.set_suspended(true, cx));
         self.tracks.update(cx, |t, _| t.release());
+        self.lists_release(cx);
         self.queue.update(cx, |q, _| q.release());
         let handle = cx.global::<Services>().art.clone();
         for im in handle.borrow_mut().drain_all() {
@@ -475,6 +486,7 @@ impl Shell {
         }
         self.np.update(cx, |n, cx| n.set_suspended(false, cx));
         self.tracks.update(cx, |t, cx| t.restore(cx));
+        self.lists_restore(cx);
         self.queue.update(cx, |q, cx| q.refresh(cx));
         window.refresh();
         cx.notify();
@@ -486,7 +498,7 @@ impl Shell {
     }
     /// Queue rail docked beside the stage (>= 1440 px, hidden on Now Playing).
     pub(crate) fn rail_docked(vw: f32, route: &Route) -> bool {
-        vw >= crate::metrics::bp::RAIL_DOCKED_FROM && *route != Route::NowPlaying
+        vw >= crate::metrics::bp::RAIL_DOCKED_FROM && *route != Route::NowPlaying && *route != Route::Login
     }
 }
 
@@ -528,6 +540,7 @@ impl Render for Shell {
         let stage: AnyElement = match &route {
             Route::Tracks => self.tracks.clone().into_any_element(),
             Route::NowPlaying => self.np.clone().into_any_element(),
+            r if super::lists::ListsHost::handles(r) => self.lists_stage(r, window, cx),
             other => match &self.lib_stage {
                 Some(v) => v.clone().into_any_element(),
                 None => self.placeholder(other, window),
@@ -538,14 +551,17 @@ impl Render for Shell {
         let top = crate::probe::pid("topbar", self.top_bar(window, cx));
         let side = crate::probe::pid("sidebar", self.sidebar(vw, &route, window, cx));
 
+        // `App.svelte`: the login route has only the title bar and its own stage (no top bar, sidebar, rail, dock)
+        let is_login = route == Route::Login;
+        let stage_id = if is_login { "login.stage" } else { "stage" };
         let body = div()
             .flex_1()
             .flex()
             .flex_row()
             .min_h_0()
             .relative()
-            .child(side)
-            .child(crate::probe::pid("stage", div().flex_1().min_w_0().h_full().overflow_hidden().child(stage)))
+            .children((!is_login).then_some(side))
+            .child(crate::probe::pid(stage_id, div().flex_1().min_w_0().h_full().overflow_hidden().child(stage)))
             .when(docked, |d| d.child(self.queue.clone()))
             .when(!docked && !on_np && self.queue_drawer, |d| {
                 d.child(div().absolute().top_0().right_0().bottom_0().child(self.queue.clone()))
@@ -560,6 +576,7 @@ impl Render for Shell {
                     let _ = b.player_play_pause();
                 })
             }))
+            .on_key_down(cx.listener(|this, ev: &gpui::KeyDownEvent, _, cx| this.lists_search_key(ev, cx)))
             .on_action(cx.listener(|this, _: &ToggleNowPlaying, _, cx| this.toggle_now_playing(cx)))
             .on_action(cx.listener(|this, _: &ToggleTheme, _, cx| this.toggle_theme(cx)))
             .on_action(cx.listener(|this, _: &NavBack, _, cx| this.go_back(cx)))
@@ -569,10 +586,18 @@ impl Render for Shell {
             .on_action(cx.listener(|this, _: &FocusSearch, window, cx| {
                 let f = this.search.read(cx).focus_handle.clone();
                 window.focus(&f);
+                // Ctrl+K with an old query selects it so typing starts a new search
+                let q = this.search.read(cx).content.to_string();
+                this.search.update(cx, |i, cx| i.set_content(&q, cx));
             }))
             .on_action(cx.listener(|this, _: &Escape, window, cx| {
-                if this.menu.read(cx).is_open() {
+                if this.lists_modal_open(cx) {
+                    this.lists_modal_cancel(window, cx);
+                } else if this.lists_editor_open(cx) {
+                    this.lists_editor_close(window, cx);
+                } else if this.menu.read(cx).is_open() {
                     this.menu.update(cx, |m, cx| m.close(window, cx));
+                } else if this.lists_search_escape(cx) {
                 } else if *this.router.current() == Route::NowPlaying {
                     this.go_back(cx);
                 } else if this.queue_drawer {
@@ -592,7 +617,7 @@ impl Render for Shell {
             .text_size(px(13.))
             .line_height(px(18.))
             .child(title)
-            .child(top)
+            .children((!is_login).then_some(top))
             .child(
                 div()
                     .flex_1()
@@ -601,12 +626,15 @@ impl Render for Shell {
                     .flex()
                     .flex_col()
                     .children(self.backdrop.clone().map(|b| {
-                        div().absolute().top_0().left_0().size_full().child(img(ImageSource::Render(b)).size_full().object_fit(ObjectFit::Fill))
+                        // the canvas starts below title bar + top bar (`--chrome-top`): on the login route there is no top bar
+                        div().absolute().top(px(if is_login { crate::metrics::topbar::H } else { 0.0 })).left_0().right_0().bottom_0().child(img(ImageSource::Render(b)).size_full().object_fit(ObjectFit::Fill))
                     }))
-                    .child(crate::probe::pid("shell.body", body))
-                    .when(!on_np, |d| d.child(self.dock.clone())),
+                    .child(crate::probe::pid(if is_login { "login.body" } else { "shell.body" }, body))
+                    .when(!on_np && !is_login, |d| d.child(self.dock.clone())),
             )
             .child(self.menu.clone())
+            .children(self.lists_editor_overlay())
+            .children(self.lists_modal_overlay())
             .child(crate::widgets::smooth::host());
         #[cfg(feature = "parity")]
         let root = root.child(crate::probe::frame_marker());

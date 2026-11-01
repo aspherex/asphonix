@@ -12,6 +12,7 @@
 use crate::discovery::*;
 use crate::error::{ApiError, ApiResult};
 use crate::types::*;
+use crate::types_lists::*;
 use std::sync::mpsc::Receiver;
 
 macro_rules! unimpl {
@@ -44,6 +45,10 @@ pub trait AuthApi {
     fn profiles_switch(&self, _id: &str) -> ApiResult<ServerCapabilities> {
         unimpl!("profiles_switch")
     }
+    /// `profiles_remove`
+    fn profiles_remove(&self, _id: &str) -> ApiResult<()> {
+        unimpl!("profiles_remove")
+    }
 }
 
 /// `library_*`
@@ -55,6 +60,58 @@ pub trait LibraryApi {
     /// `browse_get_liked_summary`.count: number of liked (starred) tracks (sidebar "Liked Songs").
     fn liked_count(&self) -> ApiResult<u32> {
         unimpl!("liked_count")
+    }
+    /// `browse_get_liked` (newest like first)
+    fn liked_get(&self, _req: PageRequest) -> ApiResult<Paged<Track>> {
+        unimpl!("liked_get")
+    }
+    /// `browse_get_liked_summary`
+    fn liked_summary(&self) -> ApiResult<LikedSummary> {
+        unimpl!("liked_summary")
+    }
+    /// `history_get` (day-grouped flat list)
+    fn history_get(&self, _req: PageRequest) -> ApiResult<Paged<HistoryItem>> {
+        unimpl!("history_get")
+    }
+    /// `history_clear`
+    fn history_clear(&self) -> ApiResult<()> {
+        unimpl!("history_clear")
+    }
+    /// `smart_playlists_list`
+    fn smart_list(&self) -> ApiResult<Vec<SmartSummary>> {
+        unimpl!("smart_list")
+    }
+    /// `smart_playlists_get`
+    fn smart_get(&self, _id: &str, _seed: u32) -> ApiResult<SmartSummary> {
+        unimpl!("smart_get")
+    }
+    /// `smart_playlists_create`
+    fn smart_create(&self, _input: SmartInput) -> ApiResult<SmartSummary> {
+        unimpl!("smart_create")
+    }
+    /// `smart_playlists_update`
+    fn smart_update(&self, _id: &str, _input: SmartInput) -> ApiResult<SmartSummary> {
+        unimpl!("smart_update")
+    }
+    /// `smart_playlists_delete`
+    fn smart_delete(&self, _id: &str) -> ApiResult<()> {
+        unimpl!("smart_delete")
+    }
+    /// `smart_playlists_duplicate`
+    fn smart_duplicate(&self, _id: &str) -> ApiResult<SmartSummary> {
+        unimpl!("smart_duplicate")
+    }
+    /// `smart_playlists_presets`
+    fn smart_presets(&self) -> ApiResult<Vec<SmartPreset>> {
+        unimpl!("smart_presets")
+    }
+    /// `smart_playlists_tracks`
+    fn smart_tracks(&self, _id: &str, _seed: u32, _req: PageRequest) -> ApiResult<Paged<Track>> {
+        unimpl!("smart_tracks")
+    }
+    /// `smart_playlists_preview`
+    fn smart_preview(&self, _input: SmartInput, _seed: u32, _req: PageRequest) -> ApiResult<Paged<Track>> {
+        unimpl!("smart_preview")
     }
 }
 
@@ -149,6 +206,18 @@ pub trait PlaylistsApi {
     fn playlists_add_tracks(&self, _req: AddToPlaylistRequest) -> ApiResult<()> {
         unimpl!("playlists_add_tracks")
     }
+    /// `playlists_remove_tracks`
+    fn playlists_remove_tracks(&self, _req: RemovePlaylistTracksRequest) -> ApiResult<()> {
+        unimpl!("playlists_remove_tracks")
+    }
+    /// `playlists_reorder`
+    fn playlists_reorder(&self, _req: ReorderPlaylistRequest) -> ApiResult<()> {
+        unimpl!("playlists_reorder")
+    }
+    /// `playlists_duplicate`
+    fn playlists_duplicate(&self, _id: &str) -> ApiResult<Playlist> {
+        unimpl!("playlists_duplicate")
+    }
 }
 
 /// `star_*` / `rating_*`
@@ -169,6 +238,18 @@ pub trait PlayerApi {
     fn player_play_queue(&self, req: PlayQueueRequest) -> ApiResult<()>;
     /// `player_play_all`
     fn player_play_all(&self, req: PlayAllRequest) -> ApiResult<()>;
+    /// `player_play_playlist` (`req.id` = playlist id)
+    fn player_play_playlist(&self, _req: PlaySourceRequest) -> ApiResult<()> {
+        unimpl!("player_play_playlist")
+    }
+    /// `player_play_liked`
+    fn player_play_liked(&self, _req: PlaySourceRequest) -> ApiResult<()> {
+        unimpl!("player_play_liked")
+    }
+    /// `player_play_smart` (`req.id` = smart playlist id)
+    fn player_play_smart(&self, _req: PlaySourceRequest) -> ApiResult<()> {
+        unimpl!("player_play_smart")
+    }
     /// `player_play_pause`
     fn player_play_pause(&self) -> ApiResult<()>;
     /// `player_play`
@@ -236,6 +317,22 @@ pub trait SettingsApi {
     fn settings_get(&self) -> ApiResult<Settings> {
         unimpl!("settings_get")
     }
+    /// One `settings_set_*` command.
+    fn settings_set(&self, _change: SettingChange) -> ApiResult<()> {
+        unimpl!("settings_set")
+    }
+    /// `mcp_get_status` (the `settings_set_mcp_*` commands answer with the fresh status too)
+    fn mcp_status(&self) -> ApiResult<McpStatus> {
+        unimpl!("mcp_status")
+    }
+    /// `art_cache_status`
+    fn art_cache_status(&self) -> ApiResult<ArtCacheStatus> {
+        unimpl!("art_cache_status")
+    }
+    /// `updates_check`
+    fn updates_check(&self) -> ApiResult<UpdateInfo> {
+        unimpl!("updates_check")
+    }
 }
 
 /// Cover art. Native replacement for the `sonix://art/{id}?s={size}` protocol:
@@ -254,6 +351,10 @@ pub trait Backend:
     fn subscribe(&self) -> Receiver<Event>;
     /// `Some("MOCK")` for a backend whose data is generated. The UI shows this in
     /// the title bar: mock data must never be mistaken for real telemetry.
+    /// "Now" for relative labels (History day headers). The mock anchors its data on a fixed epoch.
+    fn now_ms(&self) -> i64 {
+        std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_millis() as i64).unwrap_or(0)
+    }
     fn mock_label(&self) -> Option<&'static str> {
         None
     }

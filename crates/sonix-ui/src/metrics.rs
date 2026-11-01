@@ -356,3 +356,65 @@ pub mod library {
     pub const TOP_ROW_H: f32 = 34.0;
     pub const EXTRAS_STACK_BELOW: f32 = 1100.0;
 }
+
+/// List routes (`routes/PlaylistDetail.svelte`, `Liked.svelte`, `SmartPlaylistDetail.svelte`, `History.svelte`,
+/// `Playlists.svelte`), `components/Badge.svelte`, `SegmentedToggle.svelte`.
+pub mod lists {
+    /// `.page / .playlist-page { padding: var(--space-lg); gap: var(--space-lg) }`
+    pub const PAGE_PAD: f32 = super::space::LG;
+    pub const PAGE_GAP: f32 = super::space::LG;
+    /// History `.page { gap: var(--space-md) }`, `.header-right { gap: var(--space-md) }`
+    pub const HISTORY_GAP: f32 = super::space::MD;
+    /// `.header { gap: var(--space-lg) }`, `.art { 120x120 }`
+    pub const HEADER_GAP: f32 = super::space::LG;
+    pub const ART: f32 = 120.0;
+    /// `.info { gap: var(--space-xs) }`
+    pub const INFO_GAP: f32 = super::space::XS;
+    /// `.actions { gap: var(--space-sm); margin-top: var(--space-sm) }`
+    pub const ACTIONS_GAP: f32 = super::space::SM;
+    pub const ACTIONS_MT: f32 = super::space::SM;
+    /// `.play-btn / .btn-secondary / .btn-icon { height / width: 40px }`
+    pub const BTN_H: f32 = 40.0;
+    /// `.play-btn { padding: 0 var(--space-lg) }`, `.btn-secondary { padding: 0 var(--space-md) }`
+    pub const PLAY_PAD_X: f32 = super::space::LG;
+    pub const SEC_PAD_X: f32 = super::space::MD;
+    /// `<Icon size={16}>` in PLAY, `size={15}` in the others; `Icon size={56}` Liked art, `52` smart art, `32` empty playlist art
+    pub const ICON_PLAY: f32 = 16.0;
+    pub const ICON_SEC: f32 = 15.0;
+    pub const ICON_ART_LIKED: f32 = 56.0;
+    pub const ICON_ART_SMART: f32 = 52.0;
+    pub const ICON_ART_EMPTY: f32 = 32.0;
+    /// `.status { padding: var(--space-xl) }`
+    pub const STATUS_PAD: f32 = super::space::XL;
+    /// `.day { padding: 0 var(--space-sm) var(--space-xs) var(--space-sm) }`
+    pub const DAY_PAD_X: f32 = super::space::SM;
+    pub const DAY_PAD_BOTTOM: f32 = super::space::XS;
+    /// `.empty { padding: var(--space-md) }`
+    pub const EMPTY_PAD: f32 = super::space::MD;
+    /// Playlists grid: `repeat(auto-fill, minmax(240px, 1fr)); gap: var(--space-md)`
+    pub const GRID_MIN: f32 = 240.0;
+    pub const GRID_GAP: f32 = super::space::MD;
+    /// `.card { gap: var(--space-sm); padding: var(--space-sm) }`, `.card-art { 44x44 }`
+    pub const CARD_GAP: f32 = super::space::SM;
+    pub const CARD_PAD: f32 = super::space::SM;
+    pub const CARD_ART: f32 = 44.0;
+    /// `.play-overlay { 20x20; inset: auto 2px 2px auto }`, `<Icon size={10}>`
+    pub const OVERLAY: f32 = 20.0;
+    pub const OVERLAY_INSET: f32 = 2.0;
+    pub const OVERLAY_ICON: f32 = 10.0;
+    /// `.card-actions { gap: 2px }`, `.icon-btn { 26x26 }`, `<Icon size={14}>`
+    pub const CARD_ACTIONS_GAP: f32 = 2.0;
+    pub const CARD_ICON_BTN: f32 = 26.0;
+    pub const CARD_ICON: f32 = 14.0;
+    /// `.new-btn { gap: var(--space-xs); padding: var(--space-sm) var(--space-md) }`, `<Icon size={13}>`
+    pub const NEW_GAP: f32 = super::space::XS;
+    pub const NEW_PAD_Y: f32 = super::space::SM;
+    pub const NEW_PAD_X: f32 = super::space::MD;
+    pub const NEW_ICON: f32 = 13.0;
+    /// `Badge.svelte:.badge { padding: 0 var(--space-xs); line-height: 16px }`
+    pub const BADGE_PAD_X: f32 = super::space::XS;
+    pub const BADGE_LINE: f32 = 16.0;
+    /// `SegmentedToggle.svelte:.segment { padding: var(--space-xs) var(--space-md) }`
+    pub const SEG_PAD_Y: f32 = super::space::XS;
+    pub const SEG_PAD_X: f32 = super::space::MD;
+}

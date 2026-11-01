@@ -197,16 +197,15 @@ pub fn artist_track_ixs(lib: &Library, stars: &Stars, id: &str) -> ApiResult<Vec
     Ok(artist_tracks_for_id(lib, stars, id)?.iter().filter_map(|t| library::track_index(&t.id)).map(|i| i as u32).collect())
 }
 
-/// `ensureMockHistory()`: ~100 plays, one every 3.1 h, newest first (relative to the epoch).
-fn history(lib: &Library) -> Vec<(usize, i64)> {
-    let total = lib.total_tracks();
-    (0..100usize).map(|k| ((k * 137 + 11) % total, EPOCH_MS - (k as f64 * 3.1 * 3_600_000.0) as i64 - 60_000)).collect()
+/// The shared `ensureMockHistory()` list (`lists::ListState::history`, newest first).
+fn history(hist: &[(u32, i64)]) -> impl Iterator<Item = (usize, i64)> + '_ {
+    hist.iter().map(|&(ix, at)| (ix as usize, at))
 }
 
-pub fn history_recent(lib: &Library, stars: &Stars, req: &HistoryRecentRequest) -> Paged<HistoryEntry> {
+pub fn history_recent(lib: &Library, stars: &Stars, hist: &[(u32, i64)], req: &HistoryRecentRequest) -> Paged<HistoryEntry> {
     let mut seen = std::collections::HashSet::new();
     let mut items = Vec::new();
-    for (ix, at) in history(lib) {
+    for (ix, at) in history(hist) {
         if !seen.insert(ix) {
             continue;
         }
@@ -220,7 +219,7 @@ pub fn history_recent(lib: &Library, stars: &Stars, req: &HistoryRecentRequest) 
 }
 
 /// `browse_get_artist_top_tracks` (the JS mock waits 450 ms to look like a network call).
-pub fn top_tracks(lib: &Library, stars: &Stars, id: &str) -> ApiResult<ArtistTopTracks> {
+pub fn top_tracks(lib: &Library, stars: &Stars, hist: &[(u32, i64)], id: &str) -> ApiResult<ArtistTopTracks> {
     let idx = artist_index(id).ok_or_else(|| ApiError::not_found("artist"))?;
     std::thread::sleep(std::time::Duration::from_millis(450));
     let all = artist_tracks(lib, stars, idx);
@@ -230,7 +229,7 @@ pub fn top_tracks(lib: &Library, stars: &Stars, id: &str) -> ApiResult<ArtistTop
         return Ok(ArtistTopTracks { source: TopSource::Popular, items, total, offset: 0 });
     }
     let mut counts: Vec<(usize, u32)> = Vec::new();
-    for (ix, _) in history(lib) {
+    for (ix, _) in history(hist) {
         if lib.track(ix).artist_id.as_deref() == Some(id) {
             match counts.iter_mut().find(|c| c.0 == ix) {
                 Some(c) => c.1 += 1,
