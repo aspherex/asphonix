@@ -208,6 +208,11 @@ impl Shell {
                 "route": self.router.current().path(),
                 "light": self.th.light
             }),
+            "boot" => {
+                self.start_boot(window, cx);
+                window.refresh();
+                json!({"ok": true})
+            }
             "route" => match Route::parse(&s("route")) {
                 Some(r) => {
                     self.navigate(r, cx);

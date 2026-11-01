@@ -1,3 +1,4 @@
+pub mod boot;
 pub mod chrome;
 pub mod dock;
 pub mod nowplaying;

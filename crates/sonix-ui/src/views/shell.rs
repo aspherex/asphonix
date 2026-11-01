@@ -46,6 +46,8 @@ pub struct Shell {
     pub(crate) queue: Entity<QueueRail>,
     pub(crate) menu: Entity<ContextMenu>,
     pub(crate) overlays: Entity<crate::overlays::Overlays>,
+    pub(crate) boot: Option<Entity<super::boot::BootIntro>>,
+    _boot_sub: Option<Subscription>,
     pub(crate) search: Entity<TextInput>,
     pub(crate) focus: FocusHandle,
     pub(crate) playlists: Vec<Playlist>,
@@ -122,6 +124,8 @@ impl Shell {
             queue,
             menu,
             overlays,
+            boot: None,
+            _boot_sub: None,
             search,
             focus,
             playlists: Vec::new(),
@@ -504,6 +508,8 @@ impl Render for Shell {
             self.shown = true;
             crate::log("first_render");
             window.activate_window();
+            #[cfg(not(feature = "parity"))]
+            self.start_boot(window, cx);
         }
         if let Some(t) = self.resumed_at.take() {
             let ms = t.elapsed().as_secs_f64() * 1000.0;
@@ -599,7 +605,8 @@ impl Render for Shell {
                     .when(!on_np, |d| d.child(self.dock.clone())),
             )
             .child(self.menu.clone())
-            .child(self.overlays.clone());
+            .child(self.overlays.clone())
+            .children(self.boot.clone());
         #[cfg(feature = "parity")]
         let root = root.child(crate::probe::frame_marker());
         root
@@ -650,5 +657,25 @@ impl Shell {
             NpEvent::AddToPlaylist { id, at } => crate::overlays::add_to_playlist(cx, vec![id.clone()], *at),
             NpEvent::TrackInfo(t) => crate::overlays::track_info(cx, (**t).clone()),
         }
+    }
+}
+
+impl Shell {
+    /// `App.svelte showIntro`: the launch animation, once per app start (parity: only on request, the web side loads with `?resumed=1`).
+    pub fn start_boot(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if self.boot.is_some() {
+            return;
+        }
+        let (th, bd) = (self.th, self.backdrop.clone());
+        let e = cx.new(|_| super::boot::BootIntro::new(th, bd));
+        let sub = cx.subscribe(&e, |this: &mut Shell, _, _: &super::boot::BootEvent, cx| {
+            this.boot = None;
+            this._boot_sub = None;
+            cx.notify();
+        });
+        self._boot_sub = Some(sub);
+        self.boot = Some(e);
+        let _ = window;
+        cx.notify();
     }
 }
