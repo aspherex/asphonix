@@ -832,13 +832,17 @@ impl BrowseApi for MockBackend {
 
     // --- library routes port (browse.rs holds the JS-mock logic)
     fn browse_get_album(&self, id: &str) -> ApiResult<AlbumDetail> {
-        crate::browse::album_detail(&self.inner.lib, &self.inner.starred.lock().unwrap(), id)
+        let mut d = crate::browse::album_detail(&self.inner.lib, &self.inner.starred.lock().unwrap(), id)?;
+        self.rate_all(d.tracks.iter_mut());
+        Ok(d)
     }
     fn browse_get_artist(&self, id: &str) -> ApiResult<ArtistDetail> {
         crate::browse::artist_detail(&self.inner.lib, &self.inner.starred.lock().unwrap(), id)
     }
     fn browse_get_artist_tracks(&self, id: &str) -> ApiResult<Vec<Track>> {
-        crate::browse::artist_tracks_for_id(&self.inner.lib, &self.inner.starred.lock().unwrap(), id)
+        let mut v = crate::browse::artist_tracks_for_id(&self.inner.lib, &self.inner.starred.lock().unwrap(), id)?;
+        self.rate_all(v.iter_mut());
+        Ok(v)
     }
     fn browse_get_home_sections(&self) -> ApiResult<HomeSections> {
         Ok(crate::browse::home_sections(&self.inner.lib, &self.inner.starred.lock().unwrap()))
@@ -852,7 +856,9 @@ impl BrowseApi for MockBackend {
     fn browse_get_artist_top_tracks(&self, id: &str) -> ApiResult<ArtistTopTracks> {
         let stars = self.inner.starred.lock().unwrap().clone();
         let hist = self.inner.lists.lock().unwrap().history.clone();
-        crate::browse::top_tracks(&self.inner.lib, &stars, &hist, id)
+        let mut t = crate::browse::top_tracks(&self.inner.lib, &stars, &hist, id)?;
+        self.rate_all(t.items.iter_mut());
+        Ok(t)
     }
     fn browse_get_artist_info(&self, id: &str) -> ApiResult<ArtistInfo> {
         let stars = self.inner.starred.lock().unwrap().clone();
@@ -860,7 +866,9 @@ impl BrowseApi for MockBackend {
     }
     fn history_recent(&self, req: HistoryRecentRequest) -> ApiResult<Paged<HistoryEntry>> {
         let hist = self.inner.lists.lock().unwrap().history.clone();
-        Ok(crate::browse::history_recent(&self.inner.lib, &self.inner.starred.lock().unwrap(), &hist, &req))
+        let mut p = crate::browse::history_recent(&self.inner.lib, &self.inner.starred.lock().unwrap(), &hist, &req);
+        self.rate_all(p.items.iter_mut().map(|e| &mut e.track));
+        Ok(p)
     }
     fn session_check_server_queue(&self) -> ApiResult<Option<ServerQueueOffer>> {
         let c = self.inner.core.lock().unwrap();
@@ -954,6 +962,16 @@ impl PlaylistsApi for MockBackend {
 
 impl MockBackend {
     /// `likedIds()`: starred tracks, newest like first, ties by id.
+    /// The track ratings of the shared mock state (`ratings` map of mock.ts) on tracks the browse port builds.
+    fn rate_all<'a>(&self, tracks: impl Iterator<Item = &'a mut Track>) {
+        let l = self.inner.lists.lock().unwrap();
+        for t in tracks {
+            if let Some(r) = track_index(&t.id).and_then(|i| l.ratings.get(&(i as u32))) {
+                t.rating = Some(*r);
+            }
+        }
+    }
+
     fn liked_ids(&self) -> Vec<u32> {
         let st = self.inner.starred.lock().unwrap();
         let mut v: Vec<(&String, &String)> = st.iter().filter(|(k, _)| k.starts_with("tr_")).collect();
