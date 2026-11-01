@@ -719,10 +719,10 @@ impl Render for TracksView {
                                 )
                             }),
                     ))
-                    .child(pid("page.btn.0", button("play-all", th, Variant::Secondary, "Play All", Some("play"), total == 0).on_click(cx.listener(|this, _, _, cx| this.play_all(false, cx)))))
-                    .child(pid("page.btn.1", button("shuffle-all", th, Variant::Primary, "Shuffle All", Some("shuffle"), total == 0).on_click(cx.listener(|this, _, _, cx| this.play_all(true, cx)))))
+                    .child(pid("page.btn.0", button("play-all", th, Variant::Secondary, "Play All", Some("play"), total == 0, window).on_click(cx.listener(|this, _, _, cx| this.play_all(false, cx)))))
+                    .child(pid("page.btn.1", button("shuffle-all", th, Variant::Primary, "Shuffle All", Some("shuffle"), total == 0, window).on_click(cx.listener(|this, _, _, cx| this.play_all(true, cx)))))
                     // Flow (rule-based radio) is not ported yet: the control is present for layout parity, inert.
-                    .child(pid("page.btn.2", button("flow", th, Variant::Secondary, "Flow", Some("sliders"), total == 0))),
+                    .child(pid("page.btn.2", button("flow", th, Variant::Secondary, "Flow", Some("sliders"), total == 0, window))),
             );
 
         let list = uniform_list(

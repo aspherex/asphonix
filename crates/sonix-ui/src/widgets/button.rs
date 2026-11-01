@@ -1,11 +1,12 @@
 //! Button variants (`Button.svelte`: primary / secondary / danger / icon) and the
 //! flat "ghost" icon button used by the top bar, dock and rows.
 use super::{hard_shadow, icon, icon_g};
-use crate::metrics::controls as ctl;
+use crate::anim;
+use crate::metrics::{anim as m_anim, controls as ctl};
 use crate::text::txt;
 use crate::theme::Theme;
 use crate::tracking::{Family, TypeSpec};
-use gpui::{CursorStyle, Div, ElementId, Stateful, div, prelude::*, px};
+use gpui::{CursorStyle, Div, ElementId, Stateful, Window, div, prelude::*, px};
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub enum Variant {
@@ -16,12 +17,27 @@ pub enum Variant {
 
 /// A text button, optionally with a leading icon (`Button.svelte`). Attach `.on_click(...)` on the result.
 /// Primary/danger: Space Grotesk 13/18 700 caps; secondary: body font 13/18 500.
-pub fn button(id: impl Into<ElementId>, th: Theme, variant: Variant, label: &str, icon_name: Option<&str>, disabled: bool) -> Stateful<Div> {
-    let (bg, fg, border, display) = match variant {
+pub fn button(id: impl Into<ElementId>, th: Theme, variant: Variant, label: &str, icon_name: Option<&str>, disabled: bool, window: &mut Window) -> Stateful<Div> {
+    let (mut bg, fg, mut border, display) = match variant {
         Variant::Primary => (th.accent, th.accent_text, gpui::transparent_black(), true),
         Variant::Secondary => (th.mid, th.text, th.border, false),
         Variant::Danger => (th.clip, th.text, gpui::transparent_black(), true),
     };
+    // `.btn { transition: border-color 0.1s, background-color 0.1s }` (hover colours below), eased with CSS `ease`
+    let key = {
+        use std::hash::{Hash, Hasher};
+        let mut h = std::collections::hash_map::DefaultHasher::new();
+        (label, variant as u8).hash(&mut h);
+        h.finish() as usize
+    };
+    if !disabled {
+        let t = anim::transition(window, ("btn-hover", key), if anim::hovered(key) { 1.0 } else { 0.0 }, m_anim::BUTTON_TRANSITION);
+        match variant {
+            Variant::Primary => bg = anim::mix(th.accent, th.accent_hover, t),
+            Variant::Secondary => border = anim::mix(th.border, th.focus, t),
+            Variant::Danger => {}
+        }
+    }
     let spec = TypeSpec { family: if display { Family::Display } else { Family::Body }, size: 13.0, line: 18.0, tracking_em: 0.0, weight: if display { 700.0 } else { 500.0 }, caps: display };
     let mut b = div()
         .id(id)
@@ -44,11 +60,13 @@ pub fn button(id: impl Into<ElementId>, th: Theme, variant: Variant, label: &str
     if disabled {
         b = b.opacity(0.5).cursor(CursorStyle::OperationNotAllowed);
     } else {
-        b = b.cursor(CursorStyle::PointingHand).hover(move |s| match variant {
-            Variant::Primary => s.bg(th.accent_hover),
-            Variant::Secondary => s.border_color(th.focus),
-            Variant::Danger => s.opacity(0.9),
+        b = b.cursor(CursorStyle::PointingHand).on_hover(move |h, window, _| {
+            anim::set_hovered(key, *h);
+            window.refresh();
         });
+        if variant == Variant::Danger {
+            b = b.hover(|s| s.opacity(0.9));
+        }
         b = b.active(move |s| s.opacity(0.85));
     }
     b

@@ -51,6 +51,11 @@ fn main() {
     }
     let dpr: f64 = a.get(5).and_then(|s| s.parse().ok()).unwrap_or(1.5);
     let tol: i32 = a.get(6).and_then(|s| s.parse().ok()).unwrap_or(2);
+    // optional 7th arg "x,y,w,h" (CSS px): extra stats for just that region (animation frames, spectrum)
+    let region: Option<[f64; 4]> = a.get(7).and_then(|s| {
+        let v: Vec<f64> = s.split(',').filter_map(|p| p.parse().ok()).collect();
+        (v.len() == 4).then(|| [v[0], v[1], v[2], v[3]])
+    });
     let web = image::open(&a[1]).expect("web png").to_rgba8();
     let nat = image::open(&a[2]).expect("native png").to_rgba8();
     let rects: Vec<[f64; 4]> = serde_json::from_str(&std::fs::read_to_string(&a[4]).unwrap_or("[]".into())).unwrap_or_default();
@@ -140,7 +145,48 @@ fn main() {
     let (iw, inat) = (ink(&web, &hist), ink(&nat, &hist_n));
     std::fs::create_dir_all(&a[3]).ok();
     diff.save(Path::new(&a[3]).join("diff.png")).ok();
+    // optional 8th arg "x,y" (CSS px of an element's left edge, vertical middle): the border colour there in both images
+    // (the pixel within 4 device px of the edge that differs most from the interior), for transition sampling
+    let edge: Option<serde_json::Value> = a.get(8).and_then(|s| {
+        let v: Vec<f64> = s.split(',').filter_map(|p| p.parse().ok()).collect();
+        (v.len() == 2).then(|| {
+            let (ex, ey) = ((v[0] * dpr).floor() as i64, (v[1] * dpr).round() as i64);
+            let pick = |img: &RgbaImage| {
+                let interior = *img.get_pixel((ex + 8) as u32, ey as u32);
+                let mut best = (0i32, interior);
+                for dx in -1..4i64 {
+                    let p = *img.get_pixel((ex + dx).max(0) as u32, ey as u32);
+                    let d = (0..3).map(|c| (p[c] as i32 - interior[c] as i32).abs()).sum::<i32>();
+                    if d > best.0 {
+                        best = (d, p);
+                    }
+                }
+                [best.1[0], best.1[1], best.1[2]]
+            };
+            serde_json::json!({"web": pick(&web), "native": pick(&nat)})
+        })
+    });
+    let region_stats = region.map(|r| {
+        let (x0, y0) = ((r[0] * dpr).floor() as u32, (r[1] * dpr).floor() as u32);
+        let (x1, y1) = ((((r[0] + r[2]) * dpr).ceil() as u32).min(w), (((r[1] + r[3]) * dpr).ceil() as u32).min(h));
+        let (mut bad, mut tot, mut sum, mut worst) = (0u64, 0u64, 0f64, 0i32);
+        for y in y0..y1 {
+            for x in x0..x1 {
+                let (pw, pn) = (web.get_pixel(x, y), nat.get_pixel(x, y));
+                let d = (0..3).map(|c| (pw[c] as i32 - pn[c] as i32).abs()).max().unwrap();
+                tot += 1;
+                sum += d as f64;
+                worst = worst.max(d);
+                if d > tol {
+                    bad += 1;
+                }
+            }
+        }
+        serde_json::json!({"pixels": tot, "differing": bad, "fraction": bad as f64 / tot.max(1) as f64, "meanDelta": sum / tot.max(1) as f64, "worstDelta": worst})
+    });
     let out = serde_json::json!({
+        "region": region_stats,
+        "edge": edge,
         "size": [w, h],
         "tol": tol,
         "nonText": {"pixels": nt_tot, "differing": nt_bad, "fraction": nt_bad as f64 / nt_tot.max(1) as f64, "worstDelta": worst_nt,

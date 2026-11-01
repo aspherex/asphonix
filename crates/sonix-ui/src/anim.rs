@@ -141,3 +141,21 @@ mod tests {
         assert_eq!(bar_heights(false, 3.3), [0.33 * 12.0; 3]);
     }
 }
+
+/// Linear mix of two colours in sRGB (what CSS `transition` of a colour does, premultiplication aside).
+pub fn mix(a: gpui::Hsla, b: gpui::Hsla, t: f32) -> gpui::Hsla {
+    let (a, b): (gpui::Rgba, gpui::Rgba) = (a.into(), b.into());
+    gpui::Rgba { r: a.r + (b.r - a.r) * t, g: a.g + (b.g - a.g) * t, b: a.b + (b.b - a.b) * t, a: a.a + (b.a - a.a) * t }.into()
+}
+
+thread_local! {
+    static HOVER: RefCell<HashMap<usize, bool>> = RefCell::new(HashMap::new());
+}
+
+/// Hover flag of a transition-animated element, kept outside the element tree (set from `on_hover`).
+pub fn hovered(key: usize) -> bool {
+    HOVER.with(|h| h.borrow().get(&key).copied().unwrap_or(false))
+}
+pub fn set_hovered(key: usize, v: bool) {
+    HOVER.with(|h| h.borrow_mut().insert(key, v));
+}
