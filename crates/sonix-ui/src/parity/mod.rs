@@ -123,6 +123,7 @@ impl Shell {
                             let seq: &[&str] = match cmd.get("type").and_then(Value::as_str).unwrap_or("") {
                                 "move" => &["move"],
                                 "down" => &["move", "down"],
+                                "dragmove" => &["dragmove"],
                                 "up" => &["up"],
                                 "click" => &["move", "down", "up"],
                                 "dblclick" => &["move", "down", "up", "down", "up"],
@@ -236,9 +237,6 @@ impl Shell {
                 let Some(c) = &self.card else { return err("no card") };
                 let path = s("path");
                 let r = c.win.update(cx, |_, w, _| {
-                    if let Some(h) = crate::winffi::hwnd_of(w) {
-                        crate::log(&format!("card {}", crate::winffi::debug_state(h)));
-                    }
                     crate::winffi::hwnd_of(w).and_then(crate::winffi::capture_client)
                 });
                 match r {

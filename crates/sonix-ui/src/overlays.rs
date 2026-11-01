@@ -261,7 +261,7 @@ impl Render for Overlays {
                 None => {}
             }
         }
-        let mut root = div().absolute().top_0().left_0().size_full().flex().flex_col().items_center().justify_center().when(self.modal.is_none() && self.add_menu.is_none(), |d| d.size(px(0.)));
+        let mut root = div().absolute().top_0().left_0().size_full().flex().flex_col().items_center().justify_center();
 
         // ---- modal
         let modal = self.modal.as_ref().map(|m| {

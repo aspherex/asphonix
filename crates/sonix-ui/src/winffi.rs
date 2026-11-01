@@ -212,6 +212,9 @@ pub fn send_mouse(hwnd: isize, kind: &str, x: i32, y: i32, button: &str, mods: (
             "move" => {
                 SendMessageW(h, 0x200, mk(false), lp);
             }
+            "dragmove" => {
+                SendMessageW(h, 0x200, mk(true), lp);
+            }
             "down" => {
                 SendMessageW(h, down_msg, mk(true), lp);
             }
@@ -329,35 +332,3 @@ pub fn restore_foreground(hwnd: isize) {
 }
 #[cfg(not(windows))]
 pub fn restore_foreground(_: isize) {}
-
-/// Debug aid: visibility, window rect and client rect of `hwnd`.
-#[cfg(windows)]
-pub fn debug_state(hwnd: isize) -> String {
-    use std::ffi::c_void;
-    #[repr(C)]
-    #[derive(Default, Debug)]
-    struct Rect {
-        l: i32,
-        t: i32,
-        r: i32,
-        b: i32,
-    }
-    #[link(name = "user32")]
-    unsafe extern "system" {
-        fn IsWindowVisible(h: *mut c_void) -> i32;
-        fn GetWindowRect(h: *mut c_void, r: *mut Rect) -> i32;
-        fn GetClientRect(h: *mut c_void, r: *mut Rect) -> i32;
-        fn IsIconic(h: *mut c_void) -> i32;
-    }
-    unsafe {
-        let h = hwnd as *mut c_void;
-        let (mut w, mut c) = (Rect::default(), Rect::default());
-        GetWindowRect(h, &mut w);
-        GetClientRect(h, &mut c);
-        format!("visible={} iconic={} window={:?} client={:?}", IsWindowVisible(h), IsIconic(h), w, c)
-    }
-}
-#[cfg(not(windows))]
-pub fn debug_state(_: isize) -> String {
-    String::new()
-}
