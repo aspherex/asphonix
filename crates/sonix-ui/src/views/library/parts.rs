@@ -191,7 +191,7 @@ pub fn text_link(th: &Theme, id: &'static str, text: String, spec: crate::tracki
     if recolour {
         d = d.hover(move |s| s.text_color(hover));
     }
-    d.child(txt(&th, spec, text))
+    d.child(if spec.caps { txt(&th, spec, text) } else { txt(&th, spec, text).no_tracking() }) // a `<button class="genre-link">` resets the inherited letter-spacing; `.type-label-caps` on the button itself keeps it
         .child(div().absolute().left_0().right_0().bottom(px(spec.line * 0.12)).h(px(0.67)).group_hover("lnk", move |s| s.bg(if recolour { hover } else { base })))
         .on_click(move |_, window, cx| {
             cx.stop_propagation();
