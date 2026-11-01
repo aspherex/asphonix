@@ -114,6 +114,8 @@ fn bind_keys(cx: &mut App) {
         // `trackList.ts: trackListKeydown`: Up/Down move a single selection, Enter plays, Shift+Enter enqueues. The Tracks
         // route passes no `selectAll`, so Ctrl+A, Shift+arrows, Home/End and Page keys do nothing there (parity-verified).
         KeyBinding::new("shift-enter", shell::EnqueueSelected, Some("TrackList")),
+        // `trackListKeydown`'s `selectAll` (Album detail passes it; the Tracks route does not and ignores the action)
+        KeyBinding::new("ctrl-a", views::library::album_detail::SelectAllRows, Some("TrackList")),
         KeyBinding::new("menu", shell::OpenMenuKey, Some("TrackList")),
         KeyBinding::new("shift-f10", shell::OpenMenuKey, Some("TrackList")),
         KeyBinding::new("space", shell::PlayPause, Some("Root && !TextInput")),

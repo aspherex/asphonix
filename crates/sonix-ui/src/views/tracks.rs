@@ -2,6 +2,7 @@
 //! table with sortable headers, the width-driven Year/Added hiding rule, hover / selected /
 //! active rows, Ctrl/Shift multi-select, keyboard navigation, double-click or Enter to play,
 //! a context menu and a draggable styled scrollbar.
+use super::library::entity_link::{Kind as LinkKind, entity_link};
 use super::shell::{EnqueueSelected, OpenMenuKey, PlaySelected, SelDown, SelUp, Shell};
 use crate::app::{self, PlayerEvent, PlayerModel};
 use crate::art::ArtHandle;
@@ -525,9 +526,6 @@ impl TracksView {
                         .into_any_element()
                 }),
         );
-        let cell = |name: &str, grow: f32, text: String| {
-            pid(format!("track.row.{ix}.{name}"), flex_cell(grow).flex().child(txt(&th, MONO_DATA, text).color(th.muted).no_tracking().ellipsis()))
-        };
         let right = |name: &str, w: f32, s: String| pid(format!("track.row.{ix}.{name}"), div().w(px(w)).flex_none().flex().justify_end().child(txt(&th, MONO_DATA, s).color(th.muted)));
 
         pid(
@@ -553,8 +551,14 @@ impl TracksView {
                     format!("track.row.{ix}.title"),
                     div().flex().min_w_0().child(txt(&th, BODY_MD, t.title.clone()).color(if active { th.accent_fg } else { th.text }).ellipsis()),
                 )))
-                .child(cell("artist", tr::ARTIST_GROW, t.artist.clone()))
-                .child(cell("album", tr::ALBUM_GROW, t.album.clone().unwrap_or_else(|| "—".into())))
+                .child(pid(format!("track.row.{ix}.artist"), flex_cell(tr::ARTIST_GROW).flex().child(entity_link(&th, LinkKind::Artist, t.artist_id.as_deref(), &t.artist, MONO_DATA, th.muted, &format!("tr{ix}a"), window))))
+                .child(pid(
+                    format!("track.row.{ix}.album"),
+                    flex_cell(tr::ALBUM_GROW).flex().child(match &t.album {
+                        Some(a) => entity_link(&th, LinkKind::Album, t.album_id.as_deref(), a, MONO_DATA, th.muted, &format!("tr{ix}b"), window),
+                        None => txt(&th, MONO_DATA, "—").color(th.muted).no_tracking().ellipsis().into_any_element(),
+                    }),
+                ))
                 .when(cols.year, |d| d.child(right("year", tr::YEAR_W, fmt::track_year(&t))))
                 .when(cols.added, |d| d.child(right("added", tr::ADDED_W, t.date_added.as_deref().map(fmt::date_part).unwrap_or("—").to_string())))
                 .child(right("format", tr::FORMAT_W, fmt::format_track_format(&t.format)))
@@ -638,7 +642,7 @@ impl TracksView {
 }
 
 /// `flex: <grow> 1 0` (basis 0), the columns' proportional widths.
-fn flex_cell(grow: f32) -> Div {
+pub(crate) fn flex_cell(grow: f32) -> Div {
     let mut d = div().min_w_0();
     let s = d.style();
     s.flex_grow = Some(grow);
@@ -650,7 +654,7 @@ fn flex_cell(grow: f32) -> Div {
 /// The three "now playing" bars of an active row (`TrackRow.svelte:.now-playing`): `scaleY` keyframes on the
 /// shared clock (0.9 s ease-in-out infinite, delays -0.6/-0.3 s) while playing, static `scaleY(.33)` when paused.
 /// Repaints every frame only while playing, visible and not suspended (the row exists only while on screen).
-fn now_playing_bars(th: &Theme, playing: bool) -> impl IntoElement {
+pub(crate) fn now_playing_bars(th: &Theme, playing: bool) -> impl IntoElement {
     let color = th.accent;
     gpui::canvas(
         |_, _, _| (),

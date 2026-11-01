@@ -487,7 +487,8 @@ impl AuthApi for MockBackend {
             server_version: Some("mock".into()),
             api_version: Some("1.16.1".into()),
             ping_ms: Some(8),
-            last_sync_at: None,
+            // mock.ts: `new Date().toISOString()` at call time ("SYNCED JUST NOW")
+            last_sync_at: Some(crate::library::iso_from_ms(std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_millis() as i64).unwrap_or(crate::library::EPOCH_MS))),
             track_count: Some(self.inner.lib.total_tracks() as u64),
         })
     }
@@ -534,19 +535,55 @@ impl BrowseApi for MockBackend {
     }
 
     fn browse_get_artists(&self, req: GetArtistsRequest) -> ApiResult<Paged<Artist>> {
-        let lib = &self.inner.lib;
-        let mut ix: Vec<usize> = (0..crate::library::NUM_ARTISTS).collect();
-        ix.sort_by_key(|i| crate::library::artist_name(*i).to_lowercase());
-        let end = (req.offset + req.limit).min(ix.len());
-        let items = ix[req.offset.min(end)..end].iter().map(|i| lib.artist(*i)).collect();
-        Ok(Paged { items, total: ix.len(), offset: req.offset })
+        Ok(crate::browse::artists_page(&self.inner.lib, &self.inner.starred.lock().unwrap(), &req))
     }
 
     fn browse_get_albums(&self, req: GetAlbumsRequest) -> ApiResult<Paged<Album>> {
-        let total = crate::library::NUM_ALBUMS;
-        let end = (req.offset + req.limit).min(total);
-        let items = (req.offset.min(end)..end).map(|i| self.inner.lib.album(i)).collect();
-        Ok(Paged { items, total, offset: req.offset })
+        Ok(crate::browse::albums_page(&self.inner.lib, &self.inner.starred.lock().unwrap(), &req))
+    }
+
+    // --- library routes port (browse.rs holds the JS-mock logic)
+    fn browse_get_album(&self, id: &str) -> ApiResult<AlbumDetail> {
+        crate::browse::album_detail(&self.inner.lib, &self.inner.starred.lock().unwrap(), id)
+    }
+    fn browse_get_artist(&self, id: &str) -> ApiResult<ArtistDetail> {
+        crate::browse::artist_detail(&self.inner.lib, &self.inner.starred.lock().unwrap(), id)
+    }
+    fn browse_get_artist_tracks(&self, id: &str) -> ApiResult<Vec<Track>> {
+        crate::browse::artist_tracks_for_id(&self.inner.lib, &self.inner.starred.lock().unwrap(), id)
+    }
+    fn browse_get_home_sections(&self) -> ApiResult<HomeSections> {
+        Ok(crate::browse::home_sections(&self.inner.lib, &self.inner.starred.lock().unwrap()))
+    }
+    fn browse_get_genres(&self, req: GetGenresRequest) -> ApiResult<Paged<Genre>> {
+        Ok(crate::browse::genres_page(&self.inner.lib, &req))
+    }
+    fn browse_get_genre(&self, name: &str) -> ApiResult<Genre> {
+        crate::browse::genre(&self.inner.lib, name)
+    }
+    fn browse_get_artist_top_tracks(&self, id: &str) -> ApiResult<ArtistTopTracks> {
+        let stars = self.inner.starred.lock().unwrap().clone();
+        crate::browse::top_tracks(&self.inner.lib, &stars, id)
+    }
+    fn browse_get_artist_info(&self, id: &str) -> ApiResult<ArtistInfo> {
+        let stars = self.inner.starred.lock().unwrap().clone();
+        crate::browse::artist_info(&self.inner.lib, &stars, id)
+    }
+    fn history_recent(&self, req: HistoryRecentRequest) -> ApiResult<Paged<HistoryEntry>> {
+        Ok(crate::browse::history_recent(&self.inner.lib, &self.inner.starred.lock().unwrap(), &req))
+    }
+    fn session_check_server_queue(&self) -> ApiResult<Option<ServerQueueOffer>> {
+        let c = self.inner.core.lock().unwrap();
+        let current = c.current.and_then(|i| c.entries.get(i)).map(|e| format!("tr_{}", e.ix));
+        if c.status == PlaybackStatus::Playing || current.as_deref() == Some(crate::browse::SERVER_QUEUE_CURRENT) {
+            return Ok(None);
+        }
+        drop(c);
+        Ok(Some(crate::browse::server_queue_offer(&self.inner.lib, &self.inner.starred.lock().unwrap())))
+    }
+    fn session_resume_from_server(&self) -> ApiResult<()> {
+        self.player_play_queue(PlayQueueRequest { track_ids: crate::browse::server_queue_ids(), start_index: crate::browse::SERVER_QUEUE_CURRENT_INDEX })?;
+        self.player_seek(SeekRequest { position_sec: crate::browse::SERVER_QUEUE_POSITION })
     }
 }
 
@@ -793,6 +830,45 @@ impl PlayerApi for MockBackend {
     fn player_get_waveform(&self, track_id: &str) -> ApiResult<Waveform> {
         let ix = track_index(track_id).ok_or_else(|| ApiError::not_found("track"))?;
         Ok(Waveform { track_id: track_id.into(), buckets: synth_waveform(ix), filled: WAVEFORM_BUCKETS, done: true })
+    }
+
+    // --- library routes port: rolling-window sources of kind genre / artist (`mock.ts: player_play_genre/artist`)
+    fn player_play_genre(&self, req: PlayGenreRequest) -> ApiResult<()> {
+        let pool = crate::browse::genre_track_ixs(&self.inner.lib, &req.name);
+        if pool.is_empty() {
+            return Err(ApiError::not_found("genre"));
+        }
+        self.play_source(SourceKind::Genre, req.name, pool, req.shuffle, req.start_track_id)
+    }
+    fn player_play_artist(&self, req: PlayArtistRequest) -> ApiResult<()> {
+        let pool = crate::browse::artist_track_ixs(&self.inner.lib, &self.inner.starred.lock().unwrap(), &req.id)?;
+        if pool.is_empty() {
+            return Err(ApiError::not_found("artist"));
+        }
+        let idx: usize = req.id.trim_start_matches("ar_").parse().unwrap_or(0);
+        self.play_source(SourceKind::Artist, crate::library::artist_name(idx), pool, req.shuffle, req.start_track_id)
+    }
+}
+
+impl MockBackend {
+    /// Shared body of the genre/artist play commands: shuffle opens on a random track, then the pool is a rolling source.
+    fn play_source(&self, kind: SourceKind, label: String, mut pool: Vec<u32>, do_shuffle: bool, start_track_id: Option<String>) -> ApiResult<()> {
+        let mut c = self.inner.core.lock().unwrap();
+        let mut start = start_track_id.as_deref().and_then(track_index).map(|i| i as u32);
+        if do_shuffle {
+            let mut rng = c.rng;
+            shuffle(&mut pool, &mut rng);
+            c.rng = rng;
+            start = start.or_else(|| pool.first().copied());
+        }
+        c.shuffle = do_shuffle;
+        let mode = if do_shuffle { SourceMode::Shuffle } else { SourceMode::InOrder };
+        self.inner.set_source(&mut c, kind, label, mode, pool, start);
+        self.inner.push_state(&c);
+        drop(c);
+        self.inner.cv.notify_all();
+        self.inner.emit(Event::QueueChanged);
+        Ok(())
     }
 }
 

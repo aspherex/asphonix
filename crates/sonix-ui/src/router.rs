@@ -38,7 +38,7 @@ impl Route {
             Route::Playlist(id) => format!("playlist/{id}"),
             Route::Album(id) => format!("album/{id}"),
             Route::Artist(id) => format!("artist/{id}"),
-            Route::Genre(n) => format!("genre/{n}"),
+            Route::Genre(n) => format!("genre/{}", encode_component(n)),
         }
     }
 
@@ -63,10 +63,40 @@ impl Route {
             ("playlist", Some(id)) if !id.is_empty() => Route::Playlist(id.into()),
             ("album", Some(id)) if !id.is_empty() => Route::Album(id.into()),
             ("artist", Some(id)) if !id.is_empty() => Route::Artist(id.into()),
-            ("genre", Some(n)) if !n.is_empty() => Route::Genre(n.into()),
+            ("genre", Some(n)) if !n.is_empty() => Route::Genre(decode_component(n)),
             _ => return None,
         })
     }
+}
+
+/// `encodeURIComponent`: everything except `A-Z a-z 0-9 - _ . ! ~ * ' ( )`.
+pub fn encode_component(s: &str) -> String {
+    let mut out = String::new();
+    for b in s.bytes() {
+        if b.is_ascii_alphanumeric() || b"-_.!~*'()".contains(&b) {
+            out.push(b as char);
+        } else {
+            out.push_str(&format!("%{b:02X}"));
+        }
+    }
+    out
+}
+
+/// `decodeURIComponent` (invalid escapes are kept literally).
+pub fn decode_component(s: &str) -> String {
+    let b = s.as_bytes();
+    let mut out = Vec::with_capacity(b.len());
+    let mut i = 0;
+    while i < b.len() {
+        if b[i] == b'%' && i + 2 < b.len() && let Ok(v) = u8::from_str_radix(&s[i + 1..i + 3], 16) {
+            out.push(v);
+            i += 3;
+        } else {
+            out.push(b[i]);
+            i += 1;
+        }
+    }
+    String::from_utf8_lossy(&out).into_owned()
 }
 
 /// Browser-like history: navigating drops the forward entries; navigating to the
@@ -134,6 +164,8 @@ mod tests {
         ] {
             assert_eq!(Route::parse(&format!("#/{}", r.path())), Some(r.clone()), "{r:?}");
         }
+        assert_eq!(Route::Genre("Drum & Bass".into()).path(), "genre/Drum%20%26%20Bass");
+        assert_eq!(Route::parse("#/genre/Drum%20%26%20Bass"), Some(Route::Genre("Drum & Bass".into())));
         assert_eq!(Route::parse("#/"), Some(Route::Home));
         assert_eq!(Route::parse("#/nope"), None);
         assert_eq!(Route::parse("#/playlist/"), None);

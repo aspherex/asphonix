@@ -1,6 +1,7 @@
 //! The app shell (`App.svelte`): title bar, top bar, sidebar, stage (route view), queue
 //! rail / drawer, dock, the shared context-menu overlay, plus suspend/resume on minimize.
 use super::dock::{DockEvent, DockView};
+use super::library::{self, LibEvent, NavBus, NavHandle};
 use super::nowplaying::{NowPlayingView, NpEvent};
 use super::queue_rail::QueueRail;
 use super::tracks::{TracksEvent, TracksView};
@@ -54,6 +55,9 @@ pub struct Shell {
     pub(crate) pl_scroll: gpui::ScrollHandle,
     /// `uiState.queueRailCollapsed`: the docked rail (>= 1440 px) hidden by the dock's queue button.
     pub(crate) rail_collapsed: bool,
+    /// Library routes (Home, Albums, ..., `views/library`): the view entity of the open route and what it needs.
+    lib_ctx: library::Ctx,
+    lib_stage: Option<gpui::AnyView>,
     last_vw: f32,
     spectrum_on: bool,
     pub(crate) suspended: bool,
@@ -78,8 +82,16 @@ impl Shell {
         let search = cx.new(|cx| TextInput::new(cx, "SEARCH ARCHIVE", &th, MONO, 12.0, 16.0, 500.0));
         let focus = cx.focus_handle();
         window.focus(&focus);
+        let nav = cx.new(|_| NavBus);
+        cx.set_global(NavHandle(nav.clone()));
+        let lib_ctx = library::Ctx { backend: backend.clone(), art: art_cache.clone(), player: player.clone(), menu: menu.clone(), nav: nav.clone() };
 
         let mut subs = Vec::new();
+        subs.push(cx.subscribe(&nav, |this: &mut Shell, _, ev: &LibEvent, cx| {
+            if let LibEvent::Navigate(r) = ev {
+                this.navigate(r.clone(), cx);
+            }
+        }));
         subs.push(cx.subscribe(&dock, |this: &mut Shell, _, ev: &DockEvent, cx| match ev {
             DockEvent::OpenNowPlaying => this.toggle_now_playing(cx),
             DockEvent::ToggleQueue => {
@@ -126,6 +138,8 @@ impl Shell {
             queue_drawer: false,
             pl_scroll: gpui::ScrollHandle::new(),
             rail_collapsed: false,
+            lib_ctx,
+            lib_stage: None,
             last_vw: 1440.0,
             spectrum_on: false,
             suspended: false,
@@ -286,6 +300,7 @@ impl Shell {
             Event::LibraryChanged => {
                 if !self.suspended {
                     self.tracks.update(cx, |t, cx| t.refresh_rows(cx));
+                    self.lib_ctx.nav.update(cx, |_, cx| cx.emit(LibEvent::Refresh));
                 }
             }
             Event::SyncProgress(_) | Event::Connection(_) => {}
@@ -353,6 +368,9 @@ impl Shell {
     }
     fn route_changed(&mut self, cx: &mut Context<Self>) {
         self.queue_drawer = false;
+        let route = self.router.current().clone();
+        library::entity_link::set_current(&route);
+        self.lib_stage = library::stage_for(&route, &self.lib_ctx, cx);
         let on_np = *self.router.current() == Route::NowPlaying;
         self.np.update(cx, |n, cx| n.set_visible(on_np, cx));
         cx.notify();
@@ -509,7 +527,10 @@ impl Render for Shell {
         let stage: AnyElement = match &route {
             Route::Tracks => self.tracks.clone().into_any_element(),
             Route::NowPlaying => self.np.clone().into_any_element(),
-            other => self.placeholder(other, window),
+            other => match &self.lib_stage {
+                Some(v) => v.clone().into_any_element(),
+                None => self.placeholder(other, window),
+            },
         };
 
         let title = crate::probe::pid("titlebar", self.title_bar(window, cx));

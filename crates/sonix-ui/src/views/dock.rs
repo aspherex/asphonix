@@ -1,6 +1,7 @@
 //! The player dock (`PlayerDock.svelte`): cover + title, transport, seek, dB volume fader,
 //! output readout, queue toggle. Its own entity: the 4 Hz position tick re-renders only
 //! the dock (and Now Playing), never the Tracks list. Sizes: `crate::metrics::dock`.
+use super::library::entity_link::{Kind as LinkKind, entity_link};
 use crate::app::{self, PlayerModel};
 use crate::art::{self, ArtHandle};
 use crate::metrics::{bp, dock as dk, layout};
@@ -109,10 +110,16 @@ impl Render for DockView {
                             .flex_col()
                             .min_w_0()
                             .child(pid("dock.title", div().flex().min_w_0().child(txt(&th, BODY_LG, title).color(th.text).ellipsis())))
-                            .child(pid("dock.subtitle", div().flex().min_w_0().child({
-                                let t = txt(&th, MONO_DATA, subtitle).color(th.muted).ellipsis();
-                                // artist/album are `EntityLink` buttons (UA `letter-spacing: normal`); the placeholder is plain text
-                                if has { t.no_tracking() } else { t }
+                            .child(pid("dock.subtitle", div().flex().flex_row().min_w_0().child(match &track {
+                                // `<EntityLink artist/> · <EntityLink album/>`
+                                Some(t) => {
+                                    let mut row = div().flex().flex_row().min_w_0().child(entity_link(&th, LinkKind::Artist, t.artist_id.as_deref(), &t.artist, MONO_DATA, th.muted, "dock", window));
+                                    if let Some(a) = &t.album {
+                                        row = row.child(txt(&th, MONO_DATA, " · ").color(th.muted)).child(entity_link(&th, LinkKind::Album, t.album_id.as_deref(), a, MONO_DATA, th.muted, "dock", window));
+                                    }
+                                    row.into_any_element()
+                                }
+                                None => txt(&th, MONO_DATA, subtitle).color(th.muted).ellipsis().into_any_element(),
                             }))),
                     ),
             )

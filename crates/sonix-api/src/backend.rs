@@ -9,6 +9,7 @@
 //!   (and a later phase) can implement command by command without touching the UI.
 //! * Request/response types are the wire types of `types.rs`; the Rust command name
 //!   from `ipc.rs` is in each doc comment so the mapping stays greppable.
+use crate::discovery::*;
 use crate::error::{ApiError, ApiResult};
 use crate::types::*;
 use std::sync::mpsc::Receiver;
@@ -84,6 +85,35 @@ pub trait BrowseApi {
     /// `browse_get_home_sections`
     fn browse_get_home_sections(&self) -> ApiResult<HomeSections> {
         unimpl!("browse_get_home_sections")
+    }
+    // --- library routes port: genres, artist extras, recent history (types in `discovery.rs`)
+    /// `browse_get_genres`
+    fn browse_get_genres(&self, _req: GetGenresRequest) -> ApiResult<Paged<Genre>> {
+        unimpl!("browse_get_genres")
+    }
+    /// `browse_get_genre`
+    fn browse_get_genre(&self, _name: &str) -> ApiResult<Genre> {
+        unimpl!("browse_get_genre")
+    }
+    /// `browse_get_artist_top_tracks`
+    fn browse_get_artist_top_tracks(&self, _id: &str) -> ApiResult<ArtistTopTracks> {
+        unimpl!("browse_get_artist_top_tracks")
+    }
+    /// `browse_get_artist_info`
+    fn browse_get_artist_info(&self, _id: &str) -> ApiResult<ArtistInfo> {
+        unimpl!("browse_get_artist_info")
+    }
+    /// `history_recent`
+    fn history_recent(&self, _req: HistoryRecentRequest) -> ApiResult<Paged<HistoryEntry>> {
+        unimpl!("history_recent")
+    }
+    /// `session_check_server_queue` (Home's "Resume from server" bar; `None` = nothing to offer)
+    fn session_check_server_queue(&self) -> ApiResult<Option<ServerQueueOffer>> {
+        Ok(None)
+    }
+    /// `session_resume_from_server`
+    fn session_resume_from_server(&self) -> ApiResult<()> {
+        unimpl!("session_resume_from_server")
     }
 }
 
@@ -171,6 +201,14 @@ pub trait PlayerApi {
     /// `player_get_waveform`
     fn player_get_waveform(&self, _track_id: &str) -> ApiResult<Waveform> {
         unimpl!("player_get_waveform")
+    }
+    /// `player_play_genre`
+    fn player_play_genre(&self, _req: PlayGenreRequest) -> ApiResult<()> {
+        unimpl!("player_play_genre")
+    }
+    /// `player_play_artist`
+    fn player_play_artist(&self, _req: PlayArtistRequest) -> ApiResult<()> {
+        unimpl!("player_play_artist")
     }
 }
 

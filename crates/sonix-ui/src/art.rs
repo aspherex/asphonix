@@ -118,6 +118,20 @@ pub fn cover<V: 'static>(
     window: &mut Window,
     cx: &mut Context<V>,
 ) -> AnyElement {
+    let bucket = bucket_for((logical * window.scale_factor()).ceil() as u32);
+    cover_bucket(art, backend, id, logical, bucket, window, cx)
+}
+
+/// [`cover`] at an explicit size bucket (the sizes the web requests: cards 160, album header 320, thumbs 64).
+pub fn cover_bucket<V: 'static>(
+    art: &ArtHandle,
+    backend: &Arc<dyn Backend>,
+    id: Option<&str>,
+    logical: f32,
+    bucket: u32,
+    window: &mut Window,
+    cx: &mut Context<V>,
+) -> AnyElement {
     let base = div().size(px(logical)).flex_none().overflow_hidden();
     // Parity harness: the web mock cannot resolve `sonix://art` in a plain browser (the <img> is hidden, leaving the
     // slot background), so the native side renders the empty slot too.
@@ -127,7 +141,6 @@ pub fn cover<V: 'static>(
     }
     let Some(id) = id else { return base.bg(hsla(0.0, 0.0, 0.5, 0.12)).into_any_element() };
     let sid: SharedString = id.to_string().into();
-    let bucket = bucket_for((logical * window.scale_factor()).ceil() as u32);
     let hit = art.borrow_mut().get(&sid, bucket);
     if hit.is_none() && art.borrow_mut().want(&sid, bucket) {
         let (backend, art2, sid2) = (backend.clone(), art.clone(), sid.clone());

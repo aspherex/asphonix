@@ -2,6 +2,7 @@
 //! position/output row), the "Next from <label> · Shuffle" window with the real "+ N more" footer.
 //! Docked at >= 1440 px, an overlay drawer below. Not yet ported: drag-reorder, multi-select, remove,
 //! the "Next in queue" user section, flow rows (docs/PORTING.md). Sizes: `crate::metrics::rail`.
+use super::library::entity_link::{Kind as LinkKind, entity_link};
 use crate::app::{self, PlayerEvent, PlayerModel};
 use crate::art::{self, ArtHandle};
 use crate::metrics::{layout, rail as rl, space, tracks as tr};
@@ -111,7 +112,7 @@ impl Render for QueueRail {
                                     .min_w_0()
                                     .gap(px(2.))
                                     .child(pid("rail.deck.title", div().flex().min_w_0().child(txt(&th, BODY_LG, t.title.clone()).color(th.text).ellipsis())))
-                                    .child(pid("rail.deck.artist", div().flex().child(txt(&th, MONO_DATA, t.artist.clone()).color(th.muted).no_tracking().ellipsis()))),
+                                    .child(pid("rail.deck.artist", div().flex().child(entity_link(&th, LinkKind::Artist, t.artist_id.as_deref(), &t.artist, MONO_DATA, th.muted, "deck", window)))),
                             ),
                     )
                     .child(pid("rail.deck.spectrum", div().h(px(64.)).px(px(space::MD)).child(rail_spectrum(th, bands))))
@@ -185,7 +186,7 @@ impl Render for QueueRail {
                                     .flex()
                                     .flex_col()
                                     .child(div().flex().min_w_0().child(txt(&th, BODY_MD, t.title.clone()).color(th.text).ellipsis()))
-                                    .child(div().flex().min_w_0().child(txt(&th, MONO_CODE, t.artist.clone()).color(th.muted).no_tracking().ellipsis())),
+                                    .child(div().flex().min_w_0().child(entity_link(&th, LinkKind::Artist, t.artist_id.as_deref(), &t.artist, MONO_CODE, th.muted, &format!("rail{i}"), window))),
                             )
                             .child(div().flex_none().child(txt(&th, MONO_CODE, fmt::format_duration(Some(t.duration))).color(th.muted)))
                             .child(div().size(px(20.)).flex_none().flex().items_center().justify_center().child(icon("more", 11., th.muted)))
