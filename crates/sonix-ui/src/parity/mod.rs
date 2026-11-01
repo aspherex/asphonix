@@ -273,8 +273,7 @@ impl Shell {
                     "Inter" => "Inter",
                     _ => "JetBrains Mono",
                 };
-                let mut fnt = gpui::font(fam);
-                fnt.weight = gpui::FontWeight(f("weight"));
+                let fnt = crate::text::css_font(fam, f("weight"));
                 let text = s("text");
                 let run = gpui::TextRun { len: text.len(), font: fnt, color: gpui::black(), background_color: None, underline: None, strikethrough: None };
                 let l = window.text_system().layout_line(&text, px(f("size")), &[run], None);

@@ -18,6 +18,24 @@ use sonix_api::*;
 use std::cell::Cell;
 use std::rc::Rc;
 
+gpui::actions!(sonix_library_card, [CardOpen, CardMenu]);
+
+thread_local! {
+    static FOCUS: std::cell::RefCell<std::collections::HashMap<usize, gpui::FocusHandle>> = std::cell::RefCell::new(std::collections::HashMap::new());
+}
+
+/// The persistent focus handle of a card (`tabindex=0`): one per card id, bounded so scrolling a 5k-card grid
+/// does not accumulate handles.
+fn focus_handle<V: 'static>(cx: &mut Context<V>, key: usize) -> gpui::FocusHandle {
+    FOCUS.with(|m| {
+        let mut m = m.borrow_mut();
+        if m.len() > 256 && !m.contains_key(&key) {
+            m.clear();
+        }
+        m.entry(key).or_insert_with(|| cx.focus_handle()).clone()
+    })
+}
+
 pub enum CardItem<'a> {
     Album(&'a Album),
     Artist(&'a Artist),
@@ -36,7 +54,7 @@ pub fn anchor_cell() -> Rc<Cell<Bounds<Pixels>>> {
 }
 fn track_bounds(cell: &Rc<Cell<Bounds<Pixels>>>) -> AnyElement {
     let cell = cell.clone();
-    canvas(move |b, _, _| cell.set(b), |_, _, _, _| {}).absolute().size_full().into_any_element()
+    canvas(move |b, _, _| cell.set(b), |_, _, _, _| {}).absolute().top_0().left_0().size_full().into_any_element()
 }
 
 /// `openContextMenuFor(anchor)`: left-aligned, 4 px under the element.
@@ -74,7 +92,10 @@ pub fn card<V: 'static>(
         CardItem::Artist(a) => a.starred.is_some(),
     };
     let key = key_of("card", &id);
-    let hovered = anim::hovered(key);
+    let fh = focus_handle(cx, key);
+    let focused = fh.contains_focused(window, cx);
+    // `.card:hover / :focus-within` show the overlays
+    let hovered = anim::hovered(key) || focused;
     let t = anim::transition(window, ("card-ov", key), if hovered { 1.0 } else { 0.0 }, m::CARD_TRANSITION);
     let items_for = {
         let (ctx, playlists) = (ctx.clone(), playlists.to_vec());
@@ -173,8 +194,17 @@ pub fn card<V: 'static>(
 
     let ctx_menu = ctx.clone();
     let items_ctx = items_for;
+    let (ctx_key, items_key, card_anchor) = (ctx.clone(), items_ctx.clone(), anchor_cell());
+    let (route_key, anchor_key) = (route.clone(), card_anchor.clone());
+    let fh_menu = fh.clone();
     let root = div()
         .id(("card", key))
+        .key_context("Card")
+        .track_focus(&fh)
+        .tab_stop(true)
+        .on_action(move |_: &CardOpen, _, cx| navigate(cx, route_key.clone()))
+        .on_action(move |_: &CardMenu, window, cx| open_menu_under(&ctx_key, &anchor_key, items_key(), window, cx))
+        .relative()
         .flex()
         .flex_col()
         .gap(px(m::CARD_GAP))
@@ -188,8 +218,11 @@ pub fn card<V: 'static>(
         .on_click(move |_, _, cx| navigate(cx, route.clone()))
         .on_mouse_down(MouseButton::Right, move |ev: &MouseDownEvent, window, cx| {
             cx.stop_propagation();
+            window.focus(&fh_menu); // a mouse down focuses the card (tabindex=0); the menu returns focus to it on close
             open_menu_at(&ctx_menu, items_ctx(), ev.position, window, cx);
         })
+        .child(track_bounds(&card_anchor))
+        .when(focused, |d| d.child(div().absolute().top_0().left_0().size_full().border_2().border_color(th.accent_fg)))
         .child(match &ids {
             Some(p) => pid(format!("{p}.art"), art).into_any_element(),
             None => art.into_any_element(),

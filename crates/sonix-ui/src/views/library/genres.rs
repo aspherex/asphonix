@@ -58,7 +58,7 @@ impl GenresView {
 }
 
 impl Render for GenresView {
-    fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let th = app::theme(cx);
         let this = cx.entity().downgrade();
         let options: [(GenreSort, &'static str); 2] = [(GenreSort::Tracks, "Most tracks"), (GenreSort::Alphabetical, "A-Z")];
@@ -125,6 +125,6 @@ impl Render for GenresView {
             grid.into_any_element()
         };
         let page = div().relative().w_full().flex_none().flex().flex_col().gap(px(m::PAGE_GAP)).p(px(m::PAGE_PAD)).child(measure(&self.w)).child(pid("lib.header", header)).child(pid("genres.body", body));
-        self.page.wrap(&th, "genres-scroll", pid("page", page))
+        self.page.wrap(window, &th, "genres-scroll", pid("page", page))
     }
 }

@@ -6,7 +6,6 @@ use crate::probe::pid;
 use crate::text::txt;
 use crate::theme::Theme;
 use crate::tracking::{BODY_SM, LABEL_CAPS};
-use crate::widgets::WheelScroll as _;
 use crate::widgets::icon;
 use gpui::{AnyElement, App, Context, CursorStyle, Div, IntoElement, Window, canvas, div, prelude::*, px};
 use sonix_api::Backend;
@@ -149,7 +148,7 @@ impl PageScroll {
         Self { handle: gpui::ScrollHandle::new(), used: Rc::new(Cell::new(false)) }
     }
 
-    pub fn wrap(&self, th: &Theme, id: &'static str, content: impl IntoElement) -> AnyElement {
+    pub fn wrap(&self, window: &mut Window, th: &Theme, id: &'static str, content: impl IntoElement) -> AnyElement {
         let (bar, overflow) = crate::widgets::scrollbar::passive(*th, &self.handle);
         self.used.set(overflow);
         let (handle, used) = (self.handle.clone(), self.used.clone());
@@ -173,7 +172,6 @@ impl PageScroll {
                     .track_scroll(&self.handle)
                     .size_full()
                     .overflow_y_scroll()
-                    .wheel_scroll()
                     .flex()
                     .flex_col()
                     .when(overflow, |d| d.pr(px(crate::widgets::scrollbar::WIDTH)))
@@ -181,6 +179,7 @@ impl PageScroll {
             )
             .child(watch)
             .child(bar)
+            .child(crate::widgets::smooth::drive(window, crate::widgets::smooth::Scrollable::div(std::ptr::addr_of!(self.handle) as usize, &self.handle)))
             .into_any_element()
     }
 }

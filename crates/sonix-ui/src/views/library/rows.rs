@@ -99,7 +99,7 @@ fn icon_button(th: &Theme, id: (&'static str, usize), name: &'static str, color:
     let _ = th;
     let mut d = div().id(id).group("hv").relative().size(px(tr::ICON_BTN)).flex_none().flex().items_center().justify_center().cursor(CursorStyle::PointingHand).text_color(color).hover(move |s| s.text_color(hover));
     if let Some(a) = anchor {
-        d = d.child(gpui::canvas(move |b, _, _| a.set(b), |_, _, _, _| {}).absolute().size_full());
+        d = d.child(gpui::canvas(move |b, _, _| a.set(b), |_, _, _, _| {}).absolute().top_0().left_0().size_full());
     }
     d.child(icon_g(name, tr::ROW_ICON, color, hover))
 }
@@ -219,7 +219,7 @@ pub fn row(th: &Theme, t: &Track, st: &RowState, o: RowOpts, height: f32, ids: O
             .into_any_element(),
     ));
     if let Some(a) = st.anchor.clone() {
-        r = r.child(gpui::canvas(move |b, _, _| a.set(b), |_, _, _, _| {}).absolute().size_full());
+        r = r.child(gpui::canvas(move |b, _, _| a.set(b), |_, _, _, _| {}).absolute().top_0().left_0().size_full());
     }
     r = r
         .when(st.active, |d| d.child(div().absolute().left_0().top_0().bottom_0().w(px(tr::ACTIVE_BAR_W)).bg(th.accent_fg)))

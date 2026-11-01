@@ -441,6 +441,7 @@ impl Shell {
         crate::log("suspend: releasing caches");
         self.suspended = true;
         self.spectrum_on = false;
+        crate::widgets::smooth::clear();
         crate::anim::clear(); // no transition may keep requesting frames while minimized
         app::call(cx, |b| {
             let _ = b.player_set_spectrum_active(false);
@@ -563,6 +564,8 @@ impl Render for Shell {
             .on_action(cx.listener(|this, _: &ToggleTheme, _, cx| this.toggle_theme(cx)))
             .on_action(cx.listener(|this, _: &NavBack, _, cx| this.go_back(cx)))
             .on_action(cx.listener(|this, _: &NavForward, _, cx| this.go_forward(cx)))
+            .on_action(cx.listener(|_, _: &library::TabNext, window, _| window.focus_next()))
+            .on_action(cx.listener(|_, _: &library::TabPrev, window, _| window.focus_prev()))
             .on_action(cx.listener(|this, _: &FocusSearch, window, cx| {
                 let f = this.search.read(cx).focus_handle.clone();
                 window.focus(&f);
@@ -603,7 +606,8 @@ impl Render for Shell {
                     .child(crate::probe::pid("shell.body", body))
                     .when(!on_np, |d| d.child(self.dock.clone())),
             )
-            .child(self.menu.clone());
+            .child(self.menu.clone())
+            .child(crate::widgets::smooth::host());
         #[cfg(feature = "parity")]
         let root = root.child(crate::probe::frame_marker());
         root

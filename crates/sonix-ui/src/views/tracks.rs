@@ -16,7 +16,6 @@ use crate::metrics::{anim as m_anim, controls as ctl, tracks as tr};
 use crate::text::txt;
 use crate::theme::Theme;
 use crate::tracking::{BODY_MD, BODY_SM, HEADLINE_MD, LABEL_CAPS, MONO_CODE, MONO_DATA, TypeSpec};
-use crate::widgets::WheelScroll as _;
 use crate::widgets::button::{Variant, button};
 use crate::widgets::context_menu::{ContextMenu, MenuItem};
 use crate::widgets::scrollbar::{self, ScrollbarHandle};
@@ -749,7 +748,6 @@ impl Render for TracksView {
             }),
         )
         .track_scroll(self.list.clone())
-        .wheel_scroll()
         .size_full();
 
         let body: AnyElement = if total == 0 && self.pager.has_page(0) {
@@ -786,6 +784,7 @@ impl Render for TracksView {
                 .size_full()
                 .child(div().size_full().pr(px(tr::SCROLLBAR_W)).child(list))
                 .child(scrollbar::scrollbar("tracks-scrollbar", th, &self.list, &self.sb))
+                .child(crate::widgets::smooth::drive(window, crate::widgets::smooth::Scrollable::list(&self.list)))
                 .into_any_element()
         };
 

@@ -116,6 +116,13 @@ fn bind_keys(cx: &mut App) {
         KeyBinding::new("shift-enter", shell::EnqueueSelected, Some("TrackList")),
         // `trackListKeydown`'s `selectAll` (Album detail passes it; the Tracks route does not and ignores the action)
         KeyBinding::new("ctrl-a", views::library::album_detail::SelectAllRows, Some("TrackList")),
+        // album/artist cards (`tabindex=0`, Enter/Space open, Menu / Shift+F10 the context menu) and Tab traversal
+        KeyBinding::new("enter", views::library::cards::CardOpen, Some("Card")),
+        KeyBinding::new("space", views::library::cards::CardOpen, Some("Card")),
+        KeyBinding::new("menu", views::library::cards::CardMenu, Some("Card")),
+        KeyBinding::new("shift-f10", views::library::cards::CardMenu, Some("Card")),
+        KeyBinding::new("tab", views::library::TabNext, Some("Root && !TextInput")),
+        KeyBinding::new("shift-tab", views::library::TabPrev, Some("Root && !TextInput")),
         KeyBinding::new("menu", shell::OpenMenuKey, Some("TrackList")),
         KeyBinding::new("shift-f10", shell::OpenMenuKey, Some("TrackList")),
         KeyBinding::new("space", shell::PlayPause, Some("Root && !TextInput")),

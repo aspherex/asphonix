@@ -6,7 +6,6 @@ use super::parts::measure;
 use crate::metrics::library as m;
 use crate::pager::{PAGE, Pager};
 use crate::theme::Theme;
-use crate::widgets::WheelScroll as _;
 use crate::widgets::scrollbar::{self, ScrollbarHandle};
 use gpui::{AnyElement, Context, IntoElement, UniformListScrollHandle, Window, div, point, prelude::*, px, uniform_list};
 use std::cell::{Cell, RefCell};
@@ -139,7 +138,6 @@ pub fn grid_element<T: Clone + 'static, V: GridHost<T>>(this: &mut V, th: Theme,
         }),
     )
     .track_scroll(list.clone())
-    .wheel_scroll()
     .size_full();
     div()
         .relative()
@@ -147,6 +145,7 @@ pub fn grid_element<T: Clone + 'static, V: GridHost<T>>(this: &mut V, th: Theme,
         .child(measure(&width))
         .child(div().size_full().when(overflow, |d| d.pr(px(scrollbar::WIDTH))).child(body))
         .child(scrollbar::scrollbar("vgrid-scrollbar", th, &list, &sb))
+        .child(crate::widgets::smooth::drive(window, crate::widgets::smooth::Scrollable::list(&list)))
         .into_any_element()
 }
 

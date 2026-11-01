@@ -64,8 +64,7 @@ impl Txt {
 const SNAP: f32 = 1.0;
 
 fn run_for(text: &str, family: &'static str, weight: f32, color: Hsla) -> TextRun {
-    let mut f = font(family);
-    f.weight = FontWeight(weight);
+    let f = css_font(family, weight);
     TextRun { len: text.len(), font: f, color, background_color: None, underline: None, strikethrough: None }
 }
 
@@ -183,4 +182,13 @@ impl Element for Txt {
             }
         }
     }
+}
+
+/// Chromium shapes with the font's `kern` (GPOS pair kerning) on; DirectWrite via GPUI leaves it off unless the
+/// feature is requested explicitly ("AV", "AY", "PLAY" were 2-6 % wider natively). Every face we create goes through this.
+pub fn css_font(family: &'static str, weight: f32) -> gpui::Font {
+    let mut f = font(family);
+    f.weight = FontWeight(weight);
+    f.features = gpui::FontFeatures(Arc::new(vec![("kern".into(), 1)]));
+    f
 }

@@ -10,7 +10,6 @@ use crate::probe::pid;
 use crate::text::txt;
 use crate::theme::Theme;
 use crate::tracking::{BODY_LG, BODY_MD, BODY_SM, LABEL_CAPS, MONO_CODE, MONO_DATA};
-use crate::widgets::WheelScroll as _;
 use crate::widgets::icon;
 use gpui::{Bounds, ClickEvent, Context, CursorStyle, Entity, IntoElement, Render, Subscription, Window, canvas, div, fill, point, prelude::*, px, size};
 use sonix_api::format as fmt;
@@ -152,7 +151,7 @@ impl Render for QueueRail {
                 .child(pid("rail.queue.empty", div().p(px(space::MD)).child(txt(&th, BODY_SM, "Queue is empty.").color(th.muted))))
         } else {
             let (bar, overflow) = crate::widgets::scrollbar::passive(th, &self.scroll);
-            let mut list = div().id("queue-list").track_scroll(&self.scroll).size_full().overflow_y_scroll().wheel_scroll().flex().flex_col().when(overflow, |d| d.pr(px(tr::SCROLLBAR_W)));
+            let mut list = div().id("queue-list").track_scroll(&self.scroll).size_full().overflow_y_scroll().flex().flex_col().when(overflow, |d| d.pr(px(tr::SCROLLBAR_W)));
             if let Some(q) = &q {
                 for (i, it) in q.items.iter().enumerate() {
                     if (i as i64) < cur {
@@ -210,7 +209,7 @@ impl Render for QueueRail {
                     .border_color(th.border)
                     .child(txt(&th, BODY_SM, format!("+ {} more from {}", fmt::fmt_int(s.remaining as u64), s.label)).color(th.muted))
             });
-            div().flex_1().min_h_0().flex().flex_col().child(header(&th, "rail.queue.header", label, None)).child(div().relative().flex_1().min_h_0().child(list).child(bar)).children(footer)
+            div().flex_1().min_h_0().flex().flex_col().child(header(&th, "rail.queue.header", label, None)).child(div().relative().flex_1().min_h_0().child(list).child(bar).child(crate::widgets::smooth::drive(window, crate::widgets::smooth::Scrollable::div(std::ptr::addr_of!(self.scroll) as usize, &self.scroll)))).children(footer)
         };
 
         pid(

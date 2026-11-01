@@ -27,6 +27,8 @@ pub mod pages;
 pub mod parts;
 pub mod rows;
 
+gpui::actions!(sonix_library_nav, [TabNext, TabPrev]);
+
 /// What library views tell the shell (and the shell tells them).
 #[derive(Clone, Debug)]
 pub enum LibEvent {

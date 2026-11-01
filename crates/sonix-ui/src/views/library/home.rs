@@ -16,7 +16,6 @@ use crate::router::Route;
 use crate::text::txt;
 use crate::theme::Theme;
 use crate::tracking::{BODY_MD, BODY_SM, HEADLINE_LG, HEADLINE_SM, LABEL_CAPS, MONO_CODE, MONO_DATA};
-use crate::widgets::WheelScroll as _;
 use crate::widgets::icon;
 use crate::widgets::scrollbar::{self, ScrollbarHandle};
 use gpui::{AnyElement, Context, CursorStyle, IntoElement, Render, Subscription, UniformListScrollHandle, Window, div, prelude::*, px, uniform_list};
@@ -300,7 +299,7 @@ impl HomeView {
         g.into_any_element()
     }
 
-    fn list_block(&mut self, th: &Theme, cx: &mut Context<Self>) -> AnyElement {
+    fn list_block(&mut self, th: &Theme, window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
         let th = *th;
         let overflow = list_overflows(&self.list).unwrap_or(self.pager.total > 0);
         let total = self.pager.total;
@@ -342,7 +341,6 @@ impl HomeView {
             }),
         )
         .track_scroll(self.list.clone())
-        .wheel_scroll()
         .size_full();
         let wrap = div()
             .relative()
@@ -352,7 +350,8 @@ impl HomeView {
             .border_color(th.border)
             .bg(th.low)
             .child(div().size_full().when(overflow, |d| d.pr(px(scrollbar::WIDTH))).child(list))
-            .child(scrollbar::scrollbar("home-scrollbar", th, &self.list, &self.sb));
+            .child(scrollbar::scrollbar("home-scrollbar", th, &self.list, &self.sb))
+            .child(crate::widgets::smooth::drive(window, crate::widgets::smooth::Scrollable::list(&self.list)));
         div()
             .flex()
             .flex_col()
@@ -496,13 +495,13 @@ impl Render for HomeView {
         }
 
         // Recently Ingested // Server Pipeline
-        children.push(self.list_block(&th, cx));
+        children.push(self.list_block(&th, window, cx));
 
         let mut home = div().relative().w_full().flex_none().flex().flex_col().gap(px(m::HOME_GAP)).p(px(m::HOME_PAD)).child(measure(&self.w));
         for (i, c) in children.into_iter().enumerate() {
             home = home.child(pid(format!("home.child.{i}"), c));
         }
         let _ = (anchor_cell, anim::clear as fn());
-        self.page.wrap(&th, "home-scroll", home)
+        self.page.wrap(window, &th, "home-scroll", home)
     }
 }

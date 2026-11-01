@@ -15,7 +15,6 @@ use crate::text::{natural_width, txt};
 use crate::theme::{MONO, Theme};
 use crate::tracking::{BODY_MD, BODY_SM, HEADLINE_LG, HEADLINE_SM, LABEL_CAPS, MONO_CODE, MONO_DATA};
 use crate::views::shell::{EnqueueSelected, OpenMenuKey, PlaySelected, SelDown, SelUp};
-use crate::widgets::WheelScroll as _;
 use crate::widgets::context_menu::MenuItem;
 use crate::widgets::scrollbar::{self, ScrollbarHandle};
 use crate::widgets::{hard_shadow, icon};
@@ -379,7 +378,7 @@ impl AlbumDetailView {
             let _ = t_star.update(cx, |t, cx| t.toggle_album_star(cx));
         });
         let more_btn = icon_btn("album-more", "more", false)
-            .child(gpui::canvas(move |b, _, _| anchor.set(b), |_, _, _, _| {}).absolute().size_full())
+            .child(gpui::canvas(move |b, _, _| anchor.set(b), |_, _, _, _| {}).absolute().top_0().left_0().size_full())
             .on_click(move |_: &ClickEvent, window, cx| {
                 let b = anchor2.get();
                 let pos = point(b.origin.x, b.origin.y + b.size.height + px(4.));
@@ -444,7 +443,6 @@ impl AlbumDetailView {
             }),
         )
         .track_scroll(self.list.clone())
-        .wheel_scroll()
         .size_full();
         let body = div()
             .id("album-body")
@@ -477,7 +475,8 @@ impl AlbumDetailView {
             .relative()
             .size_full()
             .child(div().size_full().when(overflow, |d| d.pr(px(scrollbar::WIDTH))).child(list))
-            .child(scrollbar::scrollbar("album-scrollbar", th, &self.list, &self.sb));
+            .child(scrollbar::scrollbar("album-scrollbar", th, &self.list, &self.sb))
+            .child(crate::widgets::smooth::drive(window, crate::widgets::smooth::Scrollable::list(&self.list)));
         let _ = window;
         pid(
             "album.panel",
@@ -633,7 +632,7 @@ impl Render for AlbumDetailView {
         } else {
             div().p(px(crate::metrics::space::XL)).child(txt(&th, MONO_CODE, "ALBUM UNAVAILABLE.").color(th.clip)).into_any_element()
         };
-        self.page.wrap(&th, "album-scroll", content)
+        self.page.wrap(window, &th, "album-scroll", content)
     }
 }
 

@@ -5,6 +5,7 @@ pub mod button;
 pub mod context_menu;
 pub mod scrollbar;
 pub mod slider;
+pub mod smooth;
 pub mod text_input;
 pub mod tooltip;
 
@@ -22,20 +23,6 @@ pub fn icon_g(name: &str, size: f32, color: Hsla, hover: Hsla) -> Svg {
     icon(name, size, color).group_hover("hv", move |s| s.text_color(hover))
 }
 
-
-/// Distance one mouse-wheel notch scrolls: Chromium moves 100 CSS px per notch. GPUI turns a notch into
-/// `lines x line height of the scroll element`, so every scroll container (`overflow_y_scroll`, `uniform_list`) calls
-/// [`WheelScroll::wheel_scroll`], which sets its line height to a third of that (3 lines per notch). GPUI rounds the
-/// line height to whole px, so the effective distance is 3 x 33 = 99 px (1 % under Chromium; 100 / 3 and 33.5 both land
-/// on a whole number too: 33 and 34).
-pub const WHEEL_PX_PER_NOTCH: f32 = 100.0;
-
-pub trait WheelScroll: Styled + Sized {
-    fn wheel_scroll(self) -> Self {
-        self.line_height(px((WHEEL_PX_PER_NOTCH / 3.0_f32).floor()))
-    }
-}
-impl<T: Styled> WheelScroll for T {}
 
 /// `box-shadow: Npx Npx 0 <shadow>`: hard offset, no blur. Only for small static elements.
 pub fn hard_shadow(th: &Theme, off: f32) -> Vec<BoxShadow> {

@@ -387,17 +387,23 @@ impl ArtistDetailView {
         } else if let Some(bio) = self.info.as_ref().and_then(|i| i.biography.clone()) {
             // `line-height: 1.5` of the 13 px body font, clamped to 4 lines until expanded
             let lh = 13.0 * 1.5;
-            let lines = wrapped_lines(window, &bio, self.bio_w.get(), &th);
-            let overflows = lines > 4;
+            let all = bio_lines(window, &bio, self.bio_w.get(), &th);
+            let overflows = all.len() > 4;
             let expanded = self.bio_expanded;
-            let p = div()
-                .w_full()
-                .font_family(th.body_font)
-                .text_size(px(13.))
-                .line_height(px(lh))
-                .text_color(th.muted)
-                .when(!expanded, |d| d.max_h(px(lh * 4.0)).overflow_hidden())
-                .child(SharedString::from(bio));
+            let spec = crate::tracking::TypeSpec { line: lh, ..BODY_MD };
+            // -webkit-line-clamp: 4: the fourth line is cut to make room for "…"
+            let shown: Vec<String> = if expanded || !overflows {
+                all
+            } else {
+                let mut v: Vec<String> = all.into_iter().take(4).collect();
+                let last = v.pop().unwrap_or_default();
+                v.push(ellipsize(window, &last, self.bio_w.get(), &th));
+                v
+            };
+            let mut p = div().w_full().flex().flex_col();
+            for l in shown {
+                p = p.child(div().flex().child(txt(&th, spec, l).color(th.muted)));
+            }
             sec = sec.child(pid("artist.bio", p));
             if overflows || expanded {
                 let this = _cx.entity().downgrade();
@@ -415,15 +421,39 @@ impl ArtistDetailView {
     }
 }
 
-/// Number of lines `text` wraps to at `width` in the 13 px body font (to decide whether the clamp hides anything).
-fn wrapped_lines(window: &Window, text: &str, width: f32, th: &Theme) -> usize {
+/// The visual lines `text` wraps to at `width` in the 13 px body font (`white-space: pre-line`: newlines break, spaces collapse at wraps).
+fn bio_lines(window: &Window, text: &str, width: f32, th: &Theme) -> Vec<String> {
     if width <= 0.0 {
-        return 0;
+        return Vec::new();
     }
-    let mut f = gpui::font(th.body_font);
-    f.weight = gpui::FontWeight(400.0);
+    let f = crate::text::css_font(th.body_font, 400.0);
     let run = gpui::TextRun { len: text.len(), font: f, color: gpui::black(), background_color: None, underline: None, strikethrough: None };
-    window.text_system().shape_text(SharedString::from(text.to_string()), px(13.), &[run], Some(px(width)), None).map(|v| v.iter().map(|l| 1 + l.wrap_boundaries().len()).sum()).unwrap_or(0)
+    let Ok(shaped) = window.text_system().shape_text(SharedString::from(text.to_string()), px(13.), &[run], Some(px(width)), None) else { return Vec::new() };
+    let mut out = Vec::new();
+    let mut para_start = 0usize;
+    for line in shaped.iter() {
+        let layout = &line.unwrapped_layout;
+        let mut cuts: Vec<usize> = line.wrap_boundaries().iter().map(|b| layout.runs[b.run_ix].glyphs[b.glyph_ix].index).collect();
+        cuts.push(layout.len);
+        let mut start = 0usize;
+        for c in cuts {
+            let seg = &text[para_start + start..(para_start + c).min(text.len())];
+            out.push(seg.trim_end().to_string());
+            start = c;
+        }
+        para_start += layout.len + 1; // the newline between paragraphs
+    }
+    out
+}
+
+/// `line` cut at a glyph boundary so that it plus "…" fits `width`.
+fn ellipsize(window: &Window, line: &str, width: f32, th: &Theme) -> String {
+    let nat = |s: &str| crate::text::natural_width(window, s, th.body_font, 13.0, 400.0, 0.0);
+    let mut chars: Vec<char> = line.chars().collect();
+    while !chars.is_empty() && nat(&format!("{}…", chars.iter().collect::<String>())) > width {
+        chars.pop();
+    }
+    format!("{}…", chars.into_iter().collect::<String>())
 }
 
 impl Focusable for ArtistDetailView {
@@ -497,6 +527,6 @@ impl Render for ArtistDetailView {
             div().p(px(crate::metrics::space::XL)).child(txt(&th, MONO_CODE, "ARTIST UNAVAILABLE.").color(th.clip)).into_any_element()
         };
         let _ = BODY_MD;
-        self.page.wrap(&th, "artist-scroll", content)
+        self.page.wrap(window, &th, "artist-scroll", content)
     }
 }
