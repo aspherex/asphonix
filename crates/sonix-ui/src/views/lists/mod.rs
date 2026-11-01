@@ -69,7 +69,7 @@ pub struct ListsHost {
     playlists: Option<Entity<playlists::PlaylistsView>>,
     search: Option<Entity<search::SearchView>>,
     settings: Option<Entity<settings::SettingsView>>,
-    favorites: Option<Entity<favorites::FavoritesView>>,
+    pub(crate) favorites: Option<Entity<favorites::FavoritesView>>,
     pub(crate) login: Option<Entity<login::LoginView>>,
     subs: Vec<Subscription>,
 }
@@ -144,7 +144,8 @@ impl Shell {
             }
             Route::Favorites => {
                 if self.lists.favorites.is_none() {
-                    let v = cx.new(|cx| favorites::FavoritesView::new(backend, cx));
+                    let lib = self.lib_ctx.clone();
+                    let v = cx.new(|cx| favorites::FavoritesView::new(lib, cx));
                     self.lists.subs.push(cx.subscribe(&v, |sh: &mut Shell, _, ev: &ListsEvent, cx| sh.lists_event(ev, cx)));
                     self.lists.favorites = Some(v);
                 }

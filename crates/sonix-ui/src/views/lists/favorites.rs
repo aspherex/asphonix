@@ -1,46 +1,79 @@
-//! `Favorites.svelte` ("Starred Crates"): starred albums with a link to Liked Songs.
-//! TODO(albums agent): the grid of `AlbumCard`s (`VirtualGrid`, minCellWidth 140, gap 16) belongs to the Albums route
-//! port; until it lands a non-empty result shows the count only. The mock has no starred albums by default, so the
-//! empty state is what both apps show.
+//! `Favorites.svelte` ("Starred Crates"): starred albums in the library routes' `VirtualGrid` of `AlbumCard`s
+//! (`minCellWidth 140, textHeight 40, gap 16`, pages of 60 via `browse_get_albums({ starredOnly })`), with a link to
+//! Liked Songs. Remounted on every visit like the Svelte route (the shell drops the entity when the route changes).
 use super::ListsEvent;
 use crate::app;
 use crate::metrics::{lists as lm, space};
+use crate::pager::PAGE;
 use crate::probe::pid;
 use crate::router::Route;
 use crate::text::txt;
 use crate::tracking::{BODY_SM, HEADLINE_MD, LABEL_CAPS, MONO_CODE};
-use gpui::{Context, CursorStyle, EventEmitter, IntoElement, Render, Window, div, prelude::*, px};
+use crate::views::library::Ctx;
+use crate::views::library::cards::{CardItem, card};
+use crate::views::library::grid::{Geo, GridHost, GridState, grid_element};
+use gpui::{AnyElement, Context, CursorStyle, EventEmitter, IntoElement, Render, Window, div, prelude::*, px};
 use sonix_api::*;
-use std::sync::Arc;
 
 impl EventEmitter<ListsEvent> for FavoritesView {}
 
 pub struct FavoritesView {
-    total: usize,
-    loaded: bool,
+    ctx: Ctx,
+    grid: GridState<Album>,
 }
 
 impl FavoritesView {
-    pub fn new(backend: Arc<dyn Backend>, cx: &mut Context<Self>) -> Self {
+    pub fn new(ctx: Ctx, cx: &mut Context<Self>) -> Self {
+        let mut this = Self { ctx, grid: GridState::new("favorites".into()) };
+        this.grid.pager.want(0);
+        this.fetch(0, cx);
+        this
+    }
+
+    fn fetch(&mut self, page: usize, cx: &mut Context<Self>) {
+        let (b, epoch) = (self.ctx.backend.clone(), self.grid.pager.epoch);
+        let req = GetAlbumsRequest { offset: page * PAGE, limit: PAGE, sort: AlbumSort::Alphabetical, filter: Some(AlbumFilter { starred_only: true, ..Default::default() }) };
         cx.spawn(async move |this, cx| {
-            let r = cx
-                .background_executor()
-                .spawn(async move { backend.browse_get_albums(GetAlbumsRequest { offset: 0, limit: 60, sort: AlbumSort::Alphabetical, filter: Some(AlbumFilter { genre: None, year: None, starred_only: true }) }) })
-                .await;
+            let r = cx.background_executor().spawn(async move { b.browse_get_albums(req) }).await;
             let _ = this.update(cx, |t, cx| {
-                t.total = r.map(|p| p.total).unwrap_or(0);
-                t.loaded = true;
+                match r {
+                    Ok(p) => {
+                        let centre = t.grid.vis.start * t.grid.cols;
+                        if t.grid.pager.insert(epoch, page, p.items, centre) {
+                            t.grid.pager.total = p.total;
+                        }
+                    }
+                    Err(_) => t.grid.pager.total = 0,
+                }
+                t.grid.loaded = true;
                 cx.notify();
             });
         })
         .detach();
-        Self { total: 0, loaded: false }
+    }
+}
+
+impl GridHost<Album> for FavoritesView {
+    fn grid(&mut self) -> &mut GridState<Album> {
+        &mut self.grid
+    }
+    fn cell(&mut self, _ix: usize, item: Option<Album>, geo: Geo, window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
+        let th = app::theme(cx);
+        // `{#if !album}<div class="loading">`
+        let Some(a) = item else { return div().w(px(geo.cell_w)).h(px(geo.cell_h)).flex_none().bg(th.low).into_any_element() };
+        card(&self.ctx.clone(), &th, CardItem::Album(&a), geo.cell_w, Some(geo.cell_h), None, window, cx)
+    }
+    fn request(&mut self, page: usize, cx: &mut Context<Self>) {
+        if self.grid.pager.want(page) {
+            self.fetch(page, cx);
+        }
     }
 }
 
 impl Render for FavoritesView {
-    fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let th = app::theme(cx);
+        let total = self.grid.pager.total;
         let header = div()
             .flex()
             .flex_row()
@@ -63,13 +96,13 @@ impl Render for FavoritesView {
                             .child(txt(&th, LABEL_CAPS, "Starred tracks → Liked Songs"))
                             .on_click(cx.listener(|_, _, _, cx| cx.emit(ListsEvent::Navigate(Route::Liked)))),
                     )
-                    .child(pid("page.count", txt(&th, MONO_CODE, format!("{} ALBUMS", self.total)).color(th.muted))),
+                    .child(pid("page.count", txt(&th, MONO_CODE, format!("{total} ALBUMS")).color(th.muted))),
             );
-        let body = if self.total == 0 {
-            let m = if self.loaded { "No starred albums yet — tap the star on any album or track." } else { "Loading…" };
-            div().child(txt(&th, BODY_SM, m).color(th.muted))
+        let body: AnyElement = if total == 0 {
+            let m = if self.grid.loaded { "No starred albums yet — tap the star on any album or track." } else { "Loading…" };
+            div().child(txt(&th, BODY_SM, m).color(th.muted)).into_any_element()
         } else {
-            div().child(txt(&th, BODY_SM, format!("{} starred albums", self.total)).color(th.muted))
+            pid("lib.gridwrap", div().flex_1().min_h_0().child(grid_element(self, th, window, cx))).into_any_element()
         };
         pid("page", div().size_full().flex().flex_col().gap(px(space::MD)).p(px(lm::PAGE_PAD)).child(header).child(body))
     }

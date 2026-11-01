@@ -71,7 +71,7 @@ pub struct Shell {
     /// `uiState.queueRailCollapsed`: the docked rail (>= 1440 px) hidden by the dock's queue button.
     pub(crate) rail_collapsed: bool,
     /// Library routes (Home, Albums, ..., `views/library`): the view entity of the open route and what it needs.
-    lib_ctx: library::Ctx,
+    pub(crate) lib_ctx: library::Ctx,
     lib_stage: Option<gpui::AnyView>,
     last_vw: f32,
     spectrum_on: bool,
@@ -422,6 +422,10 @@ impl Shell {
     fn route_changed(&mut self, cx: &mut Context<Self>) {
         if *self.router.current() != Route::Login {
             self.lists.login = None;
+        }
+        // Starred Crates remounts on every visit (`onMount(() => pager.reset())`)
+        if *self.router.current() != Route::Favorites {
+            self.lists.favorites = None;
         }
         self.queue_drawer = false;
         let route = self.router.current().clone();
