@@ -42,9 +42,6 @@ impl BootIntro {
     pub fn new(th: Theme, backdrop: Option<Arc<gpui::RenderImage>>) -> Self {
         Self { th, start: crate::clock::now(), backdrop, done: false, skipped_at: None }
     }
-    pub fn set_theme(&mut self, th: Theme) {
-        self.th = th;
-    }
     pub fn skip(&mut self, cx: &mut Context<Self>) {
         if self.skipped_at.is_none() {
             self.skipped_at = Some(crate::clock::now());

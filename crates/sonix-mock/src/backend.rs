@@ -1122,126 +1122,6 @@ impl Backend for MockBackend {
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    fn req(sort: TrackSortField, dir: SortDir, filter: Option<&str>, offset: usize, limit: usize) -> GetTracksRequest {
-        GetTracksRequest { offset, limit, sort, dir, filter: filter.map(Into::into) }
-    }
-
-    #[test]
-    fn paging_is_consistent_and_deterministic() {
-        let b = MockBackend::new();
-        let a = b.browse_get_tracks(req(TrackSortField::Title, SortDir::Asc, None, 0, 100)).unwrap();
-        assert_eq!(a.total, 54_515);
-        assert_eq!(a.items.len(), 100);
-        // page 1 + page 2 == one 200-row page
-        let p2 = b.browse_get_tracks(req(TrackSortField::Title, SortDir::Asc, None, 100, 100)).unwrap();
-        let both = b.browse_get_tracks(req(TrackSortField::Title, SortDir::Asc, None, 0, 200)).unwrap();
-        assert_eq!(both.items[..100], a.items[..]);
-        assert_eq!(both.items[100..], p2.items[..]);
-        // a second backend instance yields identical rows
-        let b2 = MockBackend::new();
-        assert_eq!(b2.browse_get_tracks(req(TrackSortField::Title, SortDir::Asc, None, 100, 100)).unwrap().items, p2.items);
-        // last partial page
-        let last = b.browse_get_tracks(req(TrackSortField::Title, SortDir::Asc, None, 54_500, 100)).unwrap();
-        assert_eq!(last.items.len(), 15);
-        let past = b.browse_get_tracks(req(TrackSortField::Title, SortDir::Asc, None, 60_000, 100)).unwrap();
-        assert!(past.items.is_empty());
-    }
-
-    #[test]
-    fn sort_is_ordered_and_desc_reverses_keys() {
-        let b = MockBackend::new();
-        let asc = b.browse_get_tracks(req(TrackSortField::Title, SortDir::Asc, None, 0, 200)).unwrap();
-        assert!(asc.items.windows(2).all(|w| w[0].title.to_lowercase() <= w[1].title.to_lowercase()));
-        let desc = b.browse_get_tracks(req(TrackSortField::Title, SortDir::Desc, None, 0, 200)).unwrap();
-        assert!(desc.items.windows(2).all(|w| w[0].title.to_lowercase() >= w[1].title.to_lowercase()));
-        let yr = b.browse_get_tracks(req(TrackSortField::Year, SortDir::Asc, None, 0, 200)).unwrap();
-        assert!(yr.items.windows(2).all(|w| w[0].year <= w[1].year));
-        let added = b.browse_get_tracks(req(TrackSortField::DateAdded, SortDir::Desc, None, 0, 200)).unwrap();
-        assert!(added.items.windows(2).all(|w| w[0].date_added >= w[1].date_added));
-        // a stable sort: equal keys keep ascending library order
-        let ids: Vec<usize> = yr.items.iter().filter(|t| t.year == yr.items[0].year).map(|t| track_index(&t.id).unwrap()).collect();
-        assert!(ids.windows(2).all(|w| w[0] < w[1]));
-    }
-
-    #[test]
-    fn filter_narrows_total_and_matches_every_row() {
-        let b = MockBackend::new();
-        let r = b.browse_get_tracks(req(TrackSortField::Artist, SortDir::Asc, Some("  Overmono "), 0, 100)).unwrap();
-        assert!(r.total > 0 && r.total < 54_515);
-        for t in &r.items {
-            let hay = format!("{} {} {}", t.title, t.artist, t.album.clone().unwrap()).to_lowercase();
-            assert!(hay.contains("overmono"));
-        }
-        let none = b.browse_get_tracks(req(TrackSortField::Artist, SortDir::Asc, Some("zzzq-nothing"), 0, 100)).unwrap();
-        assert_eq!(none.total, 0);
-    }
-
-    #[test]
-    fn play_all_opens_a_rolling_window_and_next_advances() {
-        let b = MockBackend::new();
-        b.player_play_all(PlayAllRequest {
-            order: TrackOrder::Sort { field: TrackSortField::Title, dir: SortDir::Asc },
-            filter: None,
-            start_track_id: None,
-            flow: None,
-        })
-        .unwrap();
-        let q = b.player_get_queue(PageRequest { offset: 0, limit: 100 }).unwrap();
-        assert!(q.total <= QUEUE_WINDOW + 1, "{}", q.total);
-        let src = q.source.unwrap();
-        assert_eq!(src.kind, SourceKind::AllTracks);
-        assert_eq!(src.mode, SourceMode::InOrder);
-        assert_eq!(src.remaining + q.total, 54_515);
-        let first = b.player_get_state().unwrap().track.unwrap().id;
-        b.player_next().unwrap();
-        let second = b.player_get_state().unwrap().track.unwrap().id;
-        assert_ne!(first, second);
-        assert_eq!(b.player_get_state().unwrap().status, PlaybackStatus::Playing);
-        b.player_pause().unwrap();
-        assert_eq!(b.player_get_state().unwrap().status, PlaybackStatus::Paused);
-    }
-
-    #[test]
-    fn volume_is_db_tapered_and_bit_perfect_only_at_unity() {
-        assert_eq!(volume_db(1.0), Some(0.0));
-        assert_eq!(volume_db(0.0), None);
-        assert!((volume_db(0.5).unwrap() + 30.0).abs() < 1e-9);
-        let b = MockBackend::new();
-        b.player_play_queue(PlayQueueRequest { track_ids: vec!["tr_0".into()], start_index: 0 }).unwrap();
-        assert!(b.player_get_state().unwrap().bit_perfect);
-        b.player_set_volume(SetVolumeRequest { volume: 0.5 }).unwrap();
-        assert!(!b.player_get_state().unwrap().bit_perfect);
-    }
-
-    #[test]
-    fn events_flow_and_spectrum_is_gated() {
-        let b = MockBackend::new();
-        let rx = b.subscribe();
-        b.player_play_queue(PlayQueueRequest { track_ids: vec!["tr_1".into()], start_index: 0 }).unwrap();
-        assert!(matches!(rx.recv_timeout(Duration::from_secs(1)).unwrap(), Event::PlayerState(_)));
-        // spectrum off: no Spectrum event within 300 ms while playing
-        std::thread::sleep(Duration::from_millis(300));
-        assert!(!rx.try_iter().any(|e| matches!(e, Event::Spectrum(_))));
-        b.player_set_spectrum_active(true).unwrap();
-        std::thread::sleep(Duration::from_millis(300));
-        assert!(rx.try_iter().any(|e| matches!(e, Event::Spectrum(_))));
-        b.player_set_spectrum_active(false).unwrap();
-        b.player_pause().unwrap();
-    }
-
-    #[test]
-    fn art_is_exact_size_and_deterministic() {
-        let b = MockBackend::new();
-        let a = b.art_get("al_5", 64).unwrap();
-        assert_eq!((a.width, a.height, a.rgba.len()), (64, 64, 64 * 64 * 4));
-        assert_eq!(a, b.art_get("al_5", 64).unwrap());
-        assert_ne!(a.rgba, b.art_get("al_6", 64).unwrap().rgba);
-    }
-}
 
 /// mock.ts `mockWaveform`: only the track playback holds is scanned (a stopped/other track answers
 /// "no waveform"); the scan fills in over ~1.5 s of (virtual) playback time, 240 RMS buckets.
@@ -1460,5 +1340,164 @@ impl Inner {
             c.current = Some(0);
             Self::start_current(c);
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn req(sort: TrackSortField, dir: SortDir, filter: Option<&str>, offset: usize, limit: usize) -> GetTracksRequest {
+        GetTracksRequest { offset, limit, sort, dir, filter: filter.map(Into::into) }
+    }
+
+    #[test]
+    fn paging_is_consistent_and_deterministic() {
+        let b = MockBackend::new();
+        let a = b.browse_get_tracks(req(TrackSortField::Title, SortDir::Asc, None, 0, 100)).unwrap();
+        assert_eq!(a.total, 54_515);
+        assert_eq!(a.items.len(), 100);
+        // page 1 + page 2 == one 200-row page
+        let p2 = b.browse_get_tracks(req(TrackSortField::Title, SortDir::Asc, None, 100, 100)).unwrap();
+        let both = b.browse_get_tracks(req(TrackSortField::Title, SortDir::Asc, None, 0, 200)).unwrap();
+        assert_eq!(both.items[..100], a.items[..]);
+        assert_eq!(both.items[100..], p2.items[..]);
+        // a second backend instance yields identical rows
+        let b2 = MockBackend::new();
+        assert_eq!(b2.browse_get_tracks(req(TrackSortField::Title, SortDir::Asc, None, 100, 100)).unwrap().items, p2.items);
+        // last partial page
+        let last = b.browse_get_tracks(req(TrackSortField::Title, SortDir::Asc, None, 54_500, 100)).unwrap();
+        assert_eq!(last.items.len(), 15);
+        let past = b.browse_get_tracks(req(TrackSortField::Title, SortDir::Asc, None, 60_000, 100)).unwrap();
+        assert!(past.items.is_empty());
+    }
+
+    #[test]
+    fn sort_is_ordered_and_desc_reverses_keys() {
+        let b = MockBackend::new();
+        let asc = b.browse_get_tracks(req(TrackSortField::Title, SortDir::Asc, None, 0, 200)).unwrap();
+        assert!(asc.items.windows(2).all(|w| w[0].title.to_lowercase() <= w[1].title.to_lowercase()));
+        let desc = b.browse_get_tracks(req(TrackSortField::Title, SortDir::Desc, None, 0, 200)).unwrap();
+        assert!(desc.items.windows(2).all(|w| w[0].title.to_lowercase() >= w[1].title.to_lowercase()));
+        let yr = b.browse_get_tracks(req(TrackSortField::Year, SortDir::Asc, None, 0, 200)).unwrap();
+        assert!(yr.items.windows(2).all(|w| w[0].year <= w[1].year));
+        let added = b.browse_get_tracks(req(TrackSortField::DateAdded, SortDir::Desc, None, 0, 200)).unwrap();
+        assert!(added.items.windows(2).all(|w| w[0].date_added >= w[1].date_added));
+        // a stable sort: equal keys keep ascending library order
+        let ids: Vec<usize> = yr.items.iter().filter(|t| t.year == yr.items[0].year).map(|t| track_index(&t.id).unwrap()).collect();
+        assert!(ids.windows(2).all(|w| w[0] < w[1]));
+    }
+
+    #[test]
+    fn filter_narrows_total_and_matches_every_row() {
+        let b = MockBackend::new();
+        let r = b.browse_get_tracks(req(TrackSortField::Artist, SortDir::Asc, Some("  Overmono "), 0, 100)).unwrap();
+        assert!(r.total > 0 && r.total < 54_515);
+        for t in &r.items {
+            let hay = format!("{} {} {}", t.title, t.artist, t.album.clone().unwrap()).to_lowercase();
+            assert!(hay.contains("overmono"));
+        }
+        let none = b.browse_get_tracks(req(TrackSortField::Artist, SortDir::Asc, Some("zzzq-nothing"), 0, 100)).unwrap();
+        assert_eq!(none.total, 0);
+    }
+
+    #[test]
+    fn play_all_opens_a_rolling_window_and_next_advances() {
+        let b = MockBackend::new();
+        b.player_play_all(PlayAllRequest {
+            order: TrackOrder::Sort { field: TrackSortField::Title, dir: SortDir::Asc },
+            filter: None,
+            start_track_id: None,
+            flow: None,
+        })
+        .unwrap();
+        let q = b.player_get_queue(PageRequest { offset: 0, limit: 100 }).unwrap();
+        assert!(q.total <= QUEUE_WINDOW + 1, "{}", q.total);
+        let src = q.source.unwrap();
+        assert_eq!(src.kind, SourceKind::AllTracks);
+        assert_eq!(src.mode, SourceMode::InOrder);
+        assert_eq!(src.remaining + q.total, 54_515);
+        let first = b.player_get_state().unwrap().track.unwrap().id;
+        b.player_next().unwrap();
+        let second = b.player_get_state().unwrap().track.unwrap().id;
+        assert_ne!(first, second);
+        assert_eq!(b.player_get_state().unwrap().status, PlaybackStatus::Playing);
+        b.player_pause().unwrap();
+        assert_eq!(b.player_get_state().unwrap().status, PlaybackStatus::Paused);
+    }
+
+    #[test]
+    fn volume_is_db_tapered_and_bit_perfect_only_at_unity() {
+        assert_eq!(volume_db(1.0), Some(0.0));
+        assert_eq!(volume_db(0.0), None);
+        assert!((volume_db(0.5).unwrap() + 30.0).abs() < 1e-9);
+        let b = MockBackend::new();
+        b.player_play_queue(PlayQueueRequest { track_ids: vec!["tr_0".into()], start_index: 0 }).unwrap();
+        assert!(b.player_get_state().unwrap().bit_perfect);
+        b.player_set_volume(SetVolumeRequest { volume: 0.5 }).unwrap();
+        assert!(!b.player_get_state().unwrap().bit_perfect);
+    }
+
+    #[test]
+    fn events_flow_and_spectrum_is_gated() {
+        let b = MockBackend::new();
+        let rx = b.subscribe();
+        b.player_play_queue(PlayQueueRequest { track_ids: vec!["tr_1".into()], start_index: 0 }).unwrap();
+        assert!(matches!(rx.recv_timeout(Duration::from_secs(1)).unwrap(), Event::PlayerState(_)));
+        // spectrum off: no Spectrum event within 300 ms while playing
+        std::thread::sleep(Duration::from_millis(300));
+        assert!(!rx.try_iter().any(|e| matches!(e, Event::Spectrum(_))));
+        b.player_set_spectrum_active(true).unwrap();
+        std::thread::sleep(Duration::from_millis(300));
+        assert!(rx.try_iter().any(|e| matches!(e, Event::Spectrum(_))));
+        b.player_set_spectrum_active(false).unwrap();
+        b.player_pause().unwrap();
+    }
+
+    #[test]
+    fn art_is_exact_size_and_deterministic() {
+        let b = MockBackend::new();
+        let a = b.art_get("al_5", 64).unwrap();
+        assert_eq!((a.width, a.height, a.rgba.len()), (64, 64, 64 * 64 * 4));
+        assert_eq!(a, b.art_get("al_5", 64).unwrap());
+        assert_ne!(a.rgba, b.art_get("al_6", 64).unwrap().rgba);
+    }
+}
+
+#[cfg(test)]
+mod flow_tests {
+    use super::*;
+
+    #[test]
+    fn flow_play_all_fills_the_window_with_reasons_and_a_coverage() {
+        let b = MockBackend::new_manual();
+        b.player_play_all(PlayAllRequest { order: TrackOrder::Shuffle, filter: None, start_track_id: None, flow: Some(FlowArc::Build) }).unwrap();
+        let q = b.player_get_queue(PageRequest { offset: 0, limit: 100 }).unwrap();
+        assert_eq!(q.total, QUEUE_WINDOW, "the window is drawn up front");
+        let src = q.source.unwrap();
+        assert_eq!((src.mode, src.arc, src.label.as_str()), (SourceMode::Flow, Some(FlowArc::Build), "All Tracks"));
+        let cov = src.flow_coverage.unwrap();
+        assert!(cov.total > 50_000 && cov.bpm > 0 && cov.bpm < cov.total, "{cov:?}");
+        assert!(q.items[0].flow.is_none() && q.items.iter().skip(1).any(|i| i.flow.is_some()));
+    }
+
+    #[test]
+    fn lyrics_kinds_follow_the_track_index() {
+        let b = MockBackend::new_manual();
+        assert!(b.lyrics_get("tr_8").unwrap().is_none(), "idx % 4 == 0: none");
+        let synced = b.lyrics_get("tr_5").unwrap().unwrap();
+        assert!(synced.synced && synced.lines.iter().all(|l| l.start_ms.is_some()) && synced.source == LyricsSource::Opensubsonic);
+        let plain = b.lyrics_get("tr_7").unwrap().unwrap();
+        assert!(!plain.synced && plain.lines.iter().all(|l| l.start_ms.is_none()) && plain.source == LyricsSource::Classic);
+    }
+
+    #[test]
+    fn radio_replaces_the_queue_with_same_genre_tracks() {
+        let b = MockBackend::new();
+        b.radio_start(RadioStartRequest { seed: RadioSeed { kind: RadioSeedKind::Track, id: "tr_7".into() } }).unwrap();
+        let q = b.player_get_queue(PageRequest { offset: 0, limit: 5 }).unwrap();
+        assert_eq!(q.source.unwrap().kind, SourceKind::Radio);
+        let genre = b.inner.lib.track(7).genre;
+        assert!(q.items.iter().all(|i| i.track.genre == genre && i.track.id != "tr_7"));
     }
 }

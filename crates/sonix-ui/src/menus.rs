@@ -8,14 +8,20 @@ use gpui::{App, ClipboardItem, Pixels, Point, px};
 use sonix_api::*;
 use std::rc::Rc;
 
+/// A menu action callback.
+pub type MenuAction = Rc<dyn Fn(&mut App)>;
+
+/// Navigation callback of a menu.
+pub type NavFn = dyn Fn(Route, &mut App);
+
 pub struct TrackMenu {
     pub tracks: Vec<Track>,
     /// Where the menu opened (the add-to-playlist popover anchors here, `anchorPoint()`).
     pub at: Point<Pixels>,
     pub on_play_now: Rc<dyn Fn(&mut App)>,
-    pub on_play_next: Option<Rc<dyn Fn(&mut App)>>,
-    pub on_remove_from_queue: Option<Rc<dyn Fn(&mut App)>>,
-    pub on_navigate: Rc<dyn Fn(Route, &mut App)>,
+    pub on_play_next: Option<MenuAction>,
+    pub on_remove_from_queue: Option<MenuAction>,
+    pub on_navigate: Rc<NavFn>,
 }
 
 pub fn track_menu_items(m: TrackMenu) -> Vec<MenuItem> {

@@ -289,6 +289,21 @@ pub fn track_index(id: &str) -> Option<usize> {
     id.strip_prefix("tr_")?.parse().ok()
 }
 
+
+/// mock.ts `mockReplayGain`: most tracks tagged with a modest negative gain, one in seven untagged, one in ten a positive gain.
+fn mock_replay_gain(global: u64, album: u64) -> Option<sonix_api::ReplayGain> {
+    if global % 7 == 3 {
+        return None;
+    }
+    let mut rng = Rng::for_seed(global * 97 + 13);
+    let mut arng = Rng::for_seed(album * 31 + 5);
+    let round = |n: f64| (n * 100.0).round() / 100.0;
+    let loud = rng.next() < 0.1;
+    let track_gain = if loud { round(1.0 + rng.next() * 4.0) } else { round(-(2.0 + rng.next() * 9.0)) };
+    let track_peak = if loud { round(0.6 + rng.next() * 0.3) } else { round(0.85 + rng.next() * 0.15) };
+    Some(sonix_api::ReplayGain { track_gain_db: Some(track_gain), album_gain_db: Some(round(-(3.0 + arng.next() * 7.0))), track_peak: Some(track_peak), album_peak: Some(round(0.9 + arng.next() * 0.1)) })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -382,18 +397,4 @@ mod tests {
         assert!(l.matches(0, "actress"));
         assert!(!l.matches(0, "zzzz-no"));
     }
-}
-
-/// mock.ts `mockReplayGain`: most tracks tagged with a modest negative gain, one in seven untagged, one in ten a positive gain.
-fn mock_replay_gain(global: u64, album: u64) -> Option<sonix_api::ReplayGain> {
-    if global % 7 == 3 {
-        return None;
-    }
-    let mut rng = Rng::for_seed(global * 97 + 13);
-    let mut arng = Rng::for_seed(album * 31 + 5);
-    let round = |n: f64| (n * 100.0).round() / 100.0;
-    let loud = rng.next() < 0.1;
-    let track_gain = if loud { round(1.0 + rng.next() * 4.0) } else { round(-(2.0 + rng.next() * 9.0)) };
-    let track_peak = if loud { round(0.6 + rng.next() * 0.3) } else { round(0.85 + rng.next() * 0.15) };
-    Some(sonix_api::ReplayGain { track_gain_db: Some(track_gain), album_gain_db: Some(round(-(3.0 + arng.next() * 7.0))), track_peak: Some(track_peak), album_peak: Some(round(0.9 + arng.next() * 0.1)) })
 }

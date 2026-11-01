@@ -34,6 +34,16 @@ pub enum Corner {
 }
 
 impl Corner {
+    /// `OverlayCorner::from_u8` (the persisted setting).
+    pub fn from_u8(v: u8) -> Self {
+        match v {
+            1 => Corner::TopRight,
+            2 => Corner::BottomLeft,
+            3 => Corner::BottomRight,
+            _ => Corner::TopLeft,
+        }
+    }
+
     /// Top-left of a `w`x`h` card `m` px inside the work area (`overlay.rs OverlayCorner::place`, physical px).
     pub fn place(self, (ax, ay, aw, ah): (i32, i32, i32, i32), w: i32, h: i32, m: i32) -> (i32, i32) {
         let (left, right, top, bottom) = (ax + m, ax + aw - w - m, ay + m, ay + ah - h - m);

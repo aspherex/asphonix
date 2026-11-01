@@ -17,6 +17,9 @@ use sonix_api::{Playlist, Track, UpdateInfo, UpdateProgress, format as fmt};
 use std::rc::Rc;
 use std::time::Duration;
 
+/// Callback of a prompt dialog: receives the trimmed text.
+pub type PromptDone = Rc<dyn Fn(String, &mut App)>;
+
 pub struct OverlayHandle(pub Entity<Overlays>);
 impl Global for OverlayHandle {}
 
@@ -28,7 +31,7 @@ fn hot_shadow(th: &Theme, off: f32) -> Vec<BoxShadow> {
 
 enum Modal {
     Confirm { title: SharedString, message: SharedString, confirm_label: SharedString, danger: bool, on_ok: Rc<dyn Fn(&mut App)> },
-    Prompt { title: SharedString, confirm_label: SharedString, input: Entity<TextInput>, on_ok: Rc<dyn Fn(String, &mut App)>, _sub: Subscription },
+    Prompt { title: SharedString, confirm_label: SharedString, input: Entity<TextInput>, on_ok: PromptDone, _sub: Subscription },
     TrackInfo(Box<Track>),
     Update,
 }
@@ -66,10 +69,6 @@ impl Overlays {
         Self { modal: None, add_menu: None, toast: None, toast_gen: 0, focus: cx.focus_handle(), want_focus: false, upd: UpdState::default() }
     }
 
-    pub fn is_open(&self) -> bool {
-        self.modal.is_some() || self.add_menu.is_some()
-    }
-
     /// Escape: closes the topmost overlay; true when one was open.
     pub fn escape(&mut self, cx: &mut Context<Self>) -> bool {
         if self.modal.is_some() {
@@ -86,10 +85,6 @@ impl Overlays {
         } else {
             false
         }
-    }
-
-    pub fn toast_text(&self) -> Option<&str> {
-        self.toast.as_ref().map(|s| s.as_ref())
     }
 
     fn show_toast(&mut self, msg: SharedString, ms: u64, cx: &mut Context<Self>) {
@@ -156,7 +151,7 @@ impl Overlays {
         );
     }
 
-    fn open_prompt(&mut self, title: SharedString, placeholder: SharedString, confirm_label: SharedString, value: String, on_ok: Rc<dyn Fn(String, &mut App)>, cx: &mut Context<Self>) {
+    fn open_prompt(&mut self, title: SharedString, placeholder: SharedString, confirm_label: SharedString, value: String, on_ok: PromptDone, cx: &mut Context<Self>) {
         let th = app::theme(cx);
         let input = cx.new(|cx| TextInput::new(cx, &placeholder, &th, MONO, 12.0, 16.0, 500.0));
         input.update(cx, |i, _| i.content = value.into());
@@ -206,7 +201,8 @@ pub fn confirm(cx: &mut App, title: &str, message: &str, confirm_label: &str, da
         cx.notify();
     });
 }
-/// `promptText`
+/// `promptText`. API for routes (playlist create/rename) ported by other agents; the add-to-playlist popover uses the same dialog.
+#[allow(dead_code)]
 pub fn prompt(cx: &mut App, title: &str, placeholder: &str, confirm_label: &str, value: &str, on_ok: impl Fn(String, &mut App) + 'static) {
     let (t, p, c, v) = (title.to_string(), placeholder.to_string(), confirm_label.to_string(), value.to_string());
     with(cx, move |o, cx| o.open_prompt(t.into(), p.into(), c.into(), v, Rc::new(on_ok), cx));

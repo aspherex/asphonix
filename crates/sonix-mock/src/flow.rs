@@ -280,3 +280,48 @@ pub fn coverage<'a>(tracks: impl Iterator<Item = &'a FlowTrack>) -> FlowCoverage
     }
     c
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn t(bpm: Option<f64>, key: Option<(u8, bool)>, genre: &str, artist: &str) -> FlowTrack {
+        FlowTrack { bpm, key: key.map(|(num, minor)| Key { num, minor }), loudness: None, genre: Some(genre.into()), artist: Some(artist.into()) }
+    }
+
+    /// Same constants as `mockFlow.ts`: a double/half tempo and an adjacent Camelot key are rewards, a far key is a penalty.
+    #[test]
+    fn costs_follow_mock_flow_ts() {
+        assert!(bpm_cost(120.0, 120.0) < bpm_cost(120.0, 140.0));
+        assert!((bpm_cost(120.0, 240.0) - bpm_cost(120.0, 120.0) - 0.15).abs() < 1e-9, "half/double carries the 0.15 surcharge");
+        assert_eq!(key_cost(Key { num: 8, minor: true }, Key { num: 8, minor: true }), -0.5);
+        assert_eq!(key_cost(Key { num: 8, minor: true }, Key { num: 9, minor: true }), -0.35);
+        assert_eq!(key_cost(Key { num: 8, minor: true }, Key { num: 3, minor: false }), 1.0);
+        assert_eq!(key_cost(Key { num: 12, minor: true }, Key { num: 1, minor: true }), -0.35, "the wheel wraps");
+    }
+
+    #[test]
+    fn reason_names_only_real_values() {
+        let a = t(Some(124.0), Some((8, true)), "Techno", "A");
+        let b = t(Some(126.0), Some((9, true)), "Techno", "B");
+        let r = reason(&a, &b).unwrap();
+        assert_eq!((r.bpm_from, r.bpm_to, r.key_from.as_deref(), r.key_to.as_deref(), r.same_genre), (Some(124), Some(126), Some("8A"), Some("9A"), Some(true)));
+        assert!(reason(&t(None, None, "House", "A"), &t(None, None, "Techno", "B")).is_none());
+    }
+
+    #[test]
+    fn pick_prefers_the_closer_tempo_and_avoids_the_same_artist() {
+        let prev = Arc::new(t(Some(120.0), None, "Techno", "Prev"));
+        let cands = vec![(1, Arc::new(t(Some(150.0), None, "Techno", "X"))), (2, Arc::new(t(Some(122.0), None, "Techno", "Y"))), (3, Arc::new(t(Some(121.0), None, "Techno", "Prev")))];
+        let slot = Slot { prev: Some(prev.clone()), prev_id: Some(0), recent: vec![prev], arc: FlowArc::Steady, arc_pos: 0.0, lean: Lean::Neutral };
+        assert_eq!(pick(&cands, &slot), 1, "122 BPM by another artist beats 150 BPM and the same artist at 121");
+    }
+
+    #[test]
+    fn arc_position_wraps_every_40_tracks() {
+        assert_eq!(arc_position(0, 100), 0.0);
+        assert_eq!(arc_position(39, 100), 1.0);
+        assert_eq!(arc_position(40, 100), 0.0);
+        assert_eq!(arc_position(1, 2), 1.0);
+    }
+}

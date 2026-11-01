@@ -53,6 +53,7 @@ pub struct Shell {
     card_gen: u64,
     prev_track_id: Option<String>,
     track_overlay: bool,
+    track_overlay_corner: u8,
     main_active: bool,
     main_hwnd: Option<isize>,
     scale: f32,
@@ -149,6 +150,7 @@ impl Shell {
             card_gen: 0,
             prev_track_id: None,
             track_overlay: !cfg!(feature = "parity"),
+            track_overlay_corner: 0,
             main_active: true,
             main_hwnd: crate::winffi::hwnd_of(window),
             scale: window.scale_factor(),
@@ -737,7 +739,7 @@ impl Shell {
         let scale = self.scale.max(0.5);
         let (w, h_px, m) = ((WIDTH * scale) as i32, (HEIGHT * scale) as i32, (MARGIN * scale) as i32);
         let work = crate::winffi::work_area_of(main).unwrap_or((0, 0, 1920, 1040));
-        let (x, y) = Corner::TopLeft.place(work, w, h_px, m);
+        let (x, y) = Corner::from_u8(self.track_overlay_corner).place(work, w, h_px, m);
         let (backend, art) = (self.backend.clone(), cx.global::<Services>().art.clone());
         let bounds = gpui::Bounds::new(gpui::point(px(x as f32 / scale), px(y as f32 / scale)), gpui::size(px(WIDTH), px(HEIGHT)));
         let opened = cx.open_window(

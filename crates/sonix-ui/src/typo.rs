@@ -9,7 +9,3 @@ pub fn ts(th: &Theme, spec: TypeSpec) -> Div {
     div().font_family(spec.family.name(th.body_font)).text_size(px(spec.size)).line_height(px(spec.line)).font_weight(FontWeight(spec.weight))
 }
 
-/// Single-line text that truncates with an ellipsis inside a flex cell.
-pub fn ellipsis(d: Div) -> Div {
-    d.whitespace_nowrap().overflow_hidden().text_ellipsis().min_w_0().w_full()
-}

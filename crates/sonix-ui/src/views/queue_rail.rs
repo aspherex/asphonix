@@ -10,7 +10,7 @@ use crate::probe::pid;
 use crate::text::txt;
 use crate::theme::Theme;
 use crate::tracking::{BODY_LG, BODY_MD, BODY_SM, LABEL_CAPS, MONO_CODE, MONO_DATA};
-use crate::widgets::context_menu::{ContextMenu, MenuItem};
+use crate::widgets::context_menu::ContextMenu;
 use crate::widgets::icon;
 use crate::selection::Selection;
 use gpui::{Bounds, ClickEvent, Context, CursorStyle, DragMoveEvent, Entity, FocusHandle, Focusable, IntoElement, MouseDownEvent, Render, Subscription, Window, canvas, div, fill, point, prelude::*, px, size};
@@ -37,6 +37,14 @@ pub struct QueueRail {
     /// multi-select over absolute queue indices (`QueueRail.svelte`: Ctrl/Shift click, remove acts on the selection)
     sel: Selection,
     _sub: Subscription,
+}
+
+/// Per-row layout flags of `queue_row`: distance from the playing row, playing, Flow source (3-line rows).
+#[derive(Clone, Copy)]
+struct RowFlags {
+    n: usize,
+    active: bool,
+    flow_rows: bool,
 }
 
 /// Internal drag of a queue row (reorder). External drops use `crate::dnd::SonixDrag`.
@@ -212,9 +220,9 @@ impl Render for QueueRail {
                     }
                     let n = i - cur.max(0) as usize;
                     if is_user(i, it) {
-                        user_rows.push(self.queue_row(&th, it, i, n, false, flow_rows, cx));
+                        user_rows.push(self.queue_row(&th, it, i, RowFlags { n, active: false, flow_rows }, cx));
                     } else {
-                        list = list.child(self.queue_row(&th, it, i, n, (i as i64) == cur, flow_rows, cx));
+                        list = list.child(self.queue_row(&th, it, i, RowFlags { n, active: (i as i64) == cur, flow_rows }, cx));
                     }
                 }
             }
@@ -342,7 +350,8 @@ fn rail_spectrum(th: Theme, bands: Option<Vec<u8>>) -> impl IntoElement {
 impl QueueRail {
     /// One queue row (`QueueRail.svelte .row`): drag handle, title/artist, time, "more", remove. Click selects (Ctrl/Shift
     /// extend), double-click plays; rows are drag sources (reorder) and drop targets (reorder / add).
-    fn queue_row(&self, th: &Theme, it: &QueueItem, i: usize, n: usize, active: bool, flow_rows: bool, cx: &mut Context<Self>) -> gpui::AnyElement {
+    fn queue_row(&self, th: &Theme, it: &QueueItem, i: usize, flags: RowFlags, cx: &mut Context<Self>) -> gpui::AnyElement {
+        let RowFlags { n, active, flow_rows } = flags;
         let th = *th;
         let t = &it.track;
         let selected = self.sel.contains(i);

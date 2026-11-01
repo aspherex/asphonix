@@ -10,7 +10,10 @@ use sonix_api::Backend;
 #[derive(Clone, Debug)]
 pub enum DragPayload {
     Tracks(Vec<String>),
+    // Album and artist cards belong to routes other agents port; the targets already resolve them (`resolve_ids`).
+    #[allow(dead_code)]
     Album { id: String, name: String },
+    #[allow(dead_code)]
     Artist { id: String, name: String },
 }
 
