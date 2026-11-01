@@ -1,8 +1,6 @@
 //! `lib/menus.ts trackMenuItems`: the one place that assembles a track context menu (same order, labels, icons and
 //! conditions as the web). Used by the queue rail; the Tracks route builds the same list in `views/tracks.rs`.
 //!
-//! "Start radio" / "Flow" need a backend radio source that the mock does not port yet: the entry is present for structural
-//! parity and inert (documented in docs/PORTING.md).
 use crate::app;
 use crate::router::Route;
 use crate::widgets::context_menu::MenuItem;
@@ -46,8 +44,17 @@ pub fn track_menu_items(m: TrackMenu) -> Vec<MenuItem> {
         None => enqueue(format!("Play next{suffix}"), EnqueuePosition::Next, ids.clone(), "next"),
     });
     items.push(enqueue(format!("Add to queue{suffix}"), EnqueuePosition::End, ids.clone(), "queue"));
-    if single.is_some() {
-        items.push(MenuItem::action("Start radio", |_, _| {}).icon("equalizer"));
+    if let Some(t) = &single {
+        let id = t.id.clone();
+        items.push(
+            MenuItem::action("Start radio", move |_, cx| {
+                let id = id.clone();
+                app::call(cx, move |b| {
+                    let _ = b.radio_start(RadioStartRequest { seed: RadioSeed { kind: RadioSeedKind::Track, id } });
+                });
+            })
+            .icon("equalizer"),
+        );
     }
     let (ids_p, at) = (ids.clone(), m.at);
     items.push(

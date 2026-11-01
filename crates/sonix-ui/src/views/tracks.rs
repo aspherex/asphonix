@@ -21,9 +21,9 @@ use crate::widgets::scrollbar::{self, ScrollbarHandle};
 use crate::widgets::text_input::{InputEvent, TextInput};
 use crate::widgets::{icon, icon_g};
 use gpui::{
-    AnyElement, ClickEvent, ClipboardItem, Context, CursorStyle, Div, Entity, EventEmitter, FocusHandle, Focusable, IntoElement, MouseButton,
+    AnyElement, ClickEvent, Context, CursorStyle, Div, Entity, EventEmitter, FocusHandle, Focusable, IntoElement, MouseButton,
     MouseDownEvent, Point, Pixels, Render, ScrollStrategy, SharedString, Stateful, Subscription, Timer, UniformListScrollHandle, Window, div,
-    prelude::*, px, uniform_list,
+    canvas, prelude::*, px, uniform_list,
 };
 use sonix_api::format as fmt;
 use sonix_api::*;
@@ -58,6 +58,7 @@ pub struct TracksView {
     vis: Range<usize>,
     hover_row: Option<usize>,
     playlists: Vec<Playlist>,
+    flow_btn: std::rc::Rc<std::cell::Cell<gpui::Bounds<Pixels>>>,
     _subs: Vec<Subscription>,
 }
 
@@ -98,6 +99,7 @@ impl TracksView {
             vis: 0..0,
             hover_row: None,
             playlists: Vec::new(),
+            flow_btn: std::rc::Rc::new(std::cell::Cell::new(gpui::Bounds::default())),
             _subs: subs,
         };
         let _ = window;
@@ -258,7 +260,7 @@ impl TracksView {
         let (field, dir) = (self.sort, self.dir);
         let filter = if self.filter.trim().is_empty() { None } else { Some(self.filter.clone()) };
         app::call(cx, move |b| {
-            let _ = b.player_play_all(PlayAllRequest { order: TrackOrder::Sort { field, dir }, filter, start_track_id: Some(id) });
+            let _ = b.player_play_all(PlayAllRequest { order: TrackOrder::Sort { field, dir }, filter, start_track_id: Some(id), flow: None });
         });
     }
 
@@ -267,8 +269,44 @@ impl TracksView {
         let filter = if self.filter.trim().is_empty() { None } else { Some(self.filter.clone()) };
         app::call(cx, move |b| {
             let order = if shuffle { TrackOrder::Shuffle } else { TrackOrder::Sort { field, dir } };
-            let _ = b.player_play_all(PlayAllRequest { order, filter, start_track_id: None });
+            let _ = b.player_play_all(PlayAllRequest { order, filter, start_track_id: None, flow: None });
         });
+    }
+
+    /// `flow.ts openFlowMenu`: the pool's real coverage hint (disabled entry + rule), then Steady / Build / Peak under the button.
+    fn open_flow_menu(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let filter = if self.filter.trim().is_empty() { None } else { Some(self.filter.clone()) };
+        let at = {
+            let b = self.flow_btn.get();
+            gpui::point(b.left(), b.bottom() + px(4.))
+        };
+        let b = self.backend.clone();
+        let f2 = filter.clone();
+        cx.spawn_in(window, async move |this, cx| {
+            let cov = cx.background_executor().spawn(async move { b.flow_get_coverage(FlowCoverageRequest { kind: FlowPoolKind::AllTracks, id: None, filter: f2, seed: None }) }).await;
+            let hint = cov.ok().map(|c| fmt::coverage_hint(&c, "view")).unwrap_or_default();
+            let _ = this.update_in(cx, |t, window, cx| {
+                let mut items = Vec::new();
+                if !hint.is_empty() {
+                    items.push(MenuItem::action(hint, |_, _| {}).disabled(true));
+                    items.push(MenuItem::separator());
+                }
+                for (arc, label, h) in [(FlowArc::Steady, "Steady", "Smooth transitions, even energy"), (FlowArc::Build, "Build", "Energy rises over each ~40 tracks"), (FlowArc::Peak, "Peak", "Rise, then cool down")] {
+                    let filter = filter.clone();
+                    items.push(
+                        MenuItem::action(label, move |_, cx| {
+                            let filter = filter.clone();
+                            app::call(cx, move |b| {
+                                let _ = b.player_play_all(PlayAllRequest { order: TrackOrder::Shuffle, filter, start_track_id: None, flow: Some(arc) });
+                            });
+                        })
+                        .hint(h),
+                    );
+                }
+                t.menu.update(cx, |m, cx| m.show(items, at, window, cx));
+            });
+        })
+        .detach();
     }
 
     fn toggle_star(&mut self, t: &Track, cx: &mut Context<Self>) {
@@ -648,7 +686,13 @@ impl Render for TracksView {
                     .child(pid("page.btn.0", button("play-all", th, Variant::Secondary, "Play All", Some("play"), total == 0, window).on_click(cx.listener(|this, _, _, cx| this.play_all(false, cx)))))
                     .child(pid("page.btn.1", button("shuffle-all", th, Variant::Primary, "Shuffle All", Some("shuffle"), total == 0, window).on_click(cx.listener(|this, _, _, cx| this.play_all(true, cx)))))
                     // Flow (rule-based radio) is not ported yet: the control is present for layout parity, inert.
-                    .child(pid("page.btn.2", button("flow", th, Variant::Secondary, "Flow", Some("sliders"), total == 0, window))),
+                    .child(pid("page.btn.2", {
+                        let cell = self.flow_btn.clone();
+                        button("flow", th, Variant::Secondary, "Flow", Some("sliders"), total == 0, window)
+                            .relative()
+                            .child(canvas(move |b, _, _| cell.set(b), |_, _, _, _| ()).absolute().size_full())
+                            .on_click(cx.listener(|this, _, window, cx| this.open_flow_menu(window, cx)))
+                    })),
             );
 
         let list = uniform_list(

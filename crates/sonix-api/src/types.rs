@@ -110,6 +110,9 @@ pub struct QueueItem {
     #[serde(flatten)]
     pub track: Track,
     pub origin: QueueItemOrigin,
+    /// Flow sources: why this row follows the previous one.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub flow: Option<FlowReason>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -475,6 +478,9 @@ pub struct PlayAllRequest {
     pub filter: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub start_track_id: Option<String>,
+    /// Flow: play as a Flow source with this arc (overrides shuffle).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub flow: Option<FlowArc>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
@@ -540,6 +546,11 @@ pub struct QueueSourceInfo {
     pub mode: SourceMode,
     /// Exactly how many pool ids were not drawn into the window yet.
     pub remaining: usize,
+    /// Flow sources only: the energy arc and the pool's real data coverage.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub arc: Option<FlowArc>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub flow_coverage: Option<FlowCoverage>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -769,7 +780,7 @@ mod tests {
 
     #[test]
     fn queue_item_flattens_track() {
-        let it = QueueItem { track: sample_track(), origin: QueueItemOrigin::User };
+        let it = QueueItem { track: sample_track(), origin: QueueItemOrigin::User, flow: None };
         let v = serde_json::to_value(&it).unwrap();
         assert_eq!(v["id"], "tr_1");
         assert_eq!(v["origin"], "user");
@@ -820,4 +831,112 @@ mod tests {
         assert_eq!(bucket_for(65), 160);
         assert_eq!(bucket_for(9999), 640);
     }
+}
+
+// --------------------------------------------------------------- lyrics
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LyricLine {
+    /// Milliseconds from the start of the track; present on every line of synced lyrics.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub start_ms: Option<u64>,
+    pub text: String,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum LyricsSource {
+    Opensubsonic,
+    Classic,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Lyrics {
+    pub synced: bool,
+    pub lines: Vec<LyricLine>,
+    pub source: LyricsSource,
+}
+
+// --------------------------------------------------------------- flow + radio
+/// Energy arc of a Flow source.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum FlowArc {
+    Steady,
+    Build,
+    Peak,
+}
+
+/// Counts of tracks (distinct) with real sequencing data.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct FlowCoverage {
+    pub total: u32,
+    pub bpm: u32,
+    pub key: u32,
+    pub loudness: u32,
+}
+
+/// Why a queue row follows the previous one (Flow sources). Real values only.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct FlowReason {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub bpm_from: Option<i32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub bpm_to: Option<i32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub key_from: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub key_to: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub genre: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub same_genre: Option<bool>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum FlowPoolKind {
+    Playlist,
+    Artist,
+    Genre,
+    Liked,
+    Smart,
+    AllTracks,
+}
+
+/// `flow_get_coverage`: the pool a Flow play of this source would use.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct FlowCoverageRequest {
+    pub kind: FlowPoolKind,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub filter: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub seed: Option<u32>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum RadioSeedKind {
+    Track,
+    Album,
+    Artist,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RadioSeed {
+    pub kind: RadioSeedKind,
+    pub id: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RadioStartRequest {
+    pub seed: RadioSeed,
 }

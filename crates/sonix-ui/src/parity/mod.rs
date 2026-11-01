@@ -220,6 +220,7 @@ impl Shell {
                                 order: sonix_api::TrackOrder::Sort { field: sonix_api::TrackSortField::Title, dir: sonix_api::SortDir::Asc },
                                 filter: None,
                                 start_track_id: Some(id),
+                                flow: None,
                             });
                             b.player_get_state().ok().and_then(|s| s.track)
                         })
@@ -311,6 +312,7 @@ impl Shell {
                         order: sonix_api::TrackOrder::Sort { field: sonix_api::TrackSortField::Title, dir: sonix_api::SortDir::Asc },
                         filter: None,
                         start_track_id: start,
+                        flow: None,
                     });
                 });
                 json!({"ok": true})

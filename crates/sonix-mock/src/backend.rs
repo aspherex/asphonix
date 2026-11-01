@@ -5,6 +5,7 @@
 //!
 //! Threading: one ticker thread, blocked on a condvar (zero wake-ups) unless a track
 //! is playing; spectrum frames are only produced while `player_set_spectrum_active(true)`.
+use crate::flow;
 use crate::library::{Library, track_index};
 use crate::art;
 use sonix_api::*;
@@ -41,6 +42,13 @@ struct Source {
     label: String,
     mode: SourceMode,
     remaining: VecDeque<u32>,
+    /// Flow only (`MockSource` in mock.ts): arc, the whole pool, round size, Build/Peak quota, the pool's coverage.
+    arc: FlowArc,
+    pool: Vec<u32>,
+    round_total: usize,
+    quota_known: usize,
+    quota_drawn: usize,
+    coverage: Option<FlowCoverage>,
 }
 
 struct Core {
@@ -61,6 +69,10 @@ struct Core {
     loop_a: Option<f64>,
     loop_b: Option<f64>,
     loop_track: Option<String>,
+    /// Parity harness: `Math.random()` is pinned to 0.5 on the web side, so shuffles/radio use 0.5 too.
+    det_half: bool,
+    lib: Arc<Library>,
+    feats: flow::Features,
 }
 
 struct Inner {
@@ -167,6 +179,9 @@ impl MockBackend {
                 loop_a: None,
                 loop_b: None,
                 loop_track: None,
+                det_half: manual,
+                lib: Arc::new(Library::new()),
+                feats: flow::Features::default(),
             }),
             cv: Condvar::new(),
             subs: Mutex::new(Vec::new()),
@@ -329,6 +344,9 @@ impl Inner {
 
     /// Draw from the source until `window` ids are queued ahead of `current`.
     fn refill(c: &mut Core) {
+        if c.source.as_ref().is_some_and(|s| s.mode == SourceMode::Flow) {
+            return Self::flow_refill(c);
+        }
         let Some(src) = c.source.as_mut() else { return };
         let ahead = |c: &Core| c.entries.len().saturating_sub(c.current.map(|i| i + 1).unwrap_or(0));
         let _ = ahead;
@@ -407,7 +425,7 @@ impl Inner {
         } else {
             c.entries = Vec::new();
         }
-        c.source = Some(Source { kind, label, mode, remaining: pool });
+        c.source = Some(Source { kind, label, mode, remaining: pool, arc: FlowArc::Steady, pool: Vec::new(), round_total: 0, quota_known: 0, quota_drawn: 0, coverage: None });
         if c.entries.is_empty()
             && let Some(first) = c.source.as_mut().and_then(|s| s.remaining.pop_front())
         {
@@ -648,11 +666,14 @@ impl PlayerApi for MockBackend {
         }
         c.shuffle = shuffle_all;
         let mode = if shuffle_all { SourceMode::Shuffle } else { SourceMode::InOrder };
-        let label = match req.filter.as_deref().map(str::trim) {
-            Some(f) if !f.is_empty() => format!("Tracks matching \"{f}\""),
-            _ => "All tracks".into(),
-        };
-        self.inner.set_source(&mut c, SourceKind::AllTracks, label, mode, pool, start);
+        let label = String::from("All Tracks");
+        if let Some(arc) = req.flow {
+            // `flow` wins over `shuffle`; no random opener (mock.ts: `shuffle && !req.flow`)
+            let pool: Vec<u32> = (*perm).clone();
+            Inner::flow_set_source(&mut c, SourceKind::AllTracks, label, pool, start, arc);
+        } else {
+            self.inner.set_source(&mut c, SourceKind::AllTracks, label, mode, pool, start);
+        }
         self.inner.push_state(&c);
         drop(c);
         self.inner.cv.notify_all();
@@ -772,17 +793,36 @@ impl PlayerApi for MockBackend {
     }
 
     fn player_get_queue(&self, req: PageRequest) -> ApiResult<QueueState> {
-        let c = self.inner.core.lock().unwrap();
+        let mut c = self.inner.core.lock().unwrap();
         let end = (req.offset + req.limit).min(c.entries.len());
-        let items = c.entries[req.offset.min(end)..end]
-            .iter()
-            .map(|e| QueueItem { track: self.inner.track(e.ix), origin: e.origin })
-            .collect();
+        let start = req.offset.min(end);
+        let flow_on = c.source.as_ref().is_some_and(|s| s.mode == SourceMode::Flow);
+        let lib = c.lib.clone();
+        let mut items = Vec::new();
+        for idx in start..end {
+            let e = c.entries[idx].clone();
+            let flow = if flow_on && e.origin == QueueItemOrigin::Source && idx > 0 {
+                let prev = c.entries[idx - 1].ix;
+                let (p, cur) = (c.feats.get(&lib, prev), c.feats.get(&lib, e.ix));
+                flow::reason(&p, &cur)
+            } else {
+                None
+            };
+            items.push(QueueItem { track: self.inner.track(e.ix), origin: e.origin, flow });
+        }
         Ok(QueueState {
             items,
             total: c.entries.len(),
             current_index: c.current.map(|i| i as i64).unwrap_or(-1),
-            source: c.source.as_ref().map(|s| QueueSourceInfo { kind: s.kind, label: s.label.clone(), id: None, mode: s.mode, remaining: s.remaining.len() }),
+            source: c.source.as_ref().map(|s| QueueSourceInfo {
+                kind: s.kind,
+                label: s.label.clone(),
+                id: None,
+                mode: s.mode,
+                remaining: s.remaining.len(),
+                arc: (s.mode == SourceMode::Flow).then_some(s.arc),
+                flow_coverage: if s.mode == SourceMode::Flow { s.coverage } else { None },
+            }),
         })
     }
 
@@ -864,6 +904,68 @@ impl PlayerApi for MockBackend {
         Inner::refill(&mut c);
         self.inner.push_state(&c);
         drop(c);
+        self.inner.emit(Event::QueueChanged);
+        Ok(())
+    }
+
+    fn lyrics_get(&self, track_id: &str) -> ApiResult<Option<Lyrics>> {
+        let Some(idx) = track_index(track_id) else { return Ok(None) };
+        Ok(mock_lyrics(&self.inner.lib.track(idx), idx))
+    }
+
+    fn flow_get_coverage(&self, req: FlowCoverageRequest) -> ApiResult<FlowCoverage> {
+        let ids: Vec<u32> = match req.kind {
+            FlowPoolKind::AllTracks => (*self.inner.permutation(TrackSortField::Title, SortDir::Asc, req.filter.as_deref())).clone(),
+            FlowPoolKind::Playlist => self.inner.playlists.iter().find(|(p, _)| Some(&p.id) == req.id.as_ref()).map(|(_, ids)| ids.clone()).unwrap_or_default(),
+            FlowPoolKind::Liked => self.inner.starred.lock().unwrap().keys().filter_map(|k| track_index(k)).map(|i| i as u32).collect(),
+            _ => Vec::new(),
+        };
+        let mut c = self.inner.core.lock().unwrap();
+        let lib = c.lib.clone();
+        let mut seen = std::collections::HashSet::new();
+        let feats: Vec<_> = ids.into_iter().filter(|i| seen.insert(*i)).map(|i| c.feats.get(&lib, i)).collect();
+        Ok(flow::coverage(feats.iter().map(|f| f.as_ref())))
+    }
+
+    fn radio_start(&self, req: RadioStartRequest) -> ApiResult<()> {
+        let mut c = self.inner.core.lock().unwrap();
+        let (genre, exclude) = match req.seed.kind {
+            RadioSeedKind::Track => {
+                let ix = track_index(&req.seed.id).ok_or_else(|| ApiError::not_found("track"))?;
+                (c.lib.track(ix).genre, Some(ix as u32))
+            }
+            RadioSeedKind::Album => {
+                let ix = req.seed.id.strip_prefix("al_").and_then(|s| s.parse::<usize>().ok()).ok_or_else(|| ApiError::not_found("album"))?;
+                (c.lib.album(ix).genre, None)
+            }
+            RadioSeedKind::Artist => return Err(ApiError::not_found("radio seed")),
+        };
+        let total = c.lib.total_tracks();
+        let lib = c.lib.clone();
+        let mut out: Vec<u32> = Vec::new();
+        let mut seen = std::collections::HashSet::new();
+        let mut attempts = 0;
+        while genre.is_some() && out.len() < 50 && attempts < 50 * 60 && seen.len() < total {
+            attempts += 1;
+            let idx = (Inner::rand01(&mut c) * total as f64).floor() as usize;
+            if !seen.insert(idx) {
+                continue;
+            }
+            let t = lib.track(idx);
+            if t.genre != genre || Some(idx as u32) == exclude {
+                continue;
+            }
+            out.push(idx as u32);
+        }
+        if out.is_empty() {
+            return Err(ApiError::not_found("no similar tracks found for this radio seed"));
+        }
+        c.shuffle = false;
+        self.inner.set_source(&mut c, SourceKind::Radio, "Radio".into(), SourceMode::InOrder, out, None);
+        c.status = PlaybackStatus::Playing;
+        self.inner.push_state(&c);
+        drop(c);
+        self.inner.cv.notify_all();
         self.inner.emit(Event::QueueChanged);
         Ok(())
     }
@@ -1031,6 +1133,7 @@ mod tests {
             order: TrackOrder::Sort { field: TrackSortField::Title, dir: SortDir::Asc },
             filter: None,
             start_track_id: None,
+            flow: None,
         })
         .unwrap();
         let q = b.player_get_queue(PageRequest { offset: 0, limit: 100 }).unwrap();
@@ -1121,4 +1224,187 @@ fn mock_waveform(b: &MockBackend, track_id: &str) -> ApiResult<Waveform> {
         })
         .collect();
     Ok(Waveform { track_id: track_id.into(), buckets, filled, done: filled >= WAVEFORM_BUCKETS })
+}
+
+const MOCK_LYRIC_LINES: [&str; 14] = [
+    "Static on the wire, a signal in the dark",
+    "Counting every bit as it crosses the line",
+    "Nothing in between us but the clock",
+    "Hold the sample rate, hold the time",
+    "",
+    "Bass drops low under the floorboards",
+    "Treble climbing to the edge of the room",
+    "Every channel carries what it was given",
+    "Nothing added, nothing taken",
+    "",
+    "So let it play, let it ring out clean",
+    "The quiet part is part of the song",
+    "Zero dither, zero compromise",
+    "Right where we started, right where we belong",
+];
+
+/// mock.ts `mockLyrics`: a quarter of the tracks have none, a quarter plain text, the rest synced.
+fn mock_lyrics(track: &Track, idx: usize) -> Option<Lyrics> {
+    let kind = idx % 4;
+    if kind == 0 {
+        return None;
+    }
+    let dur = track.duration;
+    let count = ((dur / 5.0).floor() as i64).clamp(8, 48) as usize;
+    let intro = (12.0f64).min(dur * 0.06);
+    let step = (dur - intro - 8.0) / count as f64;
+    let lines = (0..count)
+        .map(|i| {
+            let text = MOCK_LYRIC_LINES[(i + idx) % MOCK_LYRIC_LINES.len()].to_string();
+            LyricLine { start_ms: if kind == 3 { None } else { Some(((intro + i as f64 * step) * 1000.0).round() as u64) }, text }
+        })
+        .collect();
+    Some(Lyrics { synced: kind != 3, lines, source: if kind == 3 { LyricsSource::Classic } else { LyricsSource::Opensubsonic } })
+}
+
+// ---------------------------------------------------------------------------------------- Flow (mock.ts `setSource` flow path)
+impl Inner {
+    /// `Math.random()`: pinned to 0.5 in the parity harness, a real xorshift draw otherwise.
+    fn rand01(c: &mut Core) -> f64 {
+        if c.det_half { 0.5 } else { (xorshift(&mut c.rng) >> 11) as f64 / (1u64 << 53) as f64 }
+    }
+
+    /// `shuffleIds`
+    fn shuffle_js(c: &mut Core, v: &mut [u32]) {
+        for i in (1..v.len()).rev() {
+            let j = (Self::rand01(c) * (i as f64 + 1.0)).floor() as usize;
+            v.swap(i, j);
+        }
+    }
+
+    fn unique(v: &[u32]) -> Vec<u32> {
+        let mut seen = std::collections::HashSet::new();
+        v.iter().copied().filter(|i| seen.insert(*i)).collect()
+    }
+
+    fn energy_known_of(c: &mut Core, ix: u32) -> bool {
+        let lib = c.lib.clone();
+        flow::energy_known(&c.feats.get(&lib, ix))
+    }
+
+    /// `pickFlow`
+    fn flow_pick(c: &mut Core) -> Option<u32> {
+        let lib = c.lib.clone();
+        let (k, total, remaining_len, arc, qk, qd) = {
+            let s = c.source.as_ref()?;
+            (s.remaining.len().min(flow::CANDIDATES), if s.round_total > 0 { s.round_total } else { s.pool.len() }, s.remaining.len(), s.arc, s.quota_known, s.quota_drawn)
+        };
+        if k == 0 {
+            return None;
+        }
+        let n = c.entries.len();
+        let recent: Vec<_> = c.entries[n.saturating_sub(flow::ARTIST_WINDOW)..].iter().rev().map(|e| e.ix).collect();
+        let recent: Vec<_> = recent.into_iter().map(|ix| c.feats.get(&lib, ix)).collect();
+        let prev_id = c.entries.last().map(|e| e.ix);
+        let prev = prev_id.map(|ix| c.feats.get(&lib, ix));
+        let ids: Vec<u32> = c.source.as_ref()?.remaining.iter().take(k).copied().collect();
+        let cands: Vec<(u32, _)> = ids.iter().map(|&ix| (ix, c.feats.get(&lib, ix))).collect();
+        let step = total.saturating_sub(remaining_len);
+        let slot = flow::Slot { prev, prev_id, recent, arc, arc_pos: flow::arc_position(step, total), lean: flow::quota_lean(qk, qd, step, total) };
+        let i = flow::pick(&cands, &slot);
+        let id = c.source.as_mut()?.remaining.remove(i)?;
+        if flow::energy_known(&cands[i].1) {
+            c.source.as_mut()?.quota_drawn += 1;
+        }
+        Some(id)
+    }
+
+    /// `regenerateRemaining` for a flow source: a fresh shuffled round of the distinct pool.
+    fn flow_regenerate(c: &mut Core, avoid_first: Option<u32>) {
+        let Some(pool) = c.source.as_ref().map(|s| s.pool.clone()) else { return };
+        let mut ids = Self::unique(&pool);
+        Self::shuffle_js(c, &mut ids);
+        if let Some(a) = avoid_first
+            && ids.len() > 1
+            && ids[0] == a
+        {
+            let j = 1 + (Self::rand01(c) * (ids.len() - 1) as f64).floor() as usize;
+            ids.swap(0, j);
+        }
+        let known = ids.iter().filter(|i| Self::energy_known_of(c, **i)).count();
+        if let Some(s) = c.source.as_mut() {
+            s.round_total = ids.len();
+            s.remaining = ids.into();
+            s.quota_known = known;
+            s.quota_drawn = 0;
+        }
+    }
+
+    /// `drawIntoWindow`
+    fn flow_draw(c: &mut Core, want: usize) {
+        let (mut drawn, mut regenerated) = (0, false);
+        while drawn < want {
+            let Some(src) = c.source.as_ref() else { break };
+            if src.remaining.is_empty() {
+                if !regenerated && c.repeat == RepeatMode::All && !src.pool.is_empty() {
+                    regenerated = true;
+                    let cur = c.current.and_then(|i| c.entries.get(i)).map(|e| e.ix);
+                    Self::flow_regenerate(c, cur);
+                } else {
+                    break;
+                }
+            }
+            let Some(id) = Self::flow_pick(c) else { break };
+            c.entries.push(Entry { ix: id, origin: QueueItemOrigin::Source });
+            drawn += 1;
+        }
+    }
+
+    /// `refillIfNeeded` (flow sources): keep `window / 2` source entries ahead, prune history behind `window`.
+    fn flow_refill(c: &mut Core) {
+        let cur = c.current.map(|i| i as i64).unwrap_or(-1);
+        let ahead = if cur < 0 { 0 } else { c.entries.iter().enumerate().filter(|(i, e)| (*i as i64) > cur && e.origin == QueueItemOrigin::Source).count() };
+        if ahead as f64 >= c.window as f64 / 2.0 {
+            return;
+        }
+        Self::flow_draw(c, c.window - ahead);
+        if let Some(cu) = c.current
+            && cu > c.window
+        {
+            let drop = cu - c.window;
+            c.entries.drain(..drop);
+            c.current = Some(cu - drop);
+        }
+    }
+
+    /// `setSource` with mode `flow`.
+    pub(crate) fn flow_set_source(c: &mut Core, kind: SourceKind, label: String, pool: Vec<u32>, start: Option<u32>, arc: FlowArc) {
+        c.entries = Vec::new();
+        c.current = None;
+        c.shuffle = false;
+        let mut remaining = Self::unique(&pool);
+        Self::shuffle_js(c, &mut remaining);
+        let opener = start.and_then(|s| remaining.iter().position(|x| *x == s)).map(|i| remaining.remove(i));
+        let opener_known = opener.is_some_and(|o| Self::energy_known_of(c, o)) as usize;
+        let known = remaining.iter().filter(|i| Self::energy_known_of(c, **i)).count() + opener_known;
+        let lib = c.lib.clone();
+        let uniq = Self::unique(&pool);
+        let feats: Vec<_> = uniq.iter().map(|i| c.feats.get(&lib, *i)).collect();
+        let coverage = flow::coverage(feats.iter().map(|f| f.as_ref()));
+        c.source = Some(Source {
+            kind,
+            label,
+            mode: SourceMode::Flow,
+            round_total: remaining.len() + opener.is_some() as usize,
+            remaining: remaining.into(),
+            arc,
+            pool,
+            quota_known: known,
+            quota_drawn: opener_known,
+            coverage: Some(coverage),
+        });
+        if let Some(o) = opener {
+            c.entries.push(Entry { ix: o, origin: QueueItemOrigin::Source });
+        }
+        Self::flow_draw(c, c.window - opener.is_some() as usize);
+        if !c.entries.is_empty() {
+            c.current = Some(0);
+            Self::start_current(c);
+        }
+    }
 }

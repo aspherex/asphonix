@@ -26,7 +26,7 @@ use crate::probe::pid;
 
 pub struct NowPlayingView {
     add_btn: Rc<Cell<Bounds<gpui::Pixels>>>,
-    backend: Arc<dyn Backend>,
+    pub(super) backend: Arc<dyn Backend>,
     art: ArtHandle,
     player: Entity<PlayerModel>,
     visible: bool,
@@ -48,7 +48,9 @@ pub struct NowPlayingView {
     queue_total: usize,
     queue_key: (usize, String, bool),
     queue_seq: u64,
-    lyrics_open: bool,
+    pub(super) lyrics_open: bool,
+    pub(super) ly: super::np_lyrics::LyricsPanel,
+    np_scroll: gpui::ScrollHandle,
     last_audible: f64,
     _sub: Subscription,
 }
@@ -81,6 +83,8 @@ impl NowPlayingView {
             queue_key: (usize::MAX, String::new(), false),
             queue_seq: 0,
             lyrics_open: false,
+            ly: Default::default(),
+            np_scroll: gpui::ScrollHandle::new(),
             last_audible: 2.0 / 3.0,
             _sub: sub,
         };
@@ -653,15 +657,39 @@ impl Render for NowPlayingView {
 
         let strip = pid("np.strip", self.strip(th, strip_h, Some(&t), &ps, compact, cx));
 
-        // ---- cover (square, the whole height of the 1fr row; measured, one-frame lag)
+        // ---- cover (square, the whole height of the 1fr row; measured, one-frame lag) [+ lyrics column]
         let area_h = self.cover_area_h.get();
-        let max_w = (vw - 260.0 - 32.0).max(120.0);
+        let content_w = (vw - super::shell::Shell::sidebar_width(vw) - 32.0).max(120.0);
+        let lyrics_on = self.lyrics_open;
+        let lyrics_beside = lyrics_on && vw >= 1280.0; // < 1280: the lyrics replace the cover
+        let col_w = if lyrics_beside { ((content_w - 16.0) / 2.0).floor() } else { content_w };
+        let max_w = col_w.max(120.0);
         let cover_px = if area_h > 0.0 { (area_h - 4.0).clamp(120.0, max_w) } else { (vh - 520.0).clamp(120.0, max_w) };
         let cover_px = cover_px.floor();
         let backend = self.backend.clone();
         let cover = art::cover(&self.art, &backend, t.cover_art.as_deref(), cover_px, window, cx);
         let cell = self.cover_area_h.clone();
         let tag = tag_text(&t);
+        let cover_el = pid(
+            "np.cover",
+            div()
+                .relative()
+                .size(px(cover_px))
+                .flex_none()
+                .border_1()
+                .border_color(th.border)
+                .bg(th.high)
+                .shadow(hard_shadow(&th, 4.))
+                .overflow_hidden()
+                .child(cover)
+                .children((!tag.is_empty()).then(|| {
+                    pid("np.cover.tag", div().absolute().top_0().left_0().px(px(8.)).py(px(2.)).bg(th.accent).child(txt(&th, MONO_DATA, tag).weight(700.0).color(th.accent_text)))
+                })),
+        );
+        if lyrics_on {
+            self.lyrics_ensure(&t.id, cx);
+        }
+        let lyrics_el = lyrics_on.then(|| self.lyrics_panel(th, ps.position_sec, if lyrics_beside { col_w } else { content_w }, window, cx));
         let cover_area = div()
             .flex_1()
             .min_h(px(140.))
@@ -671,7 +699,8 @@ impl Render for NowPlayingView {
             .px(px(16.))
             .flex()
             .flex_row()
-            .justify_center()
+            .gap(px(16.))
+            .when(!lyrics_on, |d| d.justify_center())
             .child(
                 canvas(
                     move |b, _, _| f32::from(b.size.height),
@@ -685,22 +714,14 @@ impl Render for NowPlayingView {
                 .absolute()
                 .size_full(),
             )
-            .child(pid(
-                "np.cover",
-                div()
-                    .relative()
-                    .size(px(cover_px))
-                    .flex_none()
-                    .border_1()
-                    .border_color(th.border)
-                    .bg(th.high)
-                    .shadow(hard_shadow(&th, 4.))
-                    .overflow_hidden()
-                    .child(cover)
-                    .children((!tag.is_empty()).then(|| {
-                        pid("np.cover.tag", div().absolute().top_0().left_0().px(px(8.)).py(px(2.)).bg(th.accent).child(txt(&th, MONO_DATA, tag).weight(700.0).color(th.accent_text)))
-                    })),
-            ));
+            .children(if !lyrics_on {
+                Some(cover_el.into_any_element())
+            } else if lyrics_beside {
+                Some(div().flex_1().min_w_0().flex().flex_row().justify_end().child(cover_el).into_any_element())
+            } else {
+                None
+            })
+            .children(lyrics_el.map(|l| div().flex_1().min_w_0().min_h_0().flex().flex_col().child(l)));
 
         // ---- title block
         let title_row = pid(
@@ -1214,17 +1235,33 @@ impl Render for NowPlayingView {
                                 .min_h(px(30.))
                                 .px(px(12.))
                                 .flex()
-                                .flex_row()
-                                .items_center()
-                                .gap(px(12.))
+                                .flex_col()
+                                .justify_center()
                                 .border_b_1()
                                 .border_color(th.mid)
                                 .cursor(CursorStyle::PointingHand)
                                 .hover(move |s| s.bg(th.mid))
-                                .child(div().w(px(20.)).flex_none().child(txt(&th, MONO_CODE, format!("{:02}", k + 1)).color(th.muted)))
-                                .child(div().flex().flex_grow().flex_basis(px(0.)).min_w_0().child(txt(&th, BODY_MD, u.track.title.clone()).color(th.text).ellipsis()))
-                                .child(div().flex().flex_grow().flex_basis(px(0.)).min_w_0().child(txt(&th, MONO_DATA, u.track.artist.clone()).color(th.muted).ellipsis()))
-                                .child(div().w(px(44.)).flex_none().flex().justify_end().child(txt(&th, MONO_CODE, fmt::format_duration(Some(u.track.duration))).color(th.muted)))
+                                .child({
+                                    let mut title = div().flex().flex_basis(px(0.)).min_w_0().child(txt(&th, BODY_MD, u.track.title.clone()).color(th.text).ellipsis());
+                                    title.style().flex_grow = Some(3.0);
+                                    let mut artist = div().flex().flex_basis(px(0.)).min_w_0().child(txt(&th, MONO_DATA, u.track.artist.clone()).color(th.muted).ellipsis());
+                                    artist.style().flex_grow = Some(2.0);
+                                    div()
+                                        .flex()
+                                        .flex_row()
+                                        .items_center()
+                                        .gap(px(12.))
+                                        .min_h(px(30.))
+                                        .child(div().w(px(20.)).flex_none().child(txt(&th, MONO_CODE, format!("{:02}", k + 1)).color(th.muted)))
+                                        .child(title)
+                                        .child(artist)
+                                        .child(div().w(px(44.)).flex_none().flex().justify_end().child(txt(&th, MONO_CODE, fmt::format_duration(Some(u.track.duration))).color(th.muted)))
+                                })
+                                // `.q-flow { margin-top: -6px; padding: 0 0 5px 32px }`
+                                .children({
+                                    let line = fmt::flow_line(u.flow.as_ref());
+                                    (!line.is_empty()).then(|| div().flex().min_w_0().mt(px(-6.)).pb(px(5.)).pl(px(32.)).child(txt(&th, MONO_CODE, line).color(th.accent_fg).ellipsis()))
+                                })
                                 .on_click(cx.listener(move |this, _, _, cx| {
                                     this.upnext_open = false;
                                     cx.notify();
@@ -1249,8 +1286,16 @@ impl Render for NowPlayingView {
             })),
         );
 
-        div().size_full().min_h(px(600.)).flex().flex_col().gap(px(8.)).child(strip).child(cover_area).child(title_block).child(fft_row).child(deck).when(!short, |d| d.child(legend_wrap(legend.into_any_element())))
-            .when(short, |d| d.child(div().h(px(0.)).flex_none())).into_any_element()
+        let page = div().size_full().min_h(px(600.)).flex().flex_col().gap(px(8.)).child(strip).child(cover_area).child(title_block).child(fft_row).child(deck).when(!short, |d| d.child(legend_wrap(legend.into_any_element())))
+            .when(short, |d| d.child(div().h(px(0.)).flex_none()));
+        // `.np { min-height: 600px }`: below that the stage scrolls (classic 10 px scrollbar eats the width, like the web)
+        let (sbar, overflow) = crate::widgets::scrollbar::passive(th, &self.np_scroll);
+        div()
+            .relative()
+            .size_full()
+            .child(div().id("np-scroll").track_scroll(&self.np_scroll).size_full().overflow_y_scroll().when(overflow, |d| d.pr(px(crate::metrics::tracks::SCROLLBAR_W))).child(page))
+            .child(sbar)
+            .into_any_element()
     }
 }
 

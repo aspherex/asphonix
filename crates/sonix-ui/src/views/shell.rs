@@ -185,6 +185,7 @@ impl Shell {
                     order: sonix_api::TrackOrder::Sort { field: sonix_api::TrackSortField::Title, dir: sonix_api::SortDir::Asc },
                     filter: None,
                     start_track_id: Some("tr_7".into()),
+                    flow: None,
                 });
             });
         }
@@ -240,6 +241,7 @@ impl Shell {
                         order: sonix_api::TrackOrder::Sort { field: sonix_api::TrackSortField::Title, dir: sonix_api::SortDir::Asc },
                         filter: None,
                         start_track_id: Some("tr_7".into()),
+                        flow: None,
                     });
                 });
                 sh.navigate(Route::NowPlaying, cx);

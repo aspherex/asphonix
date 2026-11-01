@@ -163,11 +163,21 @@ impl Render for QueueRail {
 
         // ---- queue sections: "Next in queue" (user-queued, always ahead) and "Next from <source>" (the rolling window)
         let label = match q.as_ref().and_then(|q| q.source.as_ref()) {
-            Some(s) => format!("Next from {}{}", s.label, if s.mode == SourceMode::Shuffle { " · Shuffle" } else { "" }),
+            Some(s) => format!("Next from {}{}", s.label, match s.mode {
+                SourceMode::Shuffle => " · Shuffle".to_string(),
+                SourceMode::Flow => fmt::flow_mode_label(s.arc),
+                SourceMode::InOrder => String::new(),
+            }),
             None if q.as_ref().map(|q| q.items.iter().enumerate().any(|(i, it)| (i as i64) > cur && it.origin == QueueItemOrigin::User)).unwrap_or(false) => "Queue".to_string(),
             None => "Next in buffer".to_string(),
         };
         let is_user = |i: usize, it: &QueueItem| (i as i64) > cur && it.origin == QueueItemOrigin::User;
+        let src_info = q.as_ref().and_then(|q| q.source.clone());
+        let flow_rows = src_info.as_ref().map(|s| s.mode == SourceMode::Flow).unwrap_or(false);
+        let flow_hint = match &src_info {
+            Some(s) if s.mode == SourceMode::Flow => s.flow_coverage.as_ref().map(|c| fmt::coverage_hint(c, flow_noun(s.kind))).unwrap_or_default(),
+            _ => String::new(),
+        };
         let queue_section = if total == 0 {
             div()
                 .flex_1()
@@ -187,9 +197,9 @@ impl Render for QueueRail {
                     }
                     let n = i - cur.max(0) as usize;
                     if is_user(i, it) {
-                        user_rows.push(self.queue_row(&th, it, i, n, false, cx));
+                        user_rows.push(self.queue_row(&th, it, i, n, false, flow_rows, cx));
                     } else {
-                        list = list.child(self.queue_row(&th, it, i, n, (i as i64) == cur, cx));
+                        list = list.child(self.queue_row(&th, it, i, n, (i as i64) == cur, flow_rows, cx));
                     }
                 }
             }
@@ -221,6 +231,7 @@ impl Render for QueueRail {
                 .flex_col()
                 .children(user_section)
                 .child(header(&th, "rail.queue.header", label, None))
+                .children((!flow_hint.is_empty()).then(|| div().flex_none().px(px(space::MD)).py(px(space::XS)).border_b_1().border_color(th.border).child(crate::typo::ts(&th, MONO_CODE).text_color(th.muted).child(flow_hint.clone()))))
                 .child(
                     div()
                         .relative()
@@ -274,7 +285,7 @@ fn rail_spectrum(th: Theme, bands: Option<Vec<u8>>) -> impl IntoElement {
 impl QueueRail {
     /// One queue row (`QueueRail.svelte .row`): drag handle, title/artist, time, "more", remove. Click selects (Ctrl/Shift
     /// extend), double-click plays; rows are drag sources (reorder) and drop targets (reorder / add).
-    fn queue_row(&self, th: &Theme, it: &QueueItem, i: usize, n: usize, active: bool, cx: &mut Context<Self>) -> gpui::AnyElement {
+    fn queue_row(&self, th: &Theme, it: &QueueItem, i: usize, n: usize, active: bool, flow_rows: bool, cx: &mut Context<Self>) -> gpui::AnyElement {
         let th = *th;
         let t = &it.track;
         let selected = self.sel.contains(i);
@@ -290,7 +301,7 @@ impl QueueRail {
                 .flex_none()
                 .items_center()
                 .gap(px(space::XS))
-                .h(px(44.))
+                .h(px(if flow_rows && it.origin != QueueItemOrigin::User { 56.0 } else { 44.0 }))
                 .px(px(space::SM))
                 .border_b_1()
                 .border_color(th.mid)
@@ -305,7 +316,8 @@ impl QueueRail {
                         .flex()
                         .flex_col()
                         .child(div().flex().min_w_0().child(txt(&th, BODY_MD, t.title.clone()).color(th.text).ellipsis()))
-                        .child(div().flex().min_w_0().child(txt(&th, MONO_CODE, t.artist.clone()).color(th.muted).no_tracking().ellipsis())),
+                        .child(div().flex().min_w_0().child(txt(&th, MONO_CODE, t.artist.clone()).color(th.muted).no_tracking().ellipsis()))
+                        .children((flow_rows && it.origin != QueueItemOrigin::User).then(|| div().flex().min_w_0().h(px(14.)).child(txt(&th, MONO_CODE, fmt::flow_line(it.flow.as_ref())).color(th.accent_fg).ellipsis()))),
                 )
                 .child(div().flex_none().child(txt(&th, MONO_CODE, fmt::format_duration(Some(t.duration))).color(th.muted)))
                 .child(pid(format!("rail.row.{n}.more"),
@@ -333,7 +345,7 @@ impl QueueRail {
                         .flex()
                         .items_center()
                         .justify_center()
-                        .child(crate::widgets::icon_g("close", 11., th.muted, th.text))
+                        .child(crate::widgets::icon_g("close", 11., th.muted, th.clip))
                         .on_click(cx.listener(move |this, _, _, cx| {
                             cx.stop_propagation();
                             let ix = this.sel.for_context_menu(idx);
@@ -468,5 +480,16 @@ impl QueueRail {
             });
         })
         .detach();
+    }
+}
+
+/// `flow.ts kindNoun`
+fn flow_noun(kind: SourceKind) -> &'static str {
+    match kind {
+        SourceKind::Playlist => "playlist",
+        SourceKind::Artist => "artist",
+        SourceKind::Genre => "genre",
+        SourceKind::AllTracks => "view",
+        _ => "list",
     }
 }

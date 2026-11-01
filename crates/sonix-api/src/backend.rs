@@ -180,6 +180,18 @@ pub trait PlayerApi {
     fn player_reorder_queue(&self, _from: usize, _to: usize) -> ApiResult<()> {
         Ok(())
     }
+    /// `flow_get_coverage`: how much of a Flow pool has real sequencing data.
+    fn flow_get_coverage(&self, _req: FlowCoverageRequest) -> ApiResult<FlowCoverage> {
+        Ok(FlowCoverage { total: 0, bpm: 0, key: 0, loudness: 0 })
+    }
+    /// `radio_start`: a radio queue seeded from a track, album or artist.
+    fn radio_start(&self, _req: RadioStartRequest) -> ApiResult<()> {
+        Ok(())
+    }
+    /// `lyrics_get`: None = no lyrics for the track.
+    fn lyrics_get(&self, _track_id: &str) -> ApiResult<Option<Lyrics>> {
+        Ok(None)
+    }
     /// `fullPlayer.loopCycle`: A-B loop (set A, set B, clear).
     fn player_loop_cycle(&self) -> ApiResult<()> {
         Ok(())

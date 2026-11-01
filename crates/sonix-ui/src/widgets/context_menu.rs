@@ -54,7 +54,6 @@ impl MenuItem {
         self.danger = true;
         self
     }
-    #[cfg(test)]
     pub fn disabled(mut self, d: bool) -> Self {
         self.disabled = d;
         self
@@ -113,6 +112,10 @@ fn panel_width(window: &Window, th: &Theme, items: &[MenuItem]) -> f32 {
         let label = crate::text::natural_width(window, &it.label, BODY_SM.family.name(th.body_font), BODY_SM.size, BODY_SM.weight, BODY_SM.tracking_px());
         let w_item = 24.0 + if it.icon.is_some() { 22.0 } else { 0.0 } + label + if matches!(it.kind, Kind::Submenu(_)) { 20.0 } else { 0.0 } + 2.0;
         w = w.max(w_item);
+        // a hint is a block under the item: its max-content width also sizes the menu
+        if let Some(h) = &it.hint {
+            w = w.max(24.0 + 2.0 + crate::text::natural_width(window, h, MONO_CODE.family.name(th.body_font), MONO_CODE.size, MONO_CODE.weight, MONO_CODE.tracking_px()));
+        }
     }
     w.min(MAX_W)
 }
@@ -267,9 +270,12 @@ impl ContextMenu {
             .text_size(px(12.))
             .line_height(px(16.))
             .font_family(th.body_font);
+        let mut dom = 0usize;
         for (i, it) in items.iter().enumerate() {
+            let this_dom = dom;
+            dom += 1;
             if matches!(it.kind, Kind::Separator) {
-                col = col.child(pid(format!("menu.child.{}", i + usize::from(parent.is_some()) * 100), div().h(px(1.)).my(px(4.)).bg(th.border)));
+                col = col.child(pid(format!("menu.child.{}", this_dom + usize::from(parent.is_some()) * 100), div().h(px(1.)).my(px(4.)).bg(th.border)));
                 continue;
             }
             let is_active = active == Some(i);
@@ -334,9 +340,10 @@ impl ContextMenu {
                 .child(div().flex_1().min_w_0().flex().child(txt(&th, BODY_SM, it.label.clone()).ellipsis()))
                 .children(is_sub.then(|| icon("chevron-right", 12., colr)))
                 .children(submenu);
-            col = col.child(pid(format!("menu.child.{}", i + usize::from(parent.is_some()) * 100), row));
+            col = col.child(pid(format!("menu.child.{}", this_dom + usize::from(parent.is_some()) * 100), row));
             if let Some(h) = &it.hint {
-                col = col.child(div().px(px(12.)).pb(px(4.)).mt(px(-4.)).child(txt(&th, MONO_CODE, h.clone()).color(th.muted)));
+                dom += 1;
+                col = col.child(pid(format!("menu.child.{}", this_dom + 1 + usize::from(parent.is_some()) * 100), div().px(px(12.)).pb(px(4.)).mt(px(-4.)).child(crate::typo::ts(&th, MONO_CODE).text_color(th.muted).child(h.clone()))));
             }
         }
         col
