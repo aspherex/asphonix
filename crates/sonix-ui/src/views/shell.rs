@@ -25,7 +25,7 @@ use std::time::{Duration, Instant};
 
 actions!(
     sonix,
-    [PlayPause, ToggleNowPlaying, Escape, ToggleTheme, FocusSearch, NavBack, NavForward, SelUp, SelDown, PlaySelected, EnqueueSelected, OpenMenuKey]
+    [PlayPause, ToggleNowPlaying, Escape, ToggleTheme, FocusSearch, NavBack, NavForward, SelUp, SelDown, PlaySelected, EnqueueSelected, OpenMenuKey, SelectAll]
 );
 
 pub struct Counts {
@@ -115,8 +115,13 @@ impl Shell {
             }
         }));
         subs.push(cx.subscribe(&player, |this: &mut Shell, _, _: &crate::app::PlayerEvent, cx| this.card_on_player(cx)));
-        subs.push(cx.subscribe(&queue, |this: &mut Shell, _, ev: &super::queue_rail::RailEvent, cx| match ev {
+        subs.push(cx.subscribe_in(&queue, window, |this: &mut Shell, _, ev: &super::queue_rail::RailEvent, window, cx| match ev {
             super::queue_rail::RailEvent::Navigate(r) => this.navigate(r.clone(), cx),
+            // `playFromQueue` reloads the list, which drops the focus it held: back to the page
+            super::queue_rail::RailEvent::Played => {
+                let f = this.focus.clone();
+                window.focus(&f);
+            }
         }));
         subs.push(cx.observe_window_activation(window, |this: &mut Shell, window, _cx| this.main_active = window.is_window_active()));
         subs.push(cx.subscribe(&np, |this: &mut Shell, _, ev: &NpEvent, cx| this.on_np_event(ev, cx)));

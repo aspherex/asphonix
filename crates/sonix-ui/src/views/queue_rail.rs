@@ -2,6 +2,7 @@
 //! position/output row), the "Next from <label> · Shuffle" window with the real "+ N more" footer.
 //! Docked at >= 1440 px, an overlay drawer below. Not yet ported: drag-reorder, multi-select, remove,
 //! the "Next in queue" user section, flow rows (docs/PORTING.md). Sizes: `crate::metrics::rail`.
+use super::shell::{OpenMenuKey, PlaySelected, SelDown, SelUp, SelectAll};
 use crate::app::{self, PlayerEvent, PlayerModel};
 use crate::art::{self, ArtHandle};
 use crate::metrics::{layout, rail as rl, space, tracks as tr};
@@ -12,13 +13,14 @@ use crate::tracking::{BODY_LG, BODY_MD, BODY_SM, LABEL_CAPS, MONO_CODE, MONO_DAT
 use crate::widgets::context_menu::{ContextMenu, MenuItem};
 use crate::widgets::icon;
 use crate::selection::Selection;
-use gpui::{Bounds, ClickEvent, Context, CursorStyle, Entity, IntoElement, MouseDownEvent, Render, Subscription, Window, canvas, div, fill, point, prelude::*, px, size};
+use gpui::{Bounds, ClickEvent, Context, CursorStyle, DragMoveEvent, Entity, FocusHandle, Focusable, IntoElement, MouseDownEvent, Render, Subscription, Window, canvas, div, fill, point, prelude::*, px, size};
 use sonix_api::format as fmt;
 use sonix_api::*;
 use std::sync::Arc;
 
 pub enum RailEvent {
     Navigate(crate::router::Route),
+    Played,
 }
 impl gpui::EventEmitter<RailEvent> for QueueRail {}
 
@@ -28,6 +30,9 @@ pub struct QueueRail {
     player: Entity<PlayerModel>,
     state: Option<QueueState>,
     scroll: gpui::ScrollHandle,
+    focus: FocusHandle,
+    /// edge auto-scroll while dragging a row (px per frame, + = down), `startAutoScroll`
+    drag_dy: f32,
     menu: Entity<ContextMenu>,
     /// multi-select over absolute queue indices (`QueueRail.svelte`: Ctrl/Shift click, remove acts on the selection)
     sel: Selection,
@@ -53,7 +58,7 @@ impl Render for QueueGhost {
 impl QueueRail {
     pub fn new(backend: Arc<dyn Backend>, art: ArtHandle, player: &Entity<PlayerModel>, menu: &Entity<ContextMenu>, cx: &mut Context<Self>) -> Self {
         let sub = cx.subscribe(player, |this: &mut Self, _, _: &PlayerEvent, cx| this.refresh(cx));
-        let mut s = Self { backend, art, player: player.clone(), state: None, scroll: gpui::ScrollHandle::new(), menu: menu.clone(), sel: Selection::default(), _sub: sub };
+        let mut s = Self { backend, art, player: player.clone(), state: None, scroll: gpui::ScrollHandle::new(), menu: menu.clone(), focus: cx.focus_handle(), drag_dy: 0.0, sel: Selection::default(), _sub: sub };
         s.refresh(cx);
         s
     }
@@ -97,6 +102,16 @@ fn header(th: &Theme, id: &'static str, label: String, right: Option<String>) ->
 
 impl Render for QueueRail {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        if self.drag_dy != 0.0 {
+            if cx.has_active_drag() {
+                let off = self.scroll.offset();
+                let max = f32::from(self.scroll.max_offset().height);
+                self.scroll.set_offset(point(off.x, px((f32::from(off.y) - self.drag_dy).clamp(-max, 0.0))));
+                window.request_animation_frame();
+            } else {
+                self.drag_dy = 0.0;
+            }
+        }
         let th: Theme = app::theme(cx);
         let (ps, frame) = {
             let m = self.player.read(cx);
@@ -237,6 +252,48 @@ impl Render for QueueRail {
                         .relative()
                         .flex_1()
                         .min_h_0()
+                        .track_focus(&self.focus)
+                        .key_context("TrackList QueueList")
+                        .on_action(cx.listener(|this, _: &SelDown, _, cx| this.key_move(1, cx)))
+                        .on_action(cx.listener(|this, _: &SelUp, _, cx| this.key_move(-1, cx)))
+                        .on_action(cx.listener(|this, _: &SelectAll, _, cx| this.select_all_main(cx)))
+                        .on_action(cx.listener(|this, _: &PlaySelected, _, cx| {
+                            if let Some(c) = this.sel.cursor() {
+                                app::call(cx, move |b| {
+                                    let _ = b.player_jump_to(c);
+                                });
+                                cx.emit(RailEvent::Played);
+                            }
+                        }))
+                        .on_action(cx.listener(|this, _: &OpenMenuKey, window, cx| {
+                            if let Some(c) = this.sel.cursor() {
+                                // anchored to the selected row (`openContextMenuFor(row)`: left edge, 4 px under it)
+                                let pos = match this.row_bounds(c) {
+                                    Some(b) => point(b.left(), b.bottom() + px(4.)),
+                                    None => point(px(1200.), px(300.)),
+                                };
+                                this.open_menu(c, pos, window, cx);
+                            }
+                        }))
+                        // `startAutoScroll`: the list scrolls while a dragged row sits within 36 px of its top/bottom edge
+                        .on_drag_move::<QueueDrag>(cx.listener(|this, ev: &DragMoveEvent<QueueDrag>, window, cx| {
+                            const EDGE: f32 = 36.0;
+                            let (y, top, bottom) = (f32::from(ev.event.position.y), f32::from(ev.bounds.top()), f32::from(ev.bounds.bottom()));
+                            let dy = if y < top + EDGE && y > top - EDGE {
+                                -((top + EDGE - y) / 4.0).ceil()
+                            } else if y > bottom - EDGE && y < bottom + EDGE {
+                                ((y - (bottom - EDGE)) / 4.0).ceil()
+                            } else {
+                                0.0
+                            };
+                            if dy != this.drag_dy {
+                                this.drag_dy = dy;
+                                if dy != 0.0 {
+                                    window.request_animation_frame();
+                                }
+                                cx.notify();
+                            }
+                        }))
                         // everywhere else on the rail = Add to queue
                         .on_drop(cx.listener(|this, d: &crate::dnd::SonixDrag, _, cx| this.drop_external(d.0.clone(), EnqueuePosition::End, cx)))
                         .child(list)
@@ -378,11 +435,13 @@ impl QueueRail {
                         this.open_menu(idx, ev.position, window, cx);
                     }),
                 )
-                .on_click(cx.listener(move |this, ev: &ClickEvent, _, cx| {
+                .on_click(cx.listener(move |this, ev: &ClickEvent, window, cx| {
+                    window.focus(&this.focus);
                     if ev.click_count() >= 2 {
                         app::call(cx, move |b| {
                             let _ = b.player_jump_to(idx);
                         });
+                        cx.emit(RailEvent::Played);
                     } else {
                         let m = ev.modifiers();
                         this.sel.click(idx, m.control || m.platform, m.shift);
@@ -491,5 +550,58 @@ fn flow_noun(kind: SourceKind) -> &'static str {
         SourceKind::Genre => "genre",
         SourceKind::AllTracks => "view",
         _ => "list",
+    }
+}
+
+impl QueueRail {
+    /// Absolute indices of the main list's rows (current track onwards, minus the "Next in queue" section).
+    fn main_indices(&self) -> Vec<usize> {
+        let Some(q) = &self.state else { return Vec::new() };
+        let cur = q.current_index;
+        q.items.iter().enumerate().filter(|(i, it)| (*i as i64) >= cur && !((*i as i64) > cur && it.origin == QueueItemOrigin::User)).map(|(i, _)| i).collect()
+    }
+
+    /// `trackListKeydown`: Up/Down move a single selection (clamped), scrolling it into view.
+    fn key_move(&mut self, delta: isize, cx: &mut Context<Self>) {
+        let idx = self.main_indices();
+        if idx.is_empty() {
+            return;
+        }
+        let pos = self.sel.cursor().and_then(|c| idx.iter().position(|i| *i == c));
+        let from = match pos {
+            Some(p) => p as isize,
+            None => {
+                if delta > 0 {
+                    -1
+                } else {
+                    idx.len() as isize
+                }
+            }
+        };
+        let to = (from + delta).clamp(0, idx.len() as isize - 1) as usize;
+        self.sel.click(idx[to], false, false);
+        self.scroll.scroll_to_item(to);
+        cx.notify();
+    }
+
+    /// Ctrl/Cmd+A: every row of the main list.
+    fn select_all_main(&mut self, cx: &mut Context<Self>) {
+        let idx = self.main_indices();
+        self.sel.clear();
+        for i in idx {
+            self.sel.click(i, true, false);
+        }
+        cx.notify();
+    }
+
+    fn row_bounds(&self, abs: usize) -> Option<Bounds<gpui::Pixels>> {
+        let pos = self.main_indices().iter().position(|i| *i == abs)?;
+        self.scroll.bounds_for_item(pos)
+    }
+}
+
+impl Focusable for QueueRail {
+    fn focus_handle(&self, _: &gpui::App) -> FocusHandle {
+        self.focus.clone()
     }
 }

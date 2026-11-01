@@ -379,6 +379,8 @@ impl Shell {
         let _ = menu_open;
         let focus = if menu_open && self.menu.read(cx).has_focus(window) {
             "menu"
+        } else if gpui::Focusable::focus_handle(self.queue.read(cx), cx).is_focused(window) {
+            "tracklist"
         } else if self.search.read(cx).focus_handle.is_focused(window) {
             "search"
         } else {
