@@ -38,7 +38,7 @@ pub fn fmt_int(n: u64) -> String {
     let s = n.to_string();
     let mut out = String::with_capacity(s.len() + s.len() / 3);
     for (i, c) in s.chars().enumerate() {
-        if i > 0 && (s.len() - i) % 3 == 0 {
+        if i > 0 && (s.len() - i).is_multiple_of(3) {
             out.push(',');
         }
         out.push(c);
@@ -94,6 +94,26 @@ pub fn volume_label(ps: &PlayerState) -> String {
     format!("{:.1} dB", if db == 0.0 { 0.0 } else { db })
 }
 
+/// Cover tag of the *source file* (Now Playing): "24/96 LOSSLESS FLAC", "MP3 320K".
+pub fn source_tag(f: &TrackFormat) -> String {
+    let suffix = f.suffix.to_uppercase();
+    match (f.bit_depth, f.bit_rate) {
+        (Some(d), _) => format!("{d}/{} LOSSLESS {suffix}", trim_float(f.sampling_rate as f64 / 1000.0)),
+        (None, Some(b)) => format!("{suffix} {b}K"),
+        _ => suffix,
+    }
+}
+
+/// Header line of Now Playing: "FLAC 16-BIT / 48.0 KHZ".
+pub fn source_line(f: &TrackFormat) -> String {
+    let suffix = f.suffix.to_uppercase();
+    let khz = format!("{:.1} KHZ", f.sampling_rate as f64 / 1000.0);
+    match f.bit_depth {
+        Some(d) => format!("{suffix} {d}-BIT / {khz}"),
+        None => format!("{suffix} / {khz}"),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -138,25 +158,5 @@ mod tests {
         assert_eq!(short_count(9999), "9,999");
         assert_eq!(short_count(51900), "51.9K");
         assert_eq!(short_count(50000), "50K");
-    }
-}
-
-/// Cover tag of the *source file* (Now Playing): "24/96 LOSSLESS FLAC", "MP3 320K".
-pub fn source_tag(f: &TrackFormat) -> String {
-    let suffix = f.suffix.to_uppercase();
-    match (f.bit_depth, f.bit_rate) {
-        (Some(d), _) => format!("{d}/{} LOSSLESS {suffix}", trim_float(f.sampling_rate as f64 / 1000.0)),
-        (None, Some(b)) => format!("{suffix} {b}K"),
-        _ => suffix,
-    }
-}
-
-/// Header line of Now Playing: "FLAC 16-BIT / 48.0 KHZ".
-pub fn source_line(f: &TrackFormat) -> String {
-    let suffix = f.suffix.to_uppercase();
-    let khz = format!("{:.1} KHZ", f.sampling_rate as f64 / 1000.0);
-    match f.bit_depth {
-        Some(d) => format!("{suffix} {d}-BIT / {khz}"),
-        None => format!("{suffix} / {khz}"),
     }
 }

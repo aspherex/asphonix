@@ -178,10 +178,10 @@ impl Drop for MockBackend {
 impl Inner {
     fn permutation(&self, sort: TrackSortField, dir: SortDir, filter: Option<&str>) -> Arc<Vec<u32>> {
         let key = PermKey { sort, dir, filter: filter.unwrap_or("").trim().to_lowercase() };
-        if let Some((k, p)) = self.perm.lock().unwrap().as_ref() {
-            if *k == key {
-                return p.clone();
-            }
+        if let Some((k, p)) = self.perm.lock().unwrap().as_ref()
+            && *k == key
+        {
+            return p.clone();
         }
         let total = self.lib.total_tracks();
         let mut keyed: Vec<(Key, u32)> = Vec::new();
@@ -284,9 +284,8 @@ impl Inner {
         if c.repeat == RepeatMode::One && c.current.is_some() {
             return true;
         }
-        let next = c.current.map(|i| i + 1).unwrap_or(0);
         Self::refill(c);
-        let next = if c.current.is_some() { c.current.unwrap() + 1 } else { next };
+        let next = c.current.map(|i| i + 1).unwrap_or(0);
         if next < c.entries.len() {
             c.current = Some(next);
             Self::refill(c);
@@ -318,10 +317,10 @@ impl Inner {
             c.entries = Vec::new();
         }
         c.source = Some(Source { kind, label, mode, remaining: pool });
-        if c.entries.is_empty() {
-            if let Some(first) = c.source.as_mut().and_then(|s| s.remaining.pop_front()) {
-                c.entries.push(Entry { ix: first, origin: QueueItemOrigin::Source });
-            }
+        if c.entries.is_empty()
+            && let Some(first) = c.source.as_mut().and_then(|s| s.remaining.pop_front())
+        {
+            c.entries.push(Entry { ix: first, origin: QueueItemOrigin::Source });
         }
         c.current = if c.entries.is_empty() { None } else { Some(0) };
         Self::refill(c);
@@ -719,7 +718,7 @@ impl PlayerApi for MockBackend {
 /// Deterministic 240-bucket RMS-like envelope (MOCK).
 pub fn synth_waveform(ix: usize) -> Vec<u8> {
     let mut r = crate::library::Rng::for_seed(ix as u64 * 11 + 3);
-    let (p1, p2, p3) = (r.next() * 6.28, r.next() * 6.28, r.next() * 6.28);
+    let (p1, p2, p3) = (r.next() * std::f64::consts::TAU, r.next() * std::f64::consts::TAU, r.next() * std::f64::consts::TAU);
     (0..WAVEFORM_BUCKETS)
         .map(|i| {
             let x = i as f64 / WAVEFORM_BUCKETS as f64;

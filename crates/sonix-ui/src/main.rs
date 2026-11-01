@@ -1,4 +1,11 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
+#![allow(
+    dead_code, // the widget layer ships variants/methods later phases use (Danger button, set_text, ...)
+    clippy::collapsible_if,
+    clippy::type_complexity,
+    clippy::field_reassign_with_default,
+    clippy::assertions_on_constants
+)]
 //! SONIX native: the GPUI desktop UI. Phase 1 runs against `sonix-mock` through the
 //! `sonix_api::Backend` seam; phase 2 swaps in a real backend built on `sonix-core`.
 mod app;

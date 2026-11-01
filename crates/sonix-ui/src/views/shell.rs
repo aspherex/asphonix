@@ -296,12 +296,12 @@ impl Shell {
 
     fn load_backdrop(&mut self) {
         let bytes: &[u8] = if self.th.light { include_bytes!("../../../../assets/bg/light.png") } else { include_bytes!("../../../../assets/bg/dark.png") };
-        self.backdrop = image::load_from_memory(bytes).ok().and_then(|i| {
+        self.backdrop = image::load_from_memory(bytes).ok().map(|i| {
             let mut rgba = i.to_rgba8();
-            for p in rgba.chunks_exact_mut(4) {
+            for p in rgba.chunks_mut(4) {
                 p.swap(0, 2);
             }
-            Some(Arc::new(RenderImage::new(vec![image::Frame::new(rgba)])))
+            Arc::new(RenderImage::new(vec![image::Frame::new(rgba)]))
         });
     }
 

@@ -466,7 +466,7 @@ impl TracksView {
         } else {
             ts(&th, MONO_CODE).child(SharedString::from(format!("{:02}", ix + 1))).into_any_element()
         });
-        let mut cell = |d: Div| ellipsis(d.text_color(th.muted));
+        let cell = |d: Div| ellipsis(d.text_color(th.muted));
         let artist = cell(flex_cell(2.0).font_family(MONO).text_size(px(12.)).line_height(px(16.)).font_weight(FontWeight::MEDIUM)).child(SharedString::from(t.artist.clone()));
         let album = cell(flex_cell(2.0).font_family(MONO).text_size(px(12.)).line_height(px(16.)).font_weight(FontWeight::MEDIUM)).child(SharedString::from(t.album.clone().unwrap_or_else(|| "—".into())));
         let right = |w: f32, s: String| div().w(px(w)).flex_none().text_right().font_family(MONO).text_size(px(12.)).line_height(px(16.)).font_weight(FontWeight::MEDIUM).text_color(th.muted).whitespace_nowrap().child(SharedString::from(s));

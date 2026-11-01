@@ -101,7 +101,7 @@ function Sum($procs, $field) { $s = [uint64]0; foreach ($p in $procs) { $s += [u
 function MB($b) { [math]::Round($b / 1MB, 1) }
 
 function Start-Sonix([string]$Exe, [hashtable]$EnvVars = @{}, [string]$Log = $null) {
-    foreach ($k in $EnvVars.Keys) { Set-Item -Path "Env:$k" -Value $EnvVars[$k] }
+    foreach ($k in $EnvVars.Keys) { Set-Item -Path "Env:$k" -Value $EnvVars[$k] | Out-Null }
     if ($Log) { Remove-Item $Log -ErrorAction SilentlyContinue; $env:SONIX_LOG = $Log }
     $sw = [Diagnostics.Stopwatch]::StartNew()
     $p = Start-Process -FilePath $Exe -PassThru

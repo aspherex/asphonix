@@ -6,7 +6,7 @@ use crate::app::{self, PlayerEvent, PlayerModel};
 use crate::art::{self, ArtHandle};
 use crate::theme::Theme;
 use crate::tracking::{BODY_SM, LABEL_CAPS, MONO_CODE, MONO_DATA, tracked};
-use crate::typo::{ellipsis, ts};
+use crate::typo::{ellipsis_line, ts};
 use crate::widgets::icon;
 use gpui::{ClickEvent, Context, CursorStyle, Entity, IntoElement, Render, SharedString, Subscription, Window, div, prelude::*, px};
 use sonix_api::format as fmt;
@@ -77,9 +77,9 @@ impl Render for QueueRail {
                             .min_w_0()
                             .gap(px(2.))
                             .child(tracked("NOW PLAYING", LABEL_CAPS, th.body_font, th.accent_fg, window))
-                            .child(ellipsis(ts(&th, crate::tracking::BODY_MD).text_color(th.text)).child(SharedString::from(t.title.clone())))
-                            .child(ellipsis(ts(&th, MONO_DATA).text_color(th.muted)).child(SharedString::from(t.artist.clone())))
-                            .child(ellipsis(ts(&th, MONO_CODE).text_color(if ps.bit_perfect { th.accent_fg } else { th.muted })).child(SharedString::from(readout))),
+                            .child(ellipsis_line(ts(&th, crate::tracking::BODY_MD).text_color(th.text)).child(SharedString::from(t.title.clone())))
+                            .child(ellipsis_line(ts(&th, MONO_DATA).text_color(th.muted)).child(SharedString::from(t.artist.clone())))
+                            .child(ellipsis_line(ts(&th, MONO_CODE).text_color(if ps.bit_perfect { th.accent_fg } else { th.muted })).child(SharedString::from(readout))),
                     )
                     .into_any_element()
             }
@@ -121,8 +121,8 @@ impl Render for QueueRail {
                                 .flex_col()
                                 .flex_1()
                                 .min_w_0()
-                                .child(ellipsis(ts(&th, crate::tracking::BODY_SM).text_color(th.text)).child(SharedString::from(t.title.clone())))
-                                .child(ellipsis(ts(&th, MONO_CODE).text_color(th.muted)).child(SharedString::from(t.artist.clone()))),
+                                .child(ellipsis_line(ts(&th, crate::tracking::BODY_SM).text_color(th.text)).child(SharedString::from(t.title.clone())))
+                                .child(ellipsis_line(ts(&th, MONO_CODE).text_color(th.muted)).child(SharedString::from(t.artist.clone()))),
                         )
                         .child(ts(&th, MONO_CODE).flex_none().text_color(th.muted).child(SharedString::from(fmt::format_duration(Some(t.duration)))))
                         .when(it.origin == QueueItemOrigin::User, |d| d.child(div().text_color(th.accent_fg).child(icon("add", 11., th.accent_fg))))

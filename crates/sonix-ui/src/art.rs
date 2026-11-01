@@ -30,7 +30,7 @@ pub fn new_handle(cap_bytes: usize) -> ArtHandle {
 
 pub fn render_image(p: ArtPixels) -> Option<Arc<RenderImage>> {
     let mut rgba = p.rgba;
-    for px in rgba.chunks_exact_mut(4) {
+    for px in rgba.chunks_mut(4) {
         px.swap(0, 2); // GPUI wants BGRA
     }
     let buf = RgbaImage::from_raw(p.width, p.height, rgba)?;

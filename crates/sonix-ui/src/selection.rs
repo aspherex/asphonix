@@ -116,9 +116,9 @@ mod tests {
         s.click(5, true, false);
         assert_eq!(s.indices(), vec![8], "ctrl toggles off");
         s.click(10, false, true);
-        assert_eq!(s.indices(), vec![8, 9, 10], "range from the ctrl-click anchor");
+        assert_eq!(s.indices(), (5..=10).collect::<Vec<_>>(), "range from the last clicked row (the anchor)");
         s.click(2, false, true);
-        assert_eq!(s.indices(), (2..=8).collect::<Vec<_>>(), "shift replaces the previous range");
+        assert_eq!(s.indices(), (2..=5).collect::<Vec<_>>(), "shift replaces the previous range");
         s.click(20, true, true);
         assert!(s.contains(20) && s.contains(2) && s.contains(8), "ctrl+shift adds the range");
     }

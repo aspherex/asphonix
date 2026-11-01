@@ -5,7 +5,7 @@ use crate::app::{self, PlayerModel};
 use crate::art::{self, ArtHandle};
 use crate::theme::Theme;
 use crate::tracking::{BODY_LG, MONO_CODE, MONO_DATA};
-use crate::typo::{ellipsis, ts};
+use crate::typo::{ellipsis_line, ts};
 use crate::widgets::button::ghost_icon;
 use crate::widgets::slider::{self, SliderHandle, slider};
 use crate::widgets::tooltip::tip;
@@ -89,8 +89,8 @@ impl Render for DockView {
                     .flex_col()
                     .flex_1()
                     .min_w_0()
-                    .child(ellipsis(ts(&th, BODY_LG).text_color(th.text)).child(SharedString::from(track.as_ref().map(|t| t.title.clone()).unwrap_or_else(|| "No track loaded".into()))))
-                    .child(ellipsis(ts(&th, MONO_DATA).text_color(th.muted)).child(SharedString::from(match &track {
+                    .child(ellipsis_line(ts(&th, BODY_LG).text_color(th.text)).child(SharedString::from(track.as_ref().map(|t| t.title.clone()).unwrap_or_else(|| "No track loaded".into()))))
+                    .child(ellipsis_line(ts(&th, MONO_DATA).text_color(th.muted)).child(SharedString::from(match &track {
                         Some(t) => match &t.album {
                             Some(a) => format!("{} · {}", t.artist, a),
                             None => t.artist.clone(),
@@ -225,7 +225,7 @@ impl Render for DockView {
         } else {
             let full = vw >= 1680.0;
             let text = if full { format!("{readout}{}", if bit_perfect { " · BIT-PERFECT" } else { "" }) } else { short };
-            ellipsis(ts(&th, MONO_CODE)).text_color(if bit_perfect { th.accent_fg } else { th.muted }).when(!full, |d| d.flex_none()).child(SharedString::from(text)).into_any_element()
+            ellipsis_line(ts(&th, MONO_CODE)).text_color(if bit_perfect { th.accent_fg } else { th.muted }).when(!full, |d| d.flex_none()).child(SharedString::from(text)).into_any_element()
         };
         let aux = div()
             .flex_1()

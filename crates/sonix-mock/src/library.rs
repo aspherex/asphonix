@@ -75,7 +75,7 @@ pub fn artist_name(index: usize) -> String {
     let suffix = *r.pick(&ARTIST_SUFFIX);
     let name = format!("{}{core}{suffix}", if first.is_empty() { String::new() } else { format!("{first} ") });
     let name = name.trim().to_string();
-    if index % 7 == 0 { format!("{name} {}", 100 + (index % 900)) } else { name }
+    if index.is_multiple_of(7) { format!("{name} {}", 100 + (index % 900)) } else { name }
 }
 
 pub fn album_title(index: usize) -> String {
@@ -329,7 +329,8 @@ mod tests {
         let l = Library::new();
         assert_eq!(l.total_tracks(), 54_515);
         // (global index, album, track in album, title, artist, album title, suffix, bitRate, bitDepth, rate)
-        let golden: [(usize, usize, usize, &str, &str, &str, &str, u32, Option<u32>, u32); 8] = [
+        type Golden = (usize, usize, usize, &'static str, &'static str, &'static str, &'static str, u32, Option<u32>, u32);
+        let golden: [Golden; 8] = [
             (0, 0, 0, "Ferric Monolith (Pt. 1)", "Actress Jr.", "Industrial Horizon", "flac", 6144, Some(32), 96000),
             (1, 0, 1, "Chrome Static (Mix 2)", "Actress Jr.", "Industrial Horizon", "flac", 1536, Some(16), 48000),
             (2, 0, 2, "Obsidian Fathom (Dub 3)", "Actress Jr.", "Industrial Horizon", "aac", 128, None, 48000),
