@@ -27,7 +27,4 @@ impl PlayerApi for RealBackend {
 impl OutputApi for RealBackend {
     fn output_get_status(&self) -> ApiResult<OutputStatus> { Err(ApiError::unimplemented("output_get_status")) }
 }
-impl ArtApi for RealBackend {
-    fn art_get(&self, cover_art: &str, size: u32) -> ApiResult<ArtPixels> { Err(ApiError::unimplemented("art_get")) }
-}
 impl SettingsApi for RealBackend {}

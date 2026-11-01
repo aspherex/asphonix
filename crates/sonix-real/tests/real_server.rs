@@ -46,6 +46,7 @@ fn login_profiles_restore_logout() {
     let pls = b.playlists_list().unwrap();
     println!("playlists={}", pls.len());
     println!("liked={}", b.liked_count().unwrap());
+    if let Some(cv) = albums.items.iter().find_map(|a| a.cover_art.clone()) { let px = b.art_get(&cv, 160).unwrap(); println!("art {}x{} {}B", px.width, px.height, px.rgba.len()); assert!(px.width > 0); }
     if let Some(a) = albums.items.first() { let d = b.browse_get_album(&a.id).unwrap(); println!("album detail tracks={}", d.tracks.len()); }
     let st = b.auth_session_status().unwrap();
     assert_eq!(st.state, ConnectionState::Connected);
