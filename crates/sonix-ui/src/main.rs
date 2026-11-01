@@ -8,11 +8,13 @@
 )]
 //! SONIX native: the GPUI desktop UI. Phase 1 runs against `sonix-mock` through the
 //! `sonix_api::Backend` seam; phase 2 swaps in a real backend built on `sonix-core`.
+mod anim;
 mod app;
 mod art;
 mod clock;
 mod columns;
 mod icons_gen;
+mod metrics;
 mod pager;
 #[cfg(feature = "parity")]
 mod parity;
@@ -22,6 +24,7 @@ mod router;
 mod selection;
 mod settings;
 mod theme;
+mod text;
 mod tracking;
 mod typo;
 mod views;

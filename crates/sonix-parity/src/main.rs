@@ -13,8 +13,38 @@ fn lum(p: &Rgba<u8>) -> f64 {
     0.2126 * p[0] as f64 + 0.7152 * p[1] as f64 + 0.0722 * p[2] as f64
 }
 
+/// `parity-diff crop <web.png> <native.png> <out.png> <x> <y> <w> <h> [zoom]`: side-by-side (web over native) crop
+/// in CSS px (dpr 1.5), nearest-neighbour zoomed, for eyeballing individual elements.
+fn crop(a: &[String]) {
+    let web = image::open(&a[2]).expect("web").to_rgba8();
+    let nat = image::open(&a[3]).expect("native").to_rgba8();
+    let f = |i: usize| a[i].parse::<f64>().unwrap();
+    let (x, y, w, h) = ((f(5) * 1.5) as u32, (f(6) * 1.5) as u32, (f(7) * 1.5) as u32, (f(8) * 1.5) as u32);
+    let z: u32 = a.get(9).and_then(|s| s.parse().ok()).unwrap_or(3);
+    let mut out = RgbaImage::new(w * z, (h * 2 + 2) * z);
+    for (row, img) in [&web, &nat].iter().enumerate() {
+        for yy in 0..h {
+            for xx in 0..w {
+                if x + xx >= img.width() || y + yy >= img.height() {
+                    continue;
+                }
+                let p = *img.get_pixel(x + xx, y + yy);
+                for dy in 0..z {
+                    for dx in 0..z {
+                        out.put_pixel(xx * z + dx, ((row as u32) * (h + 2) + yy) * z + dy, p);
+                    }
+                }
+            }
+        }
+    }
+    out.save(&a[4]).unwrap();
+}
+
 fn main() {
     let a: Vec<String> = std::env::args().collect();
+    if a.get(1).map(String::as_str) == Some("crop") {
+        return crop(&a);
+    }
     if a.len() < 5 {
         eprintln!("usage: parity-diff web.png native.png out-dir text-rects.json [dpr] [tol]");
         std::process::exit(2);

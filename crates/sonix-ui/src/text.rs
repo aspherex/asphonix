@@ -23,7 +23,8 @@ pub struct Txt {
     line: f32,
     tracking: f32,
     weight: f32,
-    color: Hsla,
+    /// `None` = inherit the parent's `text_color` (so hover styles on the parent recolour the text).
+    color: Option<Hsla>,
     ellipsis: bool,
 }
 
@@ -31,24 +32,30 @@ pub struct Txt {
 pub fn txt(th: &Theme, spec: TypeSpec, text: impl Into<SharedString>) -> Txt {
     let text: SharedString = text.into();
     let text = if spec.caps { SharedString::from(text.to_uppercase()) } else { text };
-    Txt { text, family: spec.family.name(th.body_font), size: spec.size, line: spec.line, tracking: spec.tracking_px(), weight: spec.weight, color: th.text, ellipsis: true }
+    Txt { text, family: spec.family.name(th.body_font), size: spec.size, line: spec.line, tracking: spec.tracking_px(), weight: spec.weight, color: None, ellipsis: false }
 }
 
 impl Txt {
     pub fn color(mut self, c: Hsla) -> Self {
-        self.color = c;
+        self.color = Some(c);
         self
     }
     pub fn weight(mut self, w: f32) -> Self {
         self.weight = w;
         self
     }
-    /// Never truncate (the box is always the natural width).
-    pub fn no_ellipsis(mut self) -> Self {
-        self.ellipsis = false;
+    /// `overflow: hidden; text-overflow: ellipsis; min-width: 0` (the box shrinks, the text is cut with "…").
+    /// Without it the box is always the natural width and never shrinks (taffy's intrinsic-size pass
+    /// over-counts shrinkable measured leaves in `flex-shrink: 0` containers, e.g. the top bar pill).
+    pub fn ellipsis(mut self) -> Self {
+        self.ellipsis = true;
         self
     }
 }
+
+/// GPUI snaps flex allocations to device pixels (1.5 per CSS px here), Chromium rounds intrinsic widths up:
+/// an allocation up to one CSS px short of the natural width is not an overflow.
+const SNAP: f32 = 1.0;
 
 fn run_for(text: &str, family: &'static str, weight: f32, color: Hsla) -> TextRun {
     let mut f = font(family);
@@ -87,7 +94,7 @@ impl Element for Txt {
     fn request_layout(&mut self, _: Option<&GlobalElementId>, _: Option<&InspectorElementId>, window: &mut Window, _cx: &mut App) -> (LayoutId, ()) {
         let (text, family, sz, weight, tracking, ellipsis, line) = (self.text.clone(), self.family, self.size, self.weight, self.tracking, self.ellipsis, self.line);
         let mut style = Style::default();
-        style.flex_shrink = 1.0;
+        style.flex_shrink = if ellipsis { 1.0 } else { 0.0 };
         if ellipsis {
             style.min_size.width = Length::Definite(DefiniteLength::Absolute(AbsoluteLength::Pixels(px(0.))));
         }
@@ -96,7 +103,7 @@ impl Element for Txt {
             let w = match known.width {
                 Some(w) => f32::from(w),
                 None => match avail.width {
-                    AvailableSpace::Definite(a) if ellipsis => nat.min(f32::from(a)),
+                    AvailableSpace::Definite(a) if ellipsis => if nat <= f32::from(a) + SNAP { nat } else { f32::from(a) },
                     AvailableSpace::MinContent if ellipsis => 0.0,
                     _ => nat,
                 },
@@ -113,7 +120,8 @@ impl Element for Txt {
             return;
         }
         let ts = window.text_system().clone();
-        let run = run_for(&self.text, self.family, self.weight, self.color);
+        let color = self.color.unwrap_or_else(|| window.text_style().color);
+        let run = run_for(&self.text, self.family, self.weight, color);
         let layout = ts.layout_line(&self.text, px(self.size), std::slice::from_ref(&run), None);
         let tr = self.tracking;
         // glyphs in order: (byte index, x, run index, glyph)
@@ -128,8 +136,8 @@ impl Element for Txt {
         let avail = f32::from(bounds.size.width);
         let mut keep = n;
         let mut ell: Option<Arc<gpui::LineLayout>> = None;
-        if self.ellipsis && natural > avail + 0.01 {
-            let el = ts.layout_line("…", px(self.size), &[run_for("…", self.family, self.weight, self.color)], None);
+        if self.ellipsis && natural > avail + SNAP {
+            let el = ts.layout_line("…", px(self.size), &[run_for("…", self.family, self.weight, color)], None);
             let ew = f32::from(el.width) + tr;
             keep = 0;
             for k in (0..=n).rev() {
@@ -157,7 +165,7 @@ impl Element for Txt {
             let r = &layout.runs[*ri];
             let g = &r.glyphs[*gi];
             if !g.is_emoji {
-                let _ = window.paint_glyph(point(px(x0 + gx + i as f32 * tr), baseline), r.font_id, g.id, px(self.size), self.color);
+                let _ = window.paint_glyph(point(px(x0 + gx + i as f32 * tr), baseline), r.font_id, g.id, px(self.size), color);
             }
             i += 1;
         }
@@ -168,7 +176,7 @@ impl Element for Txt {
             for r in &el.runs {
                 for g in &r.glyphs {
                     if !g.is_emoji {
-                        let _ = window.paint_glyph(point(px(ex + f32::from(g.position.x) + j as f32 * tr), baseline), r.font_id, g.id, px(self.size), self.color);
+                        let _ = window.paint_glyph(point(px(ex + f32::from(g.position.x) + j as f32 * tr), baseline), r.font_id, g.id, px(self.size), color);
                     }
                     j += 1;
                 }

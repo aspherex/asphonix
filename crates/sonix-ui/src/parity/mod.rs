@@ -253,6 +253,20 @@ impl Shell {
                 });
                 json!({"ok": true})
             }
+            "measure" => {
+                // shaped width of a string with a bundled family/weight (font matching check)
+                let fam: &'static str = match s("family").as_str() {
+                    "Space Grotesk" => "Space Grotesk",
+                    "Inter" => "Inter",
+                    _ => "JetBrains Mono",
+                };
+                let mut fnt = gpui::font(fam);
+                fnt.weight = gpui::FontWeight(f("weight"));
+                let text = s("text");
+                let run = gpui::TextRun { len: text.len(), font: fnt, color: gpui::black(), background_color: None, underline: None, strikethrough: None };
+                let l = window.text_system().layout_line(&text, px(f("size")), &[run], None);
+                json!({"ok": true, "width": f32::from(l.width), "ascent": f32::from(l.ascent), "descent": f32::from(l.descent)})
+            }
             "boxes" => json!({"ok": true, "boxes": crate::probe::boxes()}),
             "state" => self.parity_state(window, cx),
             "capture" => {

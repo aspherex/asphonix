@@ -10,9 +10,11 @@ use crate::pager::{PAGE, Pager};
 use crate::probe::pid;
 use crate::router::Route;
 use crate::selection::Selection;
-use crate::theme::{MONO, Theme};
-use crate::tracking::{BODY_MD, HEADLINE_MD, LABEL_CAPS, MONO_CODE, tracked};
-use crate::typo::{ellipsis, ts};
+use crate::anim;
+use crate::metrics::{anim as m_anim, controls as ctl, tracks as tr};
+use crate::text::txt;
+use crate::theme::Theme;
+use crate::tracking::{BODY_MD, BODY_SM, HEADLINE_MD, LABEL_CAPS, MONO_CODE, MONO_DATA, TypeSpec};
 use crate::widgets::button::{Variant, button};
 use crate::widgets::context_menu::{ContextMenu, MenuItem};
 use crate::widgets::scrollbar::{self, ScrollbarHandle};
@@ -29,7 +31,7 @@ use std::ops::Range;
 use std::sync::Arc;
 use std::time::Duration;
 
-pub const ROW_HEIGHT: f32 = 36.0;
+pub const ROW_HEIGHT: f32 = tr::ROW_H;
 
 pub enum TracksEvent {
     Navigate(Route),
@@ -54,6 +56,7 @@ pub struct TracksView {
     sel: Selection,
     focus: FocusHandle,
     vis: Range<usize>,
+    hover_row: Option<usize>,
     playlists: Vec<Playlist>,
     _subs: Vec<Subscription>,
 }
@@ -61,7 +64,7 @@ pub struct TracksView {
 impl TracksView {
     pub fn new(backend: Arc<dyn Backend>, art: ArtHandle, player: &Entity<PlayerModel>, menu: &Entity<ContextMenu>, window: &mut Window, cx: &mut Context<Self>) -> Self {
         let th = app::theme(cx);
-        let filter_input = cx.new(|cx| TextInput::new(cx, "Filter by title, artist, album…", &th, th.body_font, 13.0, 18.0, 400.0));
+        let filter_input = cx.new(|cx| TextInput::new(cx, "", &th, crate::theme::MONO, MONO_DATA.size, MONO_DATA.line, MONO_DATA.weight));
         let mut subs = Vec::new();
         subs.push(cx.subscribe(&filter_input, |this: &mut Self, input, ev: &InputEvent, cx| {
             if *ev == InputEvent::Changed {
@@ -93,6 +96,7 @@ impl TracksView {
             sel: Selection::default(),
             focus: cx.focus_handle(),
             vis: 0..0,
+            hover_row: None,
             playlists: Vec::new(),
             _subs: subs,
         };
@@ -416,121 +420,160 @@ impl TracksView {
     // ------------------------------------------------------------ render pieces
     fn cols(&self, window: &Window) -> Columns {
         let vw = f32::from(window.viewport_size().width);
-        let rail = if Shell::rail_docked(vw, &Route::Tracks) { 340.0 } else { 0.0 };
+        let rail = if Shell::rail_docked(vw, &Route::Tracks) { crate::metrics::layout::RAIL_W } else { 0.0 };
         // container = table panel content box: viewport - sidebar - rail - 2*16 page padding - 2*1 panel border
-        visible_columns(vw - Shell::sidebar_width(vw) - rail - 32.0 - 2.0)
+        visible_columns(vw - Shell::sidebar_width(vw) - rail - 2.0 * tr::PAGE_PAD - 2.0)
     }
 
-    fn header_cell(&self, id: &'static str, label: &'static str, field: TrackSortField, right: bool, window: &mut Window, cx: &mut Context<Self>) -> Stateful<Div> {
+    /// Sortable column header: a `<button class="sort-btn">` inside `.type-label-caps`. UA buttons reset
+    /// `text-transform`, so the labels stay mixed case ("Title ↑"); colour is the head's muted, stark on hover.
+    fn header_cell(&self, id: &'static str, label: &'static str, field: TrackSortField, right: bool, cx: &mut Context<Self>) -> Stateful<Div> {
         let th = self.th;
         let arrow = if self.sort == field { if self.dir == SortDir::Desc { " ↓" } else { " ↑" } } else { "" };
-        let text = format!("{label}{arrow}");
-        let active = self.sort == field;
+        let spec = TypeSpec { caps: false, ..LABEL_CAPS };
         div()
             .id(id)
             .flex()
             .flex_row()
             .when(right, |d| d.justify_end())
             .cursor(CursorStyle::PointingHand)
-            .text_color(if active { th.text } else { th.muted })
+            .text_color(th.muted)
             .hover(move |s| s.text_color(th.text))
-            .child(tracked(&text, LABEL_CAPS, th.body_font, if active { th.text } else { th.muted }, window))
+            .child(txt(&th, spec, format!("{label}{arrow}")))
             .on_click(cx.listener(move |this, _, _, cx| this.on_sort(field, cx)))
     }
 
-    fn head_row(&self, cols: Columns, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement + use<> {
+    fn head_row(&self, cols: Columns, cx: &mut Context<Self>) -> impl IntoElement + use<> {
         let th = self.th;
-        pid("table.head", div()
-            .flex()
-            .flex_row()
-            .items_center()
-            .gap(px(8.))
-            .pl(px(4.))
-            .pr(px(8.))
-            .py(px(4.))
-            .flex_none()
-            .border_b_1()
-            .border_color(th.border)
-            .child(div().w(px(36.)).flex_none())
-            .child(pid("table.head.title", flex_cell(3.0).child(self.header_cell("h-title", "Title", TrackSortField::Title, false, window, cx))))
-            .child(pid("table.head.artist", flex_cell(2.0).child(self.header_cell("h-artist", "Artist", TrackSortField::Artist, false, window, cx))))
-            .child(pid("table.head.album", flex_cell(2.0).child(self.header_cell("h-album", "Album", TrackSortField::Album, false, window, cx))))
-            .when(cols.year, |d| d.child(pid("table.head.year", div().w(px(56.)).flex_none().child(self.header_cell("h-year", "Year", TrackSortField::Year, true, window, cx)))))
-            .when(cols.added, |d| d.child(pid("table.head.added", div().w(px(88.)).flex_none().child(self.header_cell("h-added", "Added", TrackSortField::DateAdded, true, window, cx)))))
-            .child(pid("table.head.format", div().w(px(96.)).flex_none().child(self.header_cell("h-format", "Format", TrackSortField::Format, true, window, cx))))
-            .child(pid("table.head.time", div().w(px(48.)).flex_none().child(self.header_cell("h-time", "Time", TrackSortField::Duration, true, window, cx))))
-            .child(div().w(px(24.)).flex_none())
-            .child(div().w(px(24.)).flex_none()))
+        let spacer = || div().w(px(tr::ICON_BTN)).h(px(tr::ICON_BTN)).flex_none();
+        pid(
+            "table.head",
+            div()
+                .flex()
+                .flex_row()
+                .items_center()
+                .gap(px(tr::ROW_GAP))
+                .pl(px(tr::ROW_PAD_LEFT))
+                .pr(px(tr::ROW_PAD_RIGHT))
+                .py(px(tr::HEAD_PAD_Y))
+                .flex_none()
+                .border_b_1()
+                .border_color(th.border)
+                .child(div().w(px(tr::IDX_W)).flex_none())
+                .child(pid("table.head.title", flex_cell(tr::TITLE_GROW).child(self.header_cell("h-title", "Title", TrackSortField::Title, false, cx))))
+                .child(pid("table.head.artist", flex_cell(tr::ARTIST_GROW).child(self.header_cell("h-artist", "Artist", TrackSortField::Artist, false, cx))))
+                .child(pid("table.head.album", flex_cell(tr::ALBUM_GROW).child(self.header_cell("h-album", "Album", TrackSortField::Album, false, cx))))
+                .when(cols.year, |d| d.child(pid("table.head.year", div().w(px(tr::YEAR_W)).flex_none().child(self.header_cell("h-year", "Year", TrackSortField::Year, true, cx)))))
+                .when(cols.added, |d| d.child(pid("table.head.added", div().w(px(tr::ADDED_W)).flex_none().child(self.header_cell("h-added", "Added", TrackSortField::DateAdded, true, cx)))))
+                .child(pid("table.head.format", div().w(px(tr::FORMAT_W)).flex_none().child(self.header_cell("h-format", "Format", TrackSortField::Format, true, cx))))
+                .child(pid("table.head.time", div().w(px(tr::TIME_W)).flex_none().child(self.header_cell("h-time", "Time", TrackSortField::Duration, true, cx))))
+                .child(spacer())
+                .child(spacer()),
+        )
     }
 
-    fn row(&mut self, ix: usize, cols: Columns, cx: &mut Context<Self>) -> AnyElement {
+    fn row(&mut self, ix: usize, cols: Columns, window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
         let th = self.th;
         let Some(t) = self.pager.get(ix).cloned() else {
             self.request_page(ix / PAGE, cx);
-            return div().id(("trow", ix)).h(px(ROW_HEIGHT)).w_full().bg(th.mid).into_any_element();
+            return div().id(("trow", ix)).h(px(tr::ROW_H)).w_full().bg(th.mid).into_any_element();
         };
         let active = self.current_id.as_deref() == Some(t.id.as_str());
         let selected = self.sel.contains(ix);
         let starred = t.starred.is_some();
         let id_play = t.id.clone();
-        let idx_cell = pid(format!("track.row.{ix}.idx"), div().w(px(36.)).flex_none().flex().items_center().justify_center().gap(px(2.)).text_color(th.muted).child(if active {
-            now_playing_bars(&th, self.playing).into_any_element()
-        } else {
-            ts(&th, MONO_CODE).child(SharedString::from(format!("{:02}", ix + 1))).into_any_element()
-        }));
-        let cell = |d: Div| ellipsis(d.text_color(th.muted));
-        let artist = |d: Div| pid(format!("track.row.{ix}.artist"), d);
-        let album = |d: Div| pid(format!("track.row.{ix}.album"), d);
-        let artist = artist(cell(flex_cell(2.0).font_family(MONO).text_size(px(12.)).line_height(px(16.)).font_weight(FontWeight::MEDIUM)).child(SharedString::from(t.artist.clone())));
-        let album = album(cell(flex_cell(2.0).font_family(MONO).text_size(px(12.)).line_height(px(16.)).font_weight(FontWeight::MEDIUM)).child(SharedString::from(t.album.clone().unwrap_or_else(|| "—".into()))));
-        let right = |name: &str, w: f32, s: String| pid(format!("track.row.{ix}.{name}"), div().w(px(w)).flex_none().text_right().font_family(MONO).text_size(px(12.)).line_height(px(16.)).font_weight(FontWeight::MEDIUM).text_color(th.muted).whitespace_nowrap().child(SharedString::from(s)));
-
-        pid(format!("track.row.{ix}"), div()
-            .id(("trow", ix))
-            .relative()
-            .flex()
-            .flex_row()
-            .items_center()
-            .gap(px(8.))
-            .pl(px(4.))
-            .pr(px(8.))
-            .h(px(ROW_HEIGHT))
-            .w_full()
-            .border_b_1()
-            .border_color(th.mid)
-            .cursor(CursorStyle::Arrow)
-            .when(active || selected, |d| d.bg(th.mid))
-            .when(!active && !selected, |d| d.hover(move |s| s.bg(th.mid)))
-            .child(idx_cell)
-            .child(pid(format!("track.row.{ix}.title"), ellipsis(flex_cell(3.0).text_size(px(13.)).line_height(px(18.)).text_color(if active { th.accent_fg } else { th.text })).child(SharedString::from(t.title.clone()))))
-            .child(artist)
-            .child(album)
-            .when(cols.year, |d| d.child(right("year", 56., fmt::track_year(&t))))
-            .when(cols.added, |d| d.child(right("added", 88., t.date_added.as_deref().map(fmt::date_part).unwrap_or("—").to_string())))
-            .child(right("format", 96., fmt::format_track_format(&t.format)))
-            .child(right("time", 48., fmt::format_duration(Some(t.duration))))
-            .child(pid(format!("track.row.{ix}.star"), self.star_button(ix, &t, starred, cx)))
-            .child(pid(format!("track.row.{ix}.more"), self.more_button(ix, cx)))
-            .when(active, |d| d.child(div().absolute().left_0().top_0().bottom_0().w(px(2.)).bg(th.accent_fg)))
-            .when(selected, |d| d.child(div().absolute().top_0().left_0().size_full().border_1().border_color(th.accent_fg)))
-            .on_click(cx.listener(move |this, ev: &ClickEvent, window, cx| {
-                if ev.click_count() >= 2 {
-                    this.play_from(id_play.clone(), cx);
+        let hovered = self.hover_row == Some(ix);
+        // `.idx { transition: opacity 0.1s }`; the play glyph appears at once on :hover.
+        let idx_opacity = 1.0 - anim::transition(window, ("idx-fade", ix), if hovered { 1.0 } else { 0.0 }, m_anim::IDX_FADE);
+        let idx_cell = pid(
+            format!("track.row.{ix}.idx"),
+            div()
+                .relative()
+                .w(px(tr::IDX_W))
+                .flex_none()
+                .flex()
+                .items_center()
+                .justify_center()
+                .gap(px(2.))
+                .text_color(th.muted)
+                .child(if active {
+                    now_playing_bars(&th, self.playing).into_any_element()
                 } else {
-                    let m = ev.modifiers();
-                    this.sel.click(ix, m.control || m.platform, m.shift);
-                }
-                window.focus(&this.focus);
-                cx.notify();
-            }))
-            .on_mouse_down(
-                MouseButton::Right,
-                cx.listener(move |this, ev: &MouseDownEvent, window, cx| {
-                    window.focus(&this.focus);
-                    this.open_menu(ix, ev.position, window, cx);
+                    div()
+                        .relative()
+                        .flex()
+                        .items_center()
+                        .justify_center()
+                        .child(div().opacity(idx_opacity).child(txt(&th, MONO_CODE, format!("{:02}", ix + 1))))
+                        .when(hovered, |d| d.child(div().absolute().child(icon("play", tr::ROW_PLAY_ICON, th.muted))))
+                        .into_any_element()
                 }),
-            ))
-            .into_any_element()
+        );
+        let cell = |name: &str, grow: f32, text: String| {
+            pid(format!("track.row.{ix}.{name}"), flex_cell(grow).flex().child(txt(&th, MONO_DATA, text).color(th.muted).ellipsis()))
+        };
+        let right = |name: &str, w: f32, s: String| pid(format!("track.row.{ix}.{name}"), div().w(px(w)).flex_none().flex().justify_end().child(txt(&th, MONO_DATA, s).color(th.muted)));
+
+        pid(
+            format!("track.row.{ix}"),
+            div()
+                .id(("trow", ix))
+                .relative()
+                .flex()
+                .flex_row()
+                .items_center()
+                .gap(px(tr::ROW_GAP))
+                .pl(px(tr::ROW_PAD_LEFT))
+                .pr(px(tr::ROW_PAD_RIGHT))
+                .h(px(tr::ROW_H))
+                .w_full()
+                .border_b_1()
+                .border_color(th.mid)
+                .cursor(CursorStyle::Arrow)
+                .when(active || selected, |d| d.bg(th.mid))
+                .when(!active && !selected, |d| d.hover(move |s| s.bg(th.mid)))
+                .child(idx_cell)
+                .child(flex_cell(tr::TITLE_GROW).flex().child(pid(
+                    format!("track.row.{ix}.title"),
+                    div().flex().min_w_0().child(txt(&th, BODY_MD, t.title.clone()).color(if active { th.accent_fg } else { th.text }).ellipsis()),
+                )))
+                .child(cell("artist", tr::ARTIST_GROW, t.artist.clone()))
+                .child(cell("album", tr::ALBUM_GROW, t.album.clone().unwrap_or_else(|| "—".into())))
+                .when(cols.year, |d| d.child(right("year", tr::YEAR_W, fmt::track_year(&t))))
+                .when(cols.added, |d| d.child(right("added", tr::ADDED_W, t.date_added.as_deref().map(fmt::date_part).unwrap_or("—").to_string())))
+                .child(right("format", tr::FORMAT_W, fmt::format_track_format(&t.format)))
+                .child(right("time", tr::TIME_W, fmt::format_duration(Some(t.duration))))
+                .child(pid(format!("track.row.{ix}.star"), self.star_button(ix, &t, starred, cx)))
+                .child(pid(format!("track.row.{ix}.more"), self.more_button(ix, cx)))
+                .when(active, |d| d.child(div().absolute().left_0().top_0().bottom_0().w(px(tr::ACTIVE_BAR_W)).bg(th.accent_fg)))
+                .when(selected, |d| d.child(div().absolute().top_0().left_0().size_full().border_1().border_color(th.accent_fg)))
+                .on_hover(cx.listener(move |this, h: &bool, _, cx| {
+                    if *h {
+                        this.hover_row = Some(ix);
+                    } else if this.hover_row == Some(ix) {
+                        this.hover_row = None;
+                    }
+                    cx.notify();
+                }))
+                .on_click(cx.listener(move |this, ev: &ClickEvent, window, cx| {
+                    if ev.click_count() >= 2 {
+                        this.play_from(id_play.clone(), cx);
+                    } else {
+                        let m = ev.modifiers();
+                        this.sel.click(ix, m.control || m.platform, m.shift);
+                    }
+                    window.focus(&this.focus);
+                    cx.notify();
+                }))
+                .on_mouse_down(
+                    MouseButton::Right,
+                    cx.listener(move |this, ev: &MouseDownEvent, window, cx| {
+                        window.focus(&this.focus);
+                        this.open_menu(ix, ev.position, window, cx);
+                    }),
+                ),
+        )
+        .into_any_element()
     }
 
     fn star_button(&self, ix: usize, t: &Track, starred: bool, cx: &mut Context<Self>) -> impl IntoElement + use<> {
@@ -586,12 +629,23 @@ fn flex_cell(grow: f32) -> Div {
     d
 }
 
-/// The three "now playing" bars of an active row. Static on purpose (a CSS infinite
-/// animation would cost one frame per vsync on this route): full when playing, a third
-/// when paused, drawn at fixed heights; the state tick (4 Hz) is the only thing that changes them.
-fn now_playing_bars(th: &Theme, playing: bool) -> Div {
-    let hs: [f32; 3] = if playing { [5.0, 12.0, 8.0] } else { [4.0, 4.0, 4.0] };
-    div().flex().flex_row().items_end().gap(px(2.)).h(px(12.)).children(hs.iter().map(|h| div().w(px(2.)).h(px(*h)).bg(th.accent)))
+/// The three "now playing" bars of an active row (`TrackRow.svelte:.now-playing`): `scaleY` keyframes on the
+/// shared clock (0.9 s ease-in-out infinite, delays -0.6/-0.3 s) while playing, static `scaleY(.33)` when paused.
+/// Repaints every frame only while playing, visible and not suspended (the row exists only while on screen).
+fn now_playing_bars(th: &Theme, playing: bool) -> impl IntoElement {
+    let color = th.accent;
+    gpui::canvas(
+        |_, _, _| (),
+        move |b, _, window, _| {
+            let heights = anim::bar_heights(playing, crate::clock::now() as f32);
+            anim::paint_bars(window, b.origin, color, heights);
+            if playing && !crate::clock::frozen() {
+                window.request_animation_frame();
+            }
+        },
+    )
+    .w(px(tr::BAR_W * 3.0 + tr::BARS_GAP * 2.0))
+    .h(px(tr::BARS_H))
 }
 
 impl Focusable for TracksView {
@@ -610,56 +664,74 @@ impl Render for TracksView {
             if selecting { format!("{} SELECTED", fmt::fmt_int(self.sel.len() as u64)) } else { format!("{} TRACKS", fmt::fmt_int(total as u64)) }.into();
         let filter_focused = self.filter_input.read(cx).focus_handle.is_focused(window);
 
+        let field_w = if th.light { ctl::FIELD_W_LIGHT } else { ctl::FIELD_W_DARK };
+        let filter_empty = self.filter_input.read(cx).content.is_empty();
         let header = div()
             .flex()
             .flex_row()
             .items_center()
             .justify_between()
-            .gap(px(12.))
+            .gap(px(tr::HEADER_GAP))
             .flex_none()
-            .child(pid("page.title", tracked("Tracks", HEADLINE_MD, th.body_font, th.text, window)))
+            .child(pid("page.title", txt(&th, HEADLINE_MD, "Tracks").color(th.text)))
             .child(
                 div()
                     .flex()
                     .flex_row()
                     .items_center()
-                    .gap(px(8.))
-                    .child(pid("page.count", ts(&th, MONO_CODE).text_color(th.muted).child(count)))
-                    .child(
-                        pid("page.filter", div()
+                    .gap(px(tr::HEADER_RIGHT_GAP))
+                    .child(pid("page.count", txt(&th, MONO_CODE, count).color(th.muted)))
+                    .child(pid(
+                        "page.filter",
+                        div()
+                            .relative()
+                            .w(px(field_w))
+                            .h(px(ctl::FIELD_H))
+                            .flex_none()
+                            .px(px(ctl::FIELD_PAD_X))
                             .flex()
-                            .flex_row()
                             .items_center()
-                            .gap(px(8.))
-                            .w(px(240.))
-                            .h(px(32.))
-                            .px(px(8.))
                             .bg(th.low)
                             .border_1()
                             .border_color(if filter_focused { th.focus } else { th.border })
-                            .child(icon("search", 14., th.muted))
-                            .child(div().flex_1().min_w_0().child(self.filter_input.clone()))),
-                    )
+                            .when(filter_focused, |d| d.shadow(crate::widgets::hard_shadow(&th, ctl::BTN_SHADOW)))
+                            .child(div().flex_1().min_w_0().h_full().child(self.filter_input.clone()))
+                            .when(filter_empty, |d| {
+                                d.child(
+                                    div()
+                                        .absolute()
+                                        .left(px(ctl::FIELD_PAD_X))
+                                        .right(px(ctl::FIELD_PAD_X))
+                                        .top_0()
+                                        .bottom_0()
+                                        .overflow_hidden()
+                                        .flex()
+                                        .items_center()
+                                        .child(div().flex_none().child(txt(&th, MONO_DATA, "Filter by title, artist, album…").color(th.muted))),
+                                )
+                            }),
+                    ))
                     .child(pid("page.btn.0", button("play-all", th, Variant::Secondary, "Play All", Some("play"), total == 0).on_click(cx.listener(|this, _, _, cx| this.play_all(false, cx)))))
-                    .child(pid("page.btn.1", button("shuffle-all", th, Variant::Primary, "Shuffle All", Some("shuffle"), total == 0).on_click(cx.listener(|this, _, _, cx| this.play_all(true, cx))))),
+                    .child(pid("page.btn.1", button("shuffle-all", th, Variant::Primary, "Shuffle All", Some("shuffle"), total == 0).on_click(cx.listener(|this, _, _, cx| this.play_all(true, cx)))))
+                    // Flow (rule-based radio) is not ported yet: the control is present for layout parity, inert.
+                    .child(pid("page.btn.2", button("flow", th, Variant::Secondary, "Flow", Some("sliders"), total == 0))),
             );
 
         let list = uniform_list(
             "tracks-list",
             total,
-            cx.processor(move |this, range: Range<usize>, _window, cx| {
+            cx.processor(move |this, range: Range<usize>, window, cx| {
                 this.vis = range.clone();
-                range.map(|ix| this.row(ix, cols, cx)).collect::<Vec<_>>()
+                range.map(|ix| this.row(ix, cols, window, cx)).collect::<Vec<_>>()
             }),
         )
         .track_scroll(self.list.clone())
         .size_full();
 
         let body: AnyElement = if total == 0 && self.pager.has_page(0) {
-            ts(&th, BODY_MD)
-                .p(px(12.))
-                .text_color(th.muted)
-                .child(if self.filter.trim().is_empty() { "No tracks in your library yet." } else { "No tracks match your filter." })
+            div()
+                .p(px(crate::metrics::space::MD))
+                .child(txt(&th, BODY_SM, if self.filter.trim().is_empty() { "No tracks in your library yet." } else { "No tracks match your filter." }).color(th.muted))
                 .into_any_element()
         } else {
             div()
@@ -698,7 +770,7 @@ impl Render for TracksView {
                 }))
                 .relative()
                 .size_full()
-                .child(list)
+                .child(div().size_full().pr(px(tr::SCROLLBAR_W)).child(list))
                 .child(scrollbar::scrollbar("tracks-scrollbar", th, &self.list, &self.sb))
                 .into_any_element()
         };
@@ -707,8 +779,8 @@ impl Render for TracksView {
             .size_full()
             .flex()
             .flex_col()
-            .gap(px(12.))
-            .p(px(16.))
+            .gap(px(tr::PAGE_GAP))
+            .p(px(tr::PAGE_PAD))
             .child(header)
             .child(
                 pid("table.panel", div()
@@ -719,7 +791,7 @@ impl Render for TracksView {
                     .border_1()
                     .border_color(th.border)
                     .bg(th.low)
-                    .child(self.head_row(cols, window, cx))
+                    .child(self.head_row(cols, cx))
                     .child(div().flex_1().min_h_0().child(body))),
             ))
     }

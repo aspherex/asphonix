@@ -32,6 +32,7 @@ pub struct Counts {
     pub tracks: Option<usize>,
     pub albums: Option<usize>,
     pub artists: Option<usize>,
+    pub liked: Option<u32>,
 }
 
 pub struct Shell {
@@ -108,7 +109,7 @@ impl Shell {
             focus,
             playlists: Vec::new(),
             status: None,
-            counts: Counts { tracks: None, albums: None, artists: None },
+            counts: Counts { tracks: None, albums: None, artists: None, liked: None },
             queue_drawer: false,
             suspended: false,
             backdrop: None,
@@ -276,7 +277,7 @@ impl Shell {
     fn load_static(&mut self, cx: &mut Context<Self>) {
         let b = self.backend.clone();
         cx.spawn(async move |this, cx| {
-            let (pl, st, albums, artists) = cx
+            let (pl, st, albums, artists, liked) = cx
                 .background_executor()
                 .spawn(async move {
                     (
@@ -284,12 +285,13 @@ impl Shell {
                         b.auth_session_status(),
                         b.browse_get_albums(sonix_api::GetAlbumsRequest { offset: 0, limit: 1, sort: sonix_api::AlbumSort::Alphabetical, filter: None }),
                         b.browse_get_artists(sonix_api::GetArtistsRequest { offset: 0, limit: 1, sort: None }),
+                        b.liked_count(),
                     )
                 })
                 .await;
             let _ = this.update(cx, |sh, cx| {
                 sh.playlists = pl.unwrap_or_default();
-                sh.counts = Counts { tracks: st.as_ref().ok().and_then(|s| s.track_count).map(|n| n as usize), albums: albums.ok().map(|p| p.total), artists: artists.ok().map(|p| p.total) };
+                sh.counts = Counts { tracks: st.as_ref().ok().and_then(|s| s.track_count).map(|n| n as usize), albums: albums.ok().map(|p| p.total), artists: artists.ok().map(|p| p.total), liked: liked.ok() };
                 sh.status = st.ok();
                 cx.notify();
             });
@@ -441,11 +443,11 @@ impl Shell {
 
     // -------------------------------------------------------------- layout helpers
     pub(crate) fn sidebar_width(vw: f32) -> f32 {
-        if vw < 1280.0 { 216.0 } else { 260.0 }
+        if vw < crate::metrics::bp::COMPACT_BELOW { crate::metrics::layout::SIDEBAR_W_COMPACT } else { crate::metrics::layout::SIDEBAR_W }
     }
     /// Queue rail docked beside the stage (>= 1440 px, hidden on Now Playing).
     pub(crate) fn rail_docked(vw: f32, route: &Route) -> bool {
-        vw >= 1440.0 && *route != Route::NowPlaying
+        vw >= crate::metrics::bp::RAIL_DOCKED_FROM && *route != Route::NowPlaying
     }
 }
 
