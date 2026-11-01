@@ -37,7 +37,8 @@ pub struct ArtistDetailView {
     info_pending: bool,
     bio_expanded: bool,
     selected_top: Option<usize>,
-    playlists: Vec<Playlist>,
+    /// the FLOW button's bounds (its menu anchors under it)
+    flow_btn: Rc<Cell<Bounds<Pixels>>>,
     page: PageScroll,
     page_w: Rc<Cell<f32>>,
     top_w: Rc<Cell<f32>>,
@@ -78,7 +79,7 @@ impl ArtistDetailView {
             info_pending: true,
             bio_expanded: false,
             selected_top: None,
-            playlists: Vec::new(),
+            flow_btn: Rc::new(Cell::new(Bounds::default())),
             page: PageScroll::new(),
             page_w: Rc::new(Cell::new(0.0)),
             top_w: Rc::new(Cell::new(1000.0)),
@@ -97,7 +98,7 @@ impl ArtistDetailView {
     fn load_local(&mut self, cx: &mut Context<Self>) {
         let (b, id) = (self.ctx.backend.clone(), self.id.clone());
         cx.spawn(async move |this, cx| {
-            let (d, pl) = cx.background_executor().spawn(async move { (b.browse_get_artist(&id), b.playlists_list()) }).await;
+            let d = cx.background_executor().spawn(async move { b.browse_get_artist(&id) }).await;
             let _ = this.update(cx, |t, cx| {
                 match d {
                     Ok(d) => {
@@ -106,7 +107,6 @@ impl ArtistDetailView {
                     }
                     Err(_) => t.error = true,
                 }
-                t.playlists = pl.unwrap_or_default();
                 t.loading = false;
                 cx.notify();
             });
@@ -150,7 +150,7 @@ impl ArtistDetailView {
         self.selected_top = Some(i);
         let Some(t) = self.top_items().get(i).cloned() else { return };
         let ids: Vec<String> = self.top_items().iter().map(|t| t.id.clone()).collect();
-        let items = menus::track_menu(&[t], &self.playlists, move |cx| menus::play_tracks(cx, ids.clone(), i));
+        let items = menus::track_menu(&[t], pos, move |cx| menus::play_tracks(cx, ids.clone(), i));
         open_menu_at(&self.ctx, items, pos, window, cx);
         cx.notify();
     }
@@ -241,7 +241,8 @@ impl ArtistDetailView {
                     menus::play_artist(cx, id.clone(), false);
                 }
             });
-        // Flow is not ported (docs/PORTING.md): present for layout parity, inert. TODO(flow)
+        // `openFlowMenu(button, { kind: "artist", id }, "artist", flow => playArtist(id, { flow }))`
+        let (flow_cell, flow_menu, flow_id) = (self.flow_btn.clone(), self.ctx.menu.clone(), artist.id.clone());
         let flow = div()
             .id("artist-flow")
             .flex()
@@ -257,7 +258,14 @@ impl ArtistDetailView {
             .cursor(CursorStyle::PointingHand)
             .hover(move |s| s.border_color(th.focus))
             .child(icon("sliders", 15.0, th.text))
-            .child(txt(&th, LABEL_CAPS, "FLOW").color(th.text));
+            .child(txt(&th, LABEL_CAPS, "FLOW").color(th.text))
+            .relative()
+            .child(crate::flow::bounds_probe(flow_cell.clone()))
+            .on_click(move |_, window, cx| {
+                let id = flow_id.clone();
+                let play: crate::flow::Play = Rc::new(move |arc, cx| crate::playback::play_artist(cx, id.clone(), false, Some(arc)));
+                crate::flow::open_menu(flow_menu.clone(), flow_cell.get(), crate::flow::pool(sonix_api::FlowPoolKind::Artist, Some(flow_id.clone()), None), "artist", play, window, cx);
+            });
         let icon_btn = |id: &'static str, name: &'static str, on: bool| {
             div()
                 .id(id)
@@ -507,7 +515,7 @@ impl Render for ArtistDetailView {
             let mut grid = div().flex().flex_row().flex_wrap().gap(px(crate::metrics::space::MD));
             for (i, a) in d.albums.iter().enumerate() {
                 let ids = (i < 8).then(|| format!("artist.album.{i}"));
-                grid = grid.child(card(&self.ctx.clone(), &th, CardItem::Album(a), &self.playlists.clone(), cw, None, ids, window, cx));
+                grid = grid.child(card(&self.ctx.clone(), &th, CardItem::Album(a), cw, None, ids, window, cx));
             }
             page = page.child(pid(
                 "artist.albums",
@@ -518,7 +526,7 @@ impl Render for ArtistDetailView {
                 let mut row = div().flex().flex_row().flex_wrap().gap(px(crate::metrics::space::MD));
                 for (i, s) in info.similar.iter().enumerate() {
                     let ids = (i < 8).then(|| format!("artist.similar.{i}"));
-                    row = row.child(card(&self.ctx.clone(), &th, CardItem::Artist(s), &[], cw, None, ids, window, cx));
+                    row = row.child(card(&self.ctx.clone(), &th, CardItem::Artist(s), cw, None, ids, window, cx));
                 }
                 page = page.child(pid("artist.similar", div().flex().flex_col().gap(px(crate::metrics::space::SM)).child(Self::section_title(&th, "Fans also like")).child(row)));
             }

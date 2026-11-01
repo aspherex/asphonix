@@ -53,7 +53,6 @@ pub struct SearchView {
     selected: usize,
     seq: u64,
     scroll: ScrollHandle,
-    playlists: Vec<Playlist>,
     _sub: Subscription,
 }
 
@@ -79,7 +78,6 @@ impl SearchView {
             selected: 0,
             seq: 0,
             scroll: ScrollHandle::new(),
-            playlists: Vec::new(),
             _sub: sub,
         };
         this.set_query(query, cx);
@@ -213,29 +211,11 @@ impl SearchView {
                     });
                     let _ = &t2;
                 });
-                menus::track_menu_items(this, TrackMenu { tracks: vec![r.tracks.items[i].clone()], playlists: self.playlists.clone(), play_now: play, remove_from_playlist: None })
+                menus::track_menu_items(this, TrackMenu { tracks: vec![r.tracks.items[i].clone()], at: pos, play_now: play, remove_from_playlist: None })
             }
             Flat::Playlist(i) => menus::playlist_menu_items(this, &r.playlists.items[i], false),
-            // TODO(albums/artists agent): `albumMenuItems` / `artistMenuItems` (menus.ts) live with those routes.
-            Flat::Album(i) => {
-                let id = r.albums.items[i].id.clone();
-                let t = this.clone();
-                vec![MenuItem::action("Go to album", move |_, cx| {
-                    if let Some(t) = t.upgrade() {
-                        t.update(cx, |_, cx| cx.emit(ListsEvent::Navigate(Route::Album(id.clone()))));
-                    }
-                })
-                .icon("album")]
-            }
-            Flat::Artist(i) => {
-                let id = r.artists.items[i].id.clone();
-                vec![MenuItem::action("Go to artist", move |_, cx| {
-                    if let Some(t) = this.upgrade() {
-                        t.update(cx, |_, cx| cx.emit(ListsEvent::Navigate(Route::Artist(id.clone()))));
-                    }
-                })
-                .icon("artist")]
-            }
+            Flat::Album(i) => crate::views::library::menus::album_menu(&r.albums.items[i], pos),
+            Flat::Artist(i) => crate::views::library::menus::artist_menu(&r.artists.items[i]),
         };
         self.show_menu(items, pos, cx);
     }

@@ -358,6 +358,7 @@ impl TracksView {
             }),
             on_play_next: None,
             on_remove_from_queue: None,
+            on_remove_from_playlist: None,
             on_navigate: std::rc::Rc::new(move |r, cx| {
                 if let Some(t) = this_nav.upgrade() {
                     t.update(cx, |_, cx| cx.emit(TracksEvent::Navigate(r)));

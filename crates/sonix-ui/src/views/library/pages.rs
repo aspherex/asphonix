@@ -52,7 +52,6 @@ pub struct AlbumsView {
     grid: GridState<Album>,
     sort: AlbumSort,
     starred_only: bool,
-    playlists: Vec<Playlist>,
     _sub: Subscription,
 }
 
@@ -65,23 +64,11 @@ impl AlbumsView {
                 }
             }
         });
-        let mut this = Self { ctx, grid: GridState::new(String::new()), sort: AlbumSort::Alphabetical, starred_only: false, playlists: Vec::new(), _sub: sub };
-        this.load_playlists(cx);
+        let mut this = Self { ctx, grid: GridState::new(String::new()), sort: AlbumSort::Alphabetical, starred_only: false, _sub: sub };
         this.reload(cx);
         this
     }
 
-    fn load_playlists(&mut self, cx: &mut Context<Self>) {
-        let b = self.ctx.backend.clone();
-        cx.spawn(async move |this, cx| {
-            let pl = cx.background_executor().spawn(async move { b.playlists_list() }).await;
-            let _ = this.update(cx, |t, cx| {
-                t.playlists = pl.unwrap_or_default();
-                cx.notify();
-            });
-        })
-        .detach();
-    }
 
     fn req(&self, page: usize) -> GetAlbumsRequest {
         GetAlbumsRequest { offset: page * PAGE, limit: PAGE, sort: self.sort, filter: self.starred_only.then(|| AlbumFilter { starred_only: true, ..Default::default() }) }
@@ -120,7 +107,7 @@ impl GridHost<Album> for AlbumsView {
         let th = app::theme(cx);
         let Some(a) = item else { return loading_cell(&th, geo) };
         let ids = web_index(&self.grid, ix, geo).filter(|n| *n < 8).map(|n| format!("lib.card.{n}"));
-        card(&self.ctx.clone(), &th, CardItem::Album(&a), &self.playlists.clone(), geo.cell_w, Some(geo.cell_h), ids, window, cx)
+        card(&self.ctx.clone(), &th, CardItem::Album(&a), geo.cell_w, Some(geo.cell_h), ids, window, cx)
     }
     fn request(&mut self, page: usize, cx: &mut Context<Self>) {
         if self.grid.pager.want(page) {
@@ -220,7 +207,7 @@ impl GridHost<Artist> for ArtistsView {
         let th = app::theme(cx);
         let Some(a) = item else { return loading_cell(&th, geo) };
         let ids = web_index(&self.grid, ix, geo).filter(|n| *n < 8).map(|n| format!("lib.card.{n}"));
-        card(&self.ctx.clone(), &th, CardItem::Artist(&a), &[], geo.cell_w, Some(geo.cell_h), ids, window, cx)
+        card(&self.ctx.clone(), &th, CardItem::Artist(&a), geo.cell_w, Some(geo.cell_h), ids, window, cx)
     }
     fn request(&mut self, page: usize, cx: &mut Context<Self>) {
         if self.grid.pager.want(page) {
@@ -258,7 +245,8 @@ pub struct GenreDetailView {
     grid: GridState<Album>,
     info: Option<Genre>,
     missing: bool,
-    playlists: Vec<Playlist>,
+    /// the Flow button's bounds (its menu anchors under it)
+    flow_btn: std::rc::Rc<std::cell::Cell<gpui::Bounds<gpui::Pixels>>>,
     _sub: Subscription,
 }
 
@@ -271,18 +259,17 @@ impl GenreDetailView {
                 }
             }
         });
-        let mut this = Self { ctx, grid: GridState::new(format!("genre:{name}")), name, info: None, missing: false, playlists: Vec::new(), _sub: sub };
+        let mut this = Self { ctx, grid: GridState::new(format!("genre:{name}")), name, info: None, missing: false, flow_btn: std::rc::Rc::new(std::cell::Cell::new(gpui::Bounds::default())), _sub: sub };
         this.grid.pager.want(0);
         this.fetch(0, cx);
         let (b, n) = (this.ctx.backend.clone(), this.name.clone());
         cx.spawn(async move |this, cx| {
-            let (g, pl) = cx.background_executor().spawn(async move { (b.browse_get_genre(&n), b.playlists_list()) }).await;
+            let g = cx.background_executor().spawn(async move { b.browse_get_genre(&n) }).await;
             let _ = this.update(cx, |t, cx| {
                 match g {
                     Ok(g) => t.info = Some(g),
                     Err(_) => t.missing = true,
                 }
-                t.playlists = pl.unwrap_or_default();
                 cx.notify();
             });
         })
@@ -322,7 +309,7 @@ impl GridHost<Album> for GenreDetailView {
         let th = app::theme(cx);
         let Some(a) = item else { return loading_cell(&th, geo) };
         let ids = web_index(&self.grid, ix, geo).filter(|n| *n < 8).map(|n| format!("lib.card.{n}"));
-        card(&self.ctx.clone(), &th, CardItem::Album(&a), &self.playlists.clone(), geo.cell_w, Some(geo.cell_h), ids, window, cx)
+        card(&self.ctx.clone(), &th, CardItem::Album(&a), geo.cell_w, Some(geo.cell_h), ids, window, cx)
     }
     fn request(&mut self, page: usize, cx: &mut Context<Self>) {
         if self.grid.pager.want(page) {
@@ -361,8 +348,14 @@ impl Render for GenreDetailView {
             .gap(px(crate::metrics::space::SM))
             .child(pid("genre.btn.0", button("genre-play", th, Variant::Secondary, "Play", Some("play"), !ready, window).on_click(move |_, _, cx| menus::play_genre(cx, n1.clone(), false))))
             .child(pid("genre.btn.1", button("genre-shuffle", th, Variant::Primary, "Shuffle", Some("shuffle"), !ready, window).on_click(move |_, _, cx| menus::play_genre(cx, n2.clone(), true))))
-            // Flow is not ported (docs/PORTING.md): the button is present for layout parity, inert.
-            .child(pid("genre.btn.2", button("genre-flow", th, Variant::Secondary, "Flow", Some("sliders"), !ready, window)));
+            .child(pid("genre.btn.2", {
+                let (cell, menu, n3) = (self.flow_btn.clone(), self.ctx.menu.clone(), self.name.clone());
+                button("genre-flow", th, Variant::Secondary, "Flow", Some("sliders"), !ready, window).relative().child(crate::flow::bounds_probe(cell.clone())).on_click(move |_, window, cx| {
+                    let name = n3.clone();
+                    let play: crate::flow::Play = std::rc::Rc::new(move |arc, cx| crate::playback::play_genre(cx, name.clone(), false, Some(arc)));
+                    crate::flow::open_menu(menu.clone(), cell.get(), crate::flow::pool(sonix_api::FlowPoolKind::Genre, Some(n3.clone()), None), "genre", play, window, cx);
+                })
+            }));
         let header = pid("lib.header", div().flex().flex_row().items_end().justify_between().gap(px(crate::metrics::space::MD)).flex_wrap().flex_none().child(title).child(actions));
         let body: AnyElement = if self.missing {
             txt(&th, MONO_CODE, format!("NO TRACKS TAGGED “{}”.", self.name.to_uppercase())).color(th.muted).into_any_element_wrapped()

@@ -11,7 +11,7 @@ use crate::text::txt;
 use crate::theme::Theme;
 use crate::tracking::{BODY_LG, BODY_MD, LABEL_CAPS, MONO_DATA};
 use crate::widgets::{hard_shadow, icon};
-use gpui::{
+use gpui::{Point, 
     AnyElement, App, Bounds, ClickEvent, Context, CursorStyle, Div, IntoElement, MouseButton, MouseDownEvent, Pixels, SharedString, Stateful, Window, canvas, div, point, prelude::*, px,
 };
 use sonix_api::*;
@@ -58,9 +58,10 @@ fn track_bounds(cell: &Rc<Cell<Bounds<Pixels>>>) -> AnyElement {
 }
 
 /// `openContextMenuFor(anchor)`: left-aligned, 4 px under the element.
-fn open_menu_under(ctx: &Ctx, anchor: &Rc<Cell<Bounds<Pixels>>>, items: Vec<crate::widgets::context_menu::MenuItem>, window: &mut Window, cx: &mut App) {
+fn open_menu_under(ctx: &Ctx, anchor: &Rc<Cell<Bounds<Pixels>>>, items: impl FnOnce(Point<Pixels>) -> Vec<crate::widgets::context_menu::MenuItem>, window: &mut Window, cx: &mut App) {
     let b = anchor.get();
     let pos = point(b.origin.x, b.origin.y + b.size.height + px(4.));
+    let items = items(pos);
     ctx.menu.update(cx, |m, cx| m.show(items, pos, window, cx));
 }
 
@@ -75,7 +76,6 @@ pub fn card<V: 'static>(
     ctx: &Ctx,
     th: &Theme,
     item: CardItem<'_>,
-    playlists: &[Playlist],
     width: f32,
     height: Option<f32>,
     ids: Option<String>,
@@ -98,14 +98,12 @@ pub fn card<V: 'static>(
     let hovered = anim::hovered(key) || focused;
     let t = anim::transition(window, ("card-ov", key), if hovered { 1.0 } else { 0.0 }, m::CARD_TRANSITION);
     let items_for = {
-        let (ctx, playlists) = (ctx.clone(), playlists.to_vec());
         let owned: Result<Album, Artist> = match &item {
             CardItem::Album(a) => Ok((*a).clone()),
             CardItem::Artist(a) => Err((*a).clone()),
         };
-        let _ = &ctx;
-        move || match &owned {
-            Ok(a) => menus::album_menu(a, &playlists),
+        move |at: Point<Pixels>| match &owned {
+            Ok(a) => menus::album_menu(a, at),
             Err(a) => menus::artist_menu(a),
         }
     };
@@ -176,7 +174,7 @@ pub fn card<V: 'static>(
             .child(crate::widgets::icon_g("more", m::CARD_MENU_ICON, th.text, th.accent_fg))
             .on_click(move |_: &ClickEvent, window, cx| {
                 cx.stop_propagation();
-                open_menu_under(&menu_ctx, &anchor2, menu_items(), window, cx);
+                open_menu_under(&menu_ctx, &anchor2, menu_items.clone(), window, cx);
             }),
     );
 
@@ -203,7 +201,7 @@ pub fn card<V: 'static>(
         .track_focus(&fh)
         .tab_stop(true)
         .on_action(move |_: &CardOpen, _, cx| navigate(cx, route_key.clone()))
-        .on_action(move |_: &CardMenu, window, cx| open_menu_under(&ctx_key, &anchor_key, items_key(), window, cx))
+        .on_action(move |_: &CardMenu, window, cx| open_menu_under(&ctx_key, &anchor_key, items_key.clone(), window, cx))
         .relative()
         .flex()
         .flex_col()
@@ -219,7 +217,7 @@ pub fn card<V: 'static>(
         .on_mouse_down(MouseButton::Right, move |ev: &MouseDownEvent, window, cx| {
             cx.stop_propagation();
             window.focus(&fh_menu); // a mouse down focuses the card (tabindex=0); the menu returns focus to it on close
-            open_menu_at(&ctx_menu, items_ctx(), ev.position, window, cx);
+            open_menu_at(&ctx_menu, items_ctx(ev.position), ev.position, window, cx);
         })
         .child(track_bounds(&card_anchor))
         .when(focused, |d| d.child(div().absolute().top_0().left_0().size_full().border_2().border_color(th.accent_fg)))

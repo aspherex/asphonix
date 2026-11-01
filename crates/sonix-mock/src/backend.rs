@@ -970,21 +970,53 @@ impl MockBackend {
         }
     }
 
+    /// The playlist / liked / smart commands (`mock.ts: player_play_playlist|liked|smart`): liked and smart skip 1★
+    /// tracks unless explicitly started, playlists play every track.
     fn play_pool(&self, kind: SourceKind, label: String, pool: Vec<u32>, req: &PlaySourceRequest) -> ApiResult<()> {
         let start = req.start_track_id.as_deref().and_then(track_index).map(|i| i as u32);
-        let mut pool: Vec<u32> = pool.into_iter().filter(|i| self.inner.lists.lock().unwrap().ratings.get(i) != Some(&1) || Some(*i) == start).collect();
-        if pool.is_empty() {
+        let pool: Vec<u32> = if kind == SourceKind::Playlist {
+            pool
+        } else {
+            let l = self.inner.lists.lock().unwrap();
+            pool.into_iter().filter(|i| l.ratings.get(i) != Some(&1) || Some(*i) == start).collect()
+        };
+        self.start_source(kind, label, pool, req.shuffle, req.flow, start)
+    }
+
+    /// The one rolling-source starter of every `player_play_*` source command (playlist, artist, genre, liked, smart):
+    /// `mock.ts`: `startTrackId = req.startTrackId ?? (shuffle && !flow ? ids[floor(random * n)] : undefined)`, then
+    /// `setSource(kind, label, modeOf(req), ids, startTrackId, id, flow)` (Flow wins over shuffle, shuffle = `shuffleIds`
+    /// with the start swapped to the front, in order = the pool from the start on).
+    fn start_source(&self, kind: SourceKind, label: String, ids: Vec<u32>, shuffle: bool, flow: Option<FlowArc>, start: Option<u32>) -> ApiResult<()> {
+        if ids.is_empty() {
             return Err(ApiError::not_found("tracks"));
         }
         let mut c = self.inner.core.lock().unwrap();
-        if req.shuffle {
-            let mut rng = c.rng;
-            shuffle(&mut pool, &mut rng);
-            c.rng = rng;
+        let start = match start {
+            Some(s) => Some(s),
+            None if shuffle && flow.is_none() => Some(ids[((Inner::rand01(&mut c) * ids.len() as f64).floor() as usize).min(ids.len() - 1)]),
+            None => None,
+        };
+        if let Some(arc) = flow {
+            Inner::flow_set_source(&mut c, kind, label, ids, start, arc);
+        } else if shuffle {
+            let mut rem = ids;
+            Inner::shuffle_js(&mut c, &mut rem);
+            if let Some(i) = start.and_then(|s| rem.iter().position(|x| *x == s))
+                && i > 0
+            {
+                rem.swap(0, i);
+            }
+            c.shuffle = true;
+            self.inner.set_source(&mut c, kind, label, SourceMode::Shuffle, rem, None);
+        } else {
+            let rem = match start.and_then(|s| ids.iter().position(|x| *x == s)) {
+                Some(i) => ids[i..].to_vec(),
+                None => ids,
+            };
+            c.shuffle = false;
+            self.inner.set_source(&mut c, kind, label, SourceMode::InOrder, rem, None);
         }
-        c.shuffle = req.shuffle;
-        let mode = if req.shuffle { SourceMode::Shuffle } else { SourceMode::InOrder };
-        self.inner.set_source(&mut c, kind, label, mode, pool, start);
         self.inner.push_state(&c);
         drop(c);
         self.inner.cv.notify_all();
@@ -1368,8 +1400,22 @@ Fixes
         let ids: Vec<u32> = match req.kind {
             FlowPoolKind::AllTracks => (*self.inner.permutation(TrackSortField::Title, SortDir::Asc, req.filter.as_deref())).clone(),
             FlowPoolKind::Playlist => self.inner.playlists.lock().unwrap().iter().find(|(p, _)| Some(&p.id) == req.id.as_ref()).map(|(_, ids)| ids.clone()).unwrap_or_default(),
-            FlowPoolKind::Liked => self.inner.starred.lock().unwrap().keys().filter_map(|k| track_index(k)).map(|i| i as u32).collect(),
-            _ => Vec::new(),
+            FlowPoolKind::Liked => self.liked_ids(),
+            FlowPoolKind::Artist => {
+                let stars = self.inner.starred.lock().unwrap().clone();
+                crate::browse::artist_track_ixs(&self.inner.lib, &stars, req.id.as_deref().unwrap_or_default()).unwrap_or_default()
+            }
+            FlowPoolKind::Genre => crate::browse::genre_track_ixs(&self.inner.lib, req.id.as_deref().unwrap_or_default()),
+            FlowPoolKind::Smart => {
+                let input = self.inner.lists.lock().unwrap().smart.iter().find(|p| Some(&p.id) == req.id.as_ref()).map(|p| p.input.clone());
+                match input {
+                    Some(input) => {
+                        let starred = self.inner.starred.lock().unwrap().clone();
+                        self.inner.lists.lock().unwrap().eval(&self.inner.lib, &starred, &input, req.seed.unwrap_or(0)).to_vec()
+                    }
+                    None => Vec::new(),
+                }
+            }
         };
         let mut c = self.inner.core.lock().unwrap();
         let lib = c.lib.clone();
@@ -1379,7 +1425,36 @@ Fixes
     }
 
     fn radio_start(&self, req: RadioStartRequest) -> ApiResult<()> {
+        // `radioTracksFor*` skip anything 1-starred
+        let one_star: std::collections::HashSet<u32> = self.inner.lists.lock().unwrap().ratings.iter().filter(|(_, r)| **r == 1).map(|(i, _)| *i).collect();
+        // `radioTracksForArtist`: 50 random tracks of `artistTracksOrdered` (`sampleExcludingOneStar`)
+        let artist_pool = match req.seed.kind {
+            RadioSeedKind::Artist => {
+                let stars = self.inner.starred.lock().unwrap().clone();
+                Some(crate::browse::artist_track_ixs(&self.inner.lib, &stars, &req.seed.id)?)
+            }
+            _ => None,
+        };
         let mut c = self.inner.core.lock().unwrap();
+        if let Some(pool) = artist_pool {
+            let mut v: Vec<u32> = pool.into_iter().filter(|i| !one_star.contains(i)).collect();
+            for i in (1..v.len()).rev() {
+                let j = (Inner::rand01(&mut c) * (i + 1) as f64).floor() as usize;
+                v.swap(i, j.min(i));
+            }
+            v.truncate(50);
+            if v.is_empty() {
+                return Err(ApiError::not_found("no similar tracks found for this radio seed"));
+            }
+            self.inner.set_source(&mut c, SourceKind::Radio, "Radio".into(), SourceMode::InOrder, v, None);
+            c.shuffle = false;
+            c.status = PlaybackStatus::Playing;
+            self.inner.push_state(&c);
+            drop(c);
+            self.inner.cv.notify_all();
+            self.inner.emit(Event::QueueChanged);
+            return Ok(());
+        }
         let (genre, exclude) = match req.seed.kind {
             RadioSeedKind::Track => {
                 let ix = track_index(&req.seed.id).ok_or_else(|| ApiError::not_found("track"))?;
@@ -1389,7 +1464,7 @@ Fixes
                 let ix = req.seed.id.strip_prefix("al_").and_then(|s| s.parse::<usize>().ok()).ok_or_else(|| ApiError::not_found("album"))?;
                 (c.lib.album(ix).genre, None)
             }
-            RadioSeedKind::Artist => return Err(ApiError::not_found("radio seed")),
+            RadioSeedKind::Artist => unreachable!("handled above"),
         };
         let total = c.lib.total_tracks();
         let lib = c.lib.clone();
@@ -1403,7 +1478,7 @@ Fixes
                 continue;
             }
             let t = lib.track(idx);
-            if t.genre != genre || Some(idx as u32) == exclude {
+            if t.genre != genre || Some(idx as u32) == exclude || one_star.contains(&(idx as u32)) {
                 continue;
             }
             out.push(idx as u32);
@@ -1465,7 +1540,8 @@ Fixes
         if pool.is_empty() {
             return Err(ApiError::not_found("genre"));
         }
-        self.play_source(SourceKind::Genre, req.name, pool, req.shuffle, req.start_track_id)
+        let start = req.start_track_id.as_deref().and_then(track_index).map(|i| i as u32);
+        self.start_source(SourceKind::Genre, req.name, pool, req.shuffle, req.flow, start)
     }
     fn player_play_artist(&self, req: PlayArtistRequest) -> ApiResult<()> {
         let pool = crate::browse::artist_track_ixs(&self.inner.lib, &self.inner.starred.lock().unwrap(), &req.id)?;
@@ -1473,31 +1549,11 @@ Fixes
             return Err(ApiError::not_found("artist"));
         }
         let idx: usize = req.id.trim_start_matches("ar_").parse().unwrap_or(0);
-        self.play_source(SourceKind::Artist, crate::library::artist_name(idx), pool, req.shuffle, req.start_track_id)
+        let start = req.start_track_id.as_deref().and_then(track_index).map(|i| i as u32);
+        self.start_source(SourceKind::Artist, crate::library::artist_name(idx), pool, req.shuffle, req.flow, start)
     }
 }
 
-impl MockBackend {
-    /// Shared body of the genre/artist play commands: shuffle opens on a random track, then the pool is a rolling source.
-    fn play_source(&self, kind: SourceKind, label: String, mut pool: Vec<u32>, do_shuffle: bool, start_track_id: Option<String>) -> ApiResult<()> {
-        let mut c = self.inner.core.lock().unwrap();
-        let mut start = start_track_id.as_deref().and_then(track_index).map(|i| i as u32);
-        if do_shuffle {
-            let mut rng = c.rng;
-            shuffle(&mut pool, &mut rng);
-            c.rng = rng;
-            start = start.or_else(|| pool.first().copied());
-        }
-        c.shuffle = do_shuffle;
-        let mode = if do_shuffle { SourceMode::Shuffle } else { SourceMode::InOrder };
-        self.inner.set_source(&mut c, kind, label, mode, pool, start);
-        self.inner.push_state(&c);
-        drop(c);
-        self.inner.cv.notify_all();
-        self.inner.emit(Event::QueueChanged);
-        Ok(())
-    }
-}
 
 /// Deterministic 240-bucket RMS-like envelope (MOCK).
 pub fn synth_waveform(ix: usize) -> Vec<u8> {

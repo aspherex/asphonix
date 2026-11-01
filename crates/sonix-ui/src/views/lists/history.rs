@@ -22,7 +22,6 @@ pub struct HistoryView {
     backend: Arc<dyn Backend>,
     menu: Entity<ContextMenu>,
     table: Entity<Table>,
-    playlists: Vec<Playlist>,
     clearing: bool,
     _subs: Vec<Subscription>,
 }
@@ -42,7 +41,7 @@ impl HistoryView {
         };
         let table = cx.new(|cx| Table::new(backend.clone(), player, cfg, cx));
         let subs = vec![cx.subscribe(&table, Self::on_table)];
-        let mut this = Self { backend, menu: menu.clone(), table, playlists: Vec::new(), clearing: false, _subs: subs };
+        let mut this = Self { backend, menu: menu.clone(), table, clearing: false, _subs: subs };
         this.reload(cx);
         this
     }
@@ -61,12 +60,6 @@ impl HistoryView {
             Ok(Paged { items, total: p.total, offset: p.offset })
         });
         self.table.update(cx, |t, cx| t.set_paged(fetch, cx));
-        let b = self.backend.clone();
-        cx.spawn(async move |this, cx| {
-            let r = cx.background_executor().spawn(async move { b.playlists_list() }).await;
-            let _ = this.update(cx, |t, _| t.playlists = r.unwrap_or_default());
-        })
-        .detach();
         cx.notify();
     }
 
@@ -135,7 +128,7 @@ impl HistoryView {
                         h.update(cx, |h, cx| h.play(id, cx));
                     }
                 });
-                let items: Vec<MenuItem> = menus::track_menu_items(this, TrackMenu { tracks: vec![t], playlists: self.playlists.clone(), play_now, remove_from_playlist: None });
+                let items: Vec<MenuItem> = menus::track_menu_items(this, TrackMenu { tracks: vec![t], at: *pos, play_now, remove_from_playlist: None });
                 let (menu, pos) = (self.menu.clone(), *pos);
                 cx.defer(move |cx| {
                     let Some(w) = cx.active_window() else { return };

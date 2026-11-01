@@ -1,5 +1,6 @@
 //! `lib/menus.ts trackMenuItems`: the one place that assembles a track context menu (same order, labels, icons and
-//! conditions as the web). Used by the queue rail; the Tracks route builds the same list in `views/tracks.rs`.
+//! conditions as the web). Every track list uses it: Tracks, the queue rail, album/artist pages, playlists, Liked,
+//! smart playlists, History and Search.
 //!
 use crate::app;
 use crate::router::Route;
@@ -21,7 +22,39 @@ pub struct TrackMenu {
     pub on_play_now: Rc<dyn Fn(&mut App)>,
     pub on_play_next: Option<MenuAction>,
     pub on_remove_from_queue: Option<MenuAction>,
+    /// present only inside a playlist's own track list
+    pub on_remove_from_playlist: Option<MenuAction>,
     pub on_navigate: Rc<NavFn>,
+}
+
+impl TrackMenu {
+    /// The plain context (no queue / playlist entries), navigating through the shell.
+    pub fn new(tracks: Vec<Track>, at: Point<Pixels>, on_play_now: impl Fn(&mut App) + 'static) -> Self {
+        Self { tracks, at, on_play_now: Rc::new(on_play_now), on_play_next: None, on_remove_from_queue: None, on_remove_from_playlist: None, on_navigate: Rc::new(|r, cx| crate::views::library::navigate(cx, r)) }
+    }
+}
+
+/// `ratingSubmenu`: ★ .. ★★★★★ (1★ is the danger entry with the purge hint), rule, "Clear rating".
+pub fn rating_submenu(ids: Vec<String>, kind: StarTargetType) -> Vec<MenuItem> {
+    let apply = |ids: Vec<String>, value: u8| {
+        move |_: &mut gpui::Window, cx: &mut App| {
+            let ids = ids.clone();
+            app::call(cx, move |b| {
+                for id in ids {
+                    let _ = b.rating_set(SetRatingRequest { id, kind, rating: value });
+                }
+            });
+        }
+    };
+    let mut v: Vec<MenuItem> = (1..=5u8)
+        .map(|n| {
+            let it = MenuItem::action("★".repeat(n as usize), apply(ids.clone(), n));
+            if n == 1 { it.danger().hint("Purges from library on NAS nightly.") } else { it }
+        })
+        .collect();
+    v.push(MenuItem::separator());
+    v.push(MenuItem::action("Clear rating", apply(ids, 0)));
+    v
 }
 
 pub fn track_menu_items(m: TrackMenu) -> Vec<MenuItem> {
@@ -83,22 +116,7 @@ pub fn track_menu_items(m: TrackMenu) -> Vec<MenuItem> {
         })
         .icon(if all_starred { "heart-filled" } else { "heart" }),
     );
-    let rate = |stars: u8, ids: Vec<String>| {
-        let label = if stars == 0 { "Clear rating".to_string() } else { format!("{stars}★") };
-        let mut it = MenuItem::action(label, move |_, cx| {
-            let ids = ids.clone();
-            app::call(cx, move |b| {
-                for id in ids {
-                    let _ = b.rating_set(SetRatingRequest { id, kind: StarTargetType::Track, rating: stars });
-                }
-            });
-        });
-        if stars == 1 {
-            it = it.danger().hint("1★ tracks are purged by the NAS nightly.");
-        }
-        it
-    };
-    items.push(MenuItem::submenu(format!("Rate{suffix}"), vec![rate(0, ids.clone()), rate(5, ids.clone()), rate(4, ids.clone()), rate(3, ids.clone()), rate(2, ids.clone()), rate(1, ids.clone())]).icon("star"));
+    items.push(MenuItem::submenu(format!("Rate{suffix}"), rating_submenu(ids.clone(), StarTargetType::Track)).icon("star"));
     if let Some(t) = &single {
         if let Some(al) = t.album_id.clone() {
             let nav = m.on_navigate.clone();
@@ -108,6 +126,11 @@ pub fn track_menu_items(m: TrackMenu) -> Vec<MenuItem> {
             let nav = m.on_navigate.clone();
             items.push(MenuItem::action("Go to artist", move |_, cx| nav(Route::Artist(ar.clone()), cx)).icon("artist"));
         }
+    }
+    if let Some(f) = &m.on_remove_from_playlist {
+        let f = f.clone();
+        items.push(MenuItem::separator());
+        items.push(MenuItem::action(format!("Remove from this playlist{suffix}"), move |_, cx| f(cx)).icon("trash").danger());
     }
     if let Some(f) = &m.on_remove_from_queue {
         let f = f.clone();

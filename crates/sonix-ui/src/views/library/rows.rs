@@ -201,7 +201,7 @@ pub fn row(th: &Theme, t: &Track, st: &RowState, o: RowOpts, height: f32, ids: O
             icon_button(&th, ("dadd", key), "add", th.muted, th.text, Some(a)).on_click(move |_, window, cx| {
                 cx.stop_propagation();
                 let b = a2.get();
-                add(point(b.origin.x, b.origin.y + b.size.height + px(4.)), window, cx);
+                add(point(b.origin.x + b.size.width, b.origin.y + b.size.height), window, cx);
             }),
         );
     }

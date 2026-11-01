@@ -74,6 +74,7 @@ pub enum TableEvent {
     Remove(usize),
     /// right click / "..." / menu key: `ix` is the row, `pos` the anchor in window coordinates
     Menu { ix: usize, pos: Point<Pixels> },
+    /// the row's "+": `pos` = the bottom-right corner of the button (`AddToPlaylistMenu` anchors to its rect)
     AddToPlaylist { ix: usize, pos: Point<Pixels> },
     Reorder { from: usize, to: usize },
     SelectionChanged,
@@ -512,10 +513,12 @@ pub fn refresh_visible(&mut self, cx: &mut Context<Self>) {
             .child(right("time", tr::TIME_W, fmt::format_duration(Some(t.duration))))
             .child(pid(format!("track.row.{ix}.star"), star));
         if self.cfg.add_btn {
-            row = row.child(icon_btn("add", "add", th.muted, th.text).on_click(cx.listener(move |_, ev: &ClickEvent, _, cx| {
+            let rect = std::rc::Rc::new(std::cell::Cell::new(gpui::Bounds::<Pixels>::default()));
+            let probe = crate::flow::bounds_probe(rect.clone());
+            row = row.child(icon_btn("add", "add", th.muted, th.text).relative().child(probe).on_click(cx.listener(move |_, _: &ClickEvent, _, cx| {
                 cx.stop_propagation();
-                let p = ev.position();
-                cx.emit(TableEvent::AddToPlaylist { ix, pos: gpui::point(p.x, p.y + px(8.)) });
+                let b = rect.get();
+                cx.emit(TableEvent::AddToPlaylist { ix, pos: gpui::point(b.right(), b.bottom()) });
             })));
         }
         if self.cfg.remove_btn {

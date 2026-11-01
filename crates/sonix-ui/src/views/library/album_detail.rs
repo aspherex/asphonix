@@ -83,7 +83,6 @@ pub struct AlbumDetailView {
     other: Vec<Album>,
     loading: bool,
     error: bool,
-    playlists: Vec<Playlist>,
     sel: DetailSelection,
     list: UniformListScrollHandle,
     sb: ScrollbarHandle,
@@ -121,7 +120,6 @@ impl AlbumDetailView {
             other: Vec::new(),
             loading: true,
             error: false,
-            playlists: Vec::new(),
             sel: DetailSelection::default(),
             list: UniformListScrollHandle::new(),
             sb: scrollbar::new_handle(),
@@ -146,7 +144,7 @@ impl AlbumDetailView {
                 .spawn(async move {
                     let d = b.browse_get_album(&id);
                     let other = d.as_ref().ok().and_then(|d| d.album.artist_id.clone()).and_then(|a| b.browse_get_artist(&a).ok()).map(|a| a.albums.into_iter().filter(|x| x.id != id).collect::<Vec<_>>());
-                    (d, other, b.playlists_list())
+                    (d, other)
                 })
                 .await;
             let _ = this.update(cx, |t, cx| {
@@ -158,7 +156,6 @@ impl AlbumDetailView {
                     Err(_) => t.error = true,
                 }
                 t.other = r.1.unwrap_or_default();
-                t.playlists = r.2.unwrap_or_default();
                 t.loading = false;
                 let _ = first;
                 cx.notify();
@@ -182,7 +179,7 @@ impl AlbumDetailView {
         }
     }
 
-    fn track_menu(&mut self, ix: usize) -> Vec<MenuItem> {
+    fn track_menu(&mut self, ix: usize, at: Point<Pixels>) -> Vec<MenuItem> {
         let indices = self.sel.for_context_menu(ix);
         let tracks: Vec<Track> = indices.iter().filter_map(|i| self.tracks().get(*i).cloned()).collect();
         if tracks.is_empty() {
@@ -190,36 +187,21 @@ impl AlbumDetailView {
         }
         let ids: Vec<String> = self.tracks().iter().map(|t| t.id.clone()).collect();
         let start = indices[0];
-        menus::track_menu(&tracks, &self.playlists, move |cx| menus::play_tracks(cx, ids.clone(), start))
+        menus::track_menu(&tracks, at, move |cx| menus::play_tracks(cx, ids.clone(), start))
     }
 
     fn open_track_menu(&mut self, ix: usize, pos: Point<Pixels>, window: &mut Window, cx: &mut Context<Self>) {
-        let items = self.track_menu(ix);
+        let items = self.track_menu(ix, pos);
         if !items.is_empty() {
             open_menu_at(&self.ctx, items, pos, window, cx);
         }
         cx.notify();
     }
 
-    /// The "+" button: the web's AddToPlaylist popover; natively a menu of the writable playlists. TODO(dialogs-port)
-    fn open_add_menu(&mut self, ix: usize, pos: Point<Pixels>, window: &mut Window, cx: &mut Context<Self>) {
+    /// The "+" button: `openAddToPlaylistMenu(anchor, t.id)` (`pos` = the button's bottom-right corner).
+    fn open_add_menu(&mut self, ix: usize, pos: Point<Pixels>, _window: &mut Window, cx: &mut Context<Self>) {
         let Some(t) = self.tracks().get(ix) else { return };
-        let tid = t.id.clone();
-        let items: Vec<MenuItem> = self
-            .playlists
-            .iter()
-            .filter(|p| !p.read_only)
-            .map(|p| {
-                let (pid, tid) = (p.id.clone(), tid.clone());
-                MenuItem::action(p.name.clone(), move |_, cx| {
-                    let (pid, tid) = (pid.clone(), tid.clone());
-                    app::call(cx, move |b| {
-                        let _ = b.playlists_add_tracks(AddToPlaylistRequest { id: pid, track_ids: vec![tid] });
-                    })
-                })
-            })
-            .collect();
-        open_menu_at(&self.ctx, items, pos, window, cx);
+        crate::overlays::add_to_playlist(cx, vec![t.id.clone()], pos);
     }
 
     fn select_row(&mut self, ix: usize) {
@@ -319,7 +301,6 @@ impl AlbumDetailView {
         let anchor2 = anchor.clone();
         let ctx = self.ctx.clone();
         let album_c = album.clone();
-        let playlists = self.playlists.clone();
         let play_btn = div()
             .id("album-play")
             .relative()
@@ -383,7 +364,7 @@ impl AlbumDetailView {
             .on_click(move |_: &ClickEvent, window, cx| {
                 let b = anchor2.get();
                 let pos = point(b.origin.x, b.origin.y + b.size.height + px(4.));
-                open_menu_at(&ctx, menus::album_menu(&album_c, &playlists), pos, window, cx);
+                open_menu_at(&ctx, menus::album_menu(&album_c, pos), pos, window, cx);
             });
         let _ = id2;
         let actions = div()

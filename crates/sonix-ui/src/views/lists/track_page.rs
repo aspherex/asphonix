@@ -48,8 +48,9 @@ pub struct TrackPage {
     liked: Option<LikedSummary>,
     smart: Option<SmartSummary>,
     seed: u32,
+    /// the FLOW button's bounds (its menu anchors under it)
+    flow_btn: Rc<std::cell::Cell<gpui::Bounds<gpui::Pixels>>>,
     more_bounds: std::rc::Rc<std::cell::Cell<gpui::Bounds<gpui::Pixels>>>,
-    playlists: Vec<Playlist>,
     rev: u64,
     _subs: Vec<Subscription>,
 }
@@ -119,8 +120,8 @@ impl TrackPage {
             liked: None,
             smart: None,
             seed: initial_seed(),
+            flow_btn: Rc::new(std::cell::Cell::new(gpui::Bounds::default())),
             more_bounds: Default::default(),
-            playlists: Vec::new(),
             rev: 0,
             _subs: subs,
         };
@@ -132,15 +133,6 @@ impl TrackPage {
     pub fn reload(&mut self, cx: &mut Context<Self>) {
         self.rev += 1;
         let (rev, kind, b, seed) = (self.rev, self.kind.clone(), self.backend.clone(), self.seed);
-        let b2 = b.clone();
-        cx.spawn(async move |this, cx| {
-            let pls = cx.background_executor().spawn(async move { b2.playlists_list() }).await;
-            let _ = this.update(cx, |t, cx| {
-                t.playlists = pls.unwrap_or_default();
-                cx.notify();
-            });
-        })
-        .detach();
         match kind {
             PageKind::Playlist(id) => {
                 cx.spawn(async move |this, cx| {
@@ -264,14 +256,35 @@ impl TrackPage {
 
     // ------------------------------------------------------------ actions
     fn play_source(&self, start: Option<String>, shuffle: bool, cx: &mut Context<Self>) {
+        self.play_with(start, shuffle, None, cx);
+    }
+
+    /// `playPlaylist|playLiked|playSmart(…, { startTrackId, shuffle, flow })`
+    fn play_with(&self, start: Option<String>, shuffle: bool, flow: Option<FlowArc>, cx: &gpui::App) {
         let (kind, seed) = (self.kind.clone(), self.seed);
         app::call(cx, move |b| {
             let _ = match kind {
-                PageKind::Playlist(id) => b.player_play_playlist(PlaySourceRequest { id, shuffle, start_track_id: start, seed: 0 }),
-                PageKind::Liked => b.player_play_liked(PlaySourceRequest { shuffle, start_track_id: start, ..Default::default() }),
-                PageKind::Smart(id) => b.player_play_smart(PlaySourceRequest { id, shuffle, start_track_id: start, seed }),
+                PageKind::Playlist(id) => b.player_play_playlist(PlaySourceRequest { id, shuffle, start_track_id: start, flow, ..Default::default() }),
+                PageKind::Liked => b.player_play_liked(PlaySourceRequest { shuffle, start_track_id: start, flow, ..Default::default() }),
+                PageKind::Smart(id) => b.player_play_smart(PlaySourceRequest { id, shuffle, start_track_id: start, seed, flow }),
             };
         });
+    }
+
+    /// The header FLOW button (`openFlowMenu` with this list's pool and coverage noun).
+    fn open_flow(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let (kind, id, seed) = match &self.kind {
+            PageKind::Playlist(id) => (FlowPoolKind::Playlist, Some(id.clone()), None),
+            PageKind::Liked => (FlowPoolKind::Liked, None, None),
+            PageKind::Smart(id) => (FlowPoolKind::Smart, Some(id.clone()), Some(self.seed)),
+        };
+        let this = cx.entity().downgrade();
+        let play: crate::flow::Play = Rc::new(move |arc, cx| {
+            if let Some(t) = this.upgrade() {
+                t.read(cx).play_with(None, false, Some(arc), cx);
+            }
+        });
+        crate::flow::open_menu(self.menu.clone(), self.flow_btn.get(), crate::flow::pool(kind, id, seed), crate::flow::noun(kind), play, window, cx);
     }
 
     /// Tracks of the menu selection, handed to `then`. Rows the table has evicted (or never loaded, after Ctrl+A) are
@@ -351,35 +364,15 @@ impl TrackPage {
                     if tracks.is_empty() {
                         return;
                     }
-                    let items = t.track_menu(tracks, cx);
+                    let items = t.track_menu(tracks, pos, cx);
                     t.show_menu(items, pos, cx);
                 });
             }
             TableEvent::AddToPlaylist { ix, pos } => {
-                // TODO(player/dialogs agent): `openAddToPlaylistMenu` popover; until it exists the "..." menu's
-                // "Add to playlist" submenu is the way in.
-                let pos = *pos;
-                self.with_selection(*ix, cx, move |t, tracks, cx| {
-                    if tracks.is_empty() {
-                        return;
-                    }
-                    let ids: Vec<String> = tracks.iter().map(|t| t.id.clone()).collect();
-                    let items: Vec<MenuItem> = t
-                        .playlists
-                        .iter()
-                        .filter(|p| !p.read_only)
-                        .map(|p| {
-                            let (pid, ids) = (p.id.clone(), ids.clone());
-                            MenuItem::action(p.name.clone(), move |_, cx| {
-                                let (pid, ids) = (pid.clone(), ids.clone());
-                                app::call(cx, move |b| {
-                                    let _ = b.playlists_add_tracks(AddToPlaylistRequest { id: pid, track_ids: ids });
-                                });
-                            })
-                        })
-                        .collect();
-                    t.show_menu(items, pos, cx);
-                });
+                // `openAddToPlaylistMenu(anchor, t.id)`: the row's own track, not the selection
+                if let Some(id) = self.table.read(cx).track_at(*ix).map(|t| t.id.clone()) {
+                    crate::overlays::add_to_playlist(cx, vec![id], *pos);
+                }
             }
             TableEvent::Remove(ix) => self.remove_indices(vec![*ix], cx),
             TableEvent::Reorder { from, to } => self.reorder(*from, *to, cx),
@@ -395,7 +388,7 @@ impl TrackPage {
         });
     }
 
-    fn track_menu(&mut self, tracks: Vec<Track>, cx: &mut Context<Self>) -> Vec<MenuItem> {
+    fn track_menu(&mut self, tracks: Vec<Track>, at: gpui::Point<gpui::Pixels>, cx: &mut Context<Self>) -> Vec<MenuItem> {
         let this = cx.entity().downgrade();
         let t2 = this.clone();
         let first = tracks[0].id.clone();
@@ -426,7 +419,7 @@ impl TrackPage {
         } else {
             None
         };
-        menus::track_menu_items(this, TrackMenu { tracks, playlists: self.playlists.clone(), play_now, remove_from_playlist: remove })
+        menus::track_menu_items(this, TrackMenu { tracks, at, play_now, remove_from_playlist: remove })
     }
 
     fn remove_indices(&mut self, mut indices: Vec<usize>, cx: &mut Context<Self>) {
@@ -670,7 +663,10 @@ impl Render for TrackPage {
         actions = actions
             .child(pid("pl.btn.play", play_btn("pg-play", &th, "PLAY", empty).when(!empty, |b| b.on_click(cx.listener(|this, _, _, cx| this.play_source(None, false, cx))))))
             .child(pid("pl.btn.shuffle", sec_btn("pg-shuffle", &th, "shuffle", "SHUFFLE", empty).when(!empty, |b| b.on_click(cx.listener(|this, _, _, cx| this.play_source(None, true, cx))))))
-            .child(pid("pl.btn.flow", sec_btn("pg-flow", &th, "sliders", "FLOW", empty)));
+            .child(pid(
+                "pl.btn.flow",
+                sec_btn("pg-flow", &th, "sliders", "FLOW", empty).relative().child(crate::flow::bounds_probe(self.flow_btn.clone())).when(!empty, |b| b.on_click(cx.listener(|this, _, window, cx| this.open_flow(window, cx)))),
+            ));
         match &self.kind {
             PageKind::Playlist(_) => {
                 actions = actions

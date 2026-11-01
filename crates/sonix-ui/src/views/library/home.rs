@@ -6,6 +6,7 @@ use super::fmtx;
 use super::grid::list_overflows;
 use super::parts::{PageScroll, auto_fill, measure};
 use super::{Ctx, LibEvent, menus, navigate};
+use crate::views::lists::playlist_menu;
 use crate::anim;
 use crate::app;
 use crate::metrics::library as m;
@@ -454,7 +455,7 @@ impl Render for HomeView {
 
         // Heavy Rotation
         if let Some(s) = self.sections.clone().filter(|s| !s.frequent.is_empty()) {
-            let cards: Vec<AnyElement> = s.frequent.iter().enumerate().map(|(i, a)| card(&ctx, &th, CardItem::Album(a), &self.lists, card_w, None, Some(format!("home.card.{i}")), window, cx)).collect();
+            let cards: Vec<AnyElement> = s.frequent.iter().enumerate().map(|(i, a)| card(&ctx, &th, CardItem::Album(a), card_w, None, Some(format!("home.card.{i}")), window, cx)).collect();
             children.push(div().flex().flex_col().child(Self::block_title(&th, "Heavy Rotation")).child(Self::grid(cards, sp::MD)).into_any_element());
         }
         if self.sections.is_none() && self.sections_unavailable {
@@ -472,7 +473,7 @@ impl Render for HomeView {
                     menu: Rc::new(move |anchor, window, cx| {
                         let b = anchor.get();
                         let pos = gpui::point(b.origin.x, b.origin.y + b.size.height + px(4.));
-                        open_menu_at(&mctx, menus::playlist_menu(&pl), pos, window, cx);
+                        open_menu_at(&mctx, playlist_menu(&pl, cx), pos, window, cx);
                     }),
                 };
                 let (mctx2, pl2) = (ctx.clone(), p.clone());
@@ -487,7 +488,7 @@ impl Render for HomeView {
                 .on_click(move |_, _, cx| navigate(cx, Route::Playlist(id_open.clone())))
                 .on_mouse_down(gpui::MouseButton::Right, move |ev, window, cx| {
                     cx.stop_propagation();
-                    open_menu_at(&mctx2, menus::playlist_menu(&pl2), ev.position, window, cx);
+                    open_menu_at(&mctx2, playlist_menu(&pl2, cx), ev.position, window, cx);
                 });
                 tiles.push(pid(format!("home.pl.{i}"), t).into_any_element());
             }

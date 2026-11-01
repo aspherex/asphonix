@@ -514,6 +514,7 @@ impl QueueRail {
                     });
                 }
             })),
+            on_remove_from_playlist: None,
             on_remove_from_queue: Some(std::rc::Rc::new(move |cx| {
                 if let Some(t) = this_rm.upgrade() {
                     let ix = ix_rm.clone();

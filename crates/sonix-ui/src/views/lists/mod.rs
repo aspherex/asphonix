@@ -47,6 +47,18 @@ pub fn hot_shadow(th: &Theme, off: f32) -> Vec<BoxShadow> {
 pub struct Bridge;
 impl gpui::EventEmitter<ListsEvent> for Bridge {}
 
+/// The bridge, reachable from other routes (Home's playlist tiles use the same `playlistMenuItems`).
+pub struct BridgeHandle(pub gpui::WeakEntity<Bridge>);
+impl gpui::Global for BridgeHandle {}
+
+/// `playlistMenuItems` for a playlist shown outside the list routes (rename / duplicate / delete included).
+pub fn playlist_menu(p: &sonix_api::Playlist, cx: &gpui::App) -> Vec<crate::widgets::context_menu::MenuItem> {
+    match cx.try_global::<BridgeHandle>() {
+        Some(h) => menus::playlist_menu_items(h.0.clone(), p, false),
+        None => Vec::new(),
+    }
+}
+
 #[derive(Default)]
 pub struct ListsHost {
     pub smart_side: Vec<SmartSummary>,
@@ -81,6 +93,7 @@ impl Shell {
     /// Shell startup: the smart editor host and the event bridge live for the whole run (dialogs are `crate::overlays`).
     pub(crate) fn lists_init(&mut self, cx: &mut Context<Self>) {
         let br = cx.new(|_| Bridge);
+        cx.set_global(BridgeHandle(br.downgrade()));
         self.lists.subs.push(cx.subscribe(&br, |sh: &mut Shell, _, ev: &ListsEvent, cx| sh.lists_event(ev, cx)));
         self.lists.bridge = Some(br);
         let (b, menu) = (self.backend.clone(), self.menu.clone());

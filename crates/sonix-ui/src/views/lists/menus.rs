@@ -5,7 +5,7 @@ use super::ListsEvent;
 use crate::app;
 use crate::router::Route;
 use crate::widgets::context_menu::MenuItem;
-use gpui::{App, ClipboardItem, EventEmitter, WeakEntity};
+use gpui::{App, EventEmitter, WeakEntity};
 use sonix_api::*;
 use std::rc::Rc;
 
@@ -13,19 +13,10 @@ pub type Action = Rc<dyn Fn(&mut App)>;
 
 pub struct TrackMenu {
     pub tracks: Vec<Track>,
-    pub playlists: Vec<Playlist>,
+    /// where the menu opened (the add-to-playlist popover anchors here)
+    pub at: gpui::Point<gpui::Pixels>,
     pub play_now: Action,
     pub remove_from_playlist: Option<Action>,
-}
-
-fn enqueue(label: String, pos: EnqueuePosition, ids: Vec<String>, icon: &'static str) -> MenuItem {
-    MenuItem::action(label, move |_, cx| {
-        let ids = ids.clone();
-        app::call(cx, move |b| {
-            let _ = b.player_enqueue(EnqueueRequest { track_ids: ids, position: pos });
-        });
-    })
-    .icon(icon)
 }
 
 fn nav<V: EventEmitter<ListsEvent> + 'static>(this: &WeakEntity<V>, cx: &mut App, r: Route) {
@@ -34,106 +25,21 @@ fn nav<V: EventEmitter<ListsEvent> + 'static>(this: &WeakEntity<V>, cx: &mut App
     }
 }
 
-/// `trackMenuItems`
+/// `trackMenuItems`: the shared builder (`crate::menus`) with this page's play / remove-from-playlist context.
 pub fn track_menu_items<V: EventEmitter<ListsEvent> + 'static>(this: WeakEntity<V>, o: TrackMenu) -> Vec<MenuItem> {
-    let tracks = o.tracks;
-    let n = tracks.len();
-    let suffix = if n > 1 { format!(" ({n} tracks)") } else { String::new() };
-    let ids: Vec<String> = tracks.iter().map(|t| t.id.clone()).collect();
-    let first = tracks[0].clone();
-    let all_starred = tracks.iter().all(|t| t.starred.is_some());
-
-    let play = o.play_now.clone();
-    let mut items = vec![
-        MenuItem::action("Play now", move |_, cx| play(cx)).icon("play"),
-        enqueue(format!("Play next{suffix}"), EnqueuePosition::Next, ids.clone(), "next"),
-        enqueue(format!("Add to queue{suffix}"), EnqueuePosition::End, ids.clone(), "queue"),
-    ];
-    if n == 1 {
-        items.push(MenuItem::action("Start radio", |_, _| {}).icon("equalizer"));
-    }
-    let pls: Vec<MenuItem> = o
-        .playlists
-        .iter()
-        .filter(|p| !p.read_only)
-        .map(|p| {
-            let (pid, ids, this) = (p.id.clone(), ids.clone(), this.clone());
-            MenuItem::action(p.name.clone(), move |_, cx| {
-                let (pid, ids) = (pid.clone(), ids.clone());
-                app::call(cx, move |b| {
-                    let _ = b.playlists_add_tracks(AddToPlaylistRequest { id: pid, track_ids: ids });
-                });
-                if let Some(t) = this.upgrade() {
-                    t.update(cx, |_, cx| cx.emit(ListsEvent::PlaylistsChanged));
-                }
-            })
-        })
-        .collect();
-    items.push(MenuItem::submenu(format!("Add to playlist{suffix}"), pls).icon("add"));
-    let ids_l = ids.clone();
-    items.push(
-        MenuItem::action(format!("{}{suffix}", if all_starred { "Unlike" } else { "Like" }), move |_, cx| {
-            let ids = ids_l.clone();
-            app::call(cx, move |b| {
-                for id in ids {
-                    let req = StarRequest { id, kind: StarTargetType::Track };
-                    let _ = if all_starred { b.star_remove(req) } else { b.star_add(req) };
-                }
-            });
-        })
-        .icon(if all_starred { "heart-filled" } else { "heart" }),
-    );
-    let rate = |stars: u8, ids: Vec<String>| {
-        let label = if stars == 0 { "Clear rating".to_string() } else { format!("{}★", stars) };
-        let mut it = MenuItem::action(label, move |_, cx| {
-            let ids = ids.clone();
-            app::call(cx, move |b| {
-                for id in ids {
-                    let _ = b.rating_set(SetRatingRequest { id, kind: StarTargetType::Track, rating: stars });
-                }
-            });
-        });
-        if stars == 1 {
-            it = it.danger().hint("1★ tracks are purged by the NAS nightly.");
-        }
-        it
-    };
-    items.push(MenuItem::submenu(format!("Rate{suffix}"), [0u8, 5, 4, 3, 2, 1].into_iter().map(|s| rate(s, ids.clone())).collect()).icon("star"));
-    if n == 1 {
-        if let Some(al) = first.album_id.clone() {
-            let this = this.clone();
-            items.push(MenuItem::action("Go to album", move |_, cx| nav(&this, cx, Route::Album(al.clone()))).icon("album"));
-        }
-        if let Some(ar) = first.artist_id.clone() {
-            let this = this.clone();
-            items.push(MenuItem::action("Go to artist", move |_, cx| nav(&this, cx, Route::Artist(ar.clone()))).icon("artist"));
-        }
-    }
-    if let Some(rm) = o.remove_from_playlist {
-        items.push(MenuItem::separator());
-        items.push(MenuItem::action(format!("Remove from this playlist{suffix}"), move |_, cx| rm(cx)).icon("trash").danger());
-    }
-    if n == 1 {
-        items.push(MenuItem::separator());
-        items.push(MenuItem::action("Track info", |_, _| {}).icon("eye"));
-        let text = format!("{} – {}", first.artist, first.title);
-        items.push(MenuItem::action("Copy \"Artist – Title\"", move |_, cx| cx.write_to_clipboard(ClipboardItem::new_string(text.clone()))));
-    }
-    items
-}
-
-/// `flowMenuEntry`: the "Flow ▸" submenu (Flow sequencing is not ported: the entries are inert).
-fn flow_entry(disabled: bool) -> MenuItem {
-    MenuItem::submenu("Flow", vec![MenuItem::action("Steady", |_, _| {}), MenuItem::action("Build", |_, _| {}), MenuItem::action("Peak", |_, _| {})]).icon("sliders").disabled(disabled)
+    crate::menus::track_menu_items(crate::menus::TrackMenu {
+        tracks: o.tracks,
+        at: o.at,
+        on_play_now: o.play_now,
+        on_play_next: None,
+        on_remove_from_queue: None,
+        on_remove_from_playlist: o.remove_from_playlist,
+        on_navigate: Rc::new(move |r, cx| nav(&this, cx, r)),
+    })
 }
 
 fn play_pl(id: String, shuffle: bool) -> impl Fn(&mut gpui::Window, &mut App) {
-    move |_, cx| {
-        let id = id.clone();
-        app::call(cx, move |b| {
-            let _ = b.player_play_playlist(PlaySourceRequest { id, shuffle, start_track_id: None, seed: 0 });
-        });
-    }
+    move |_, cx| crate::playback::play_playlist(cx, id.clone(), shuffle, None)
 }
 
 /// `playlistMenuItems`
@@ -208,7 +114,10 @@ pub fn playlist_menu_items<V: EventEmitter<ListsEvent> + 'static>(this: WeakEnti
     vec![
         MenuItem::action("Play", play_pl(p.id.clone(), false)).icon("play").disabled(empty),
         MenuItem::action("Shuffle", play_pl(p.id.clone(), true)).icon("shuffle").disabled(empty),
-        flow_entry(empty),
+        {
+            let id = p.id.clone();
+            crate::flow::menu_entry(Rc::new(move |arc, cx: &mut App| crate::playback::play_playlist(cx, id.clone(), false, Some(arc))), empty)
+        },
         queue_item("Play next", EnqueuePosition::Next, "next"),
         queue_item("Add to queue", EnqueuePosition::End, "queue"),
         MenuItem::separator(),
@@ -220,27 +129,18 @@ pub fn playlist_menu_items<V: EventEmitter<ListsEvent> + 'static>(this: WeakEnti
 
 /// `likedMenuItems`
 pub fn liked_menu_items(count: usize) -> Vec<MenuItem> {
-    let play = |shuffle: bool| {
-        move |_: &mut gpui::Window, cx: &mut App| {
-            app::call(cx, move |b| {
-                let _ = b.player_play_liked(PlaySourceRequest { shuffle, ..Default::default() });
-            });
-        }
-    };
-    vec![MenuItem::action("Play", play(false)).icon("play").disabled(count == 0), MenuItem::action("Shuffle", play(true)).icon("shuffle").disabled(count == 0), flow_entry(count == 0)]
+    let play = |shuffle: bool| move |_: &mut gpui::Window, cx: &mut App| crate::playback::play_liked(cx, shuffle, None);
+    vec![
+        MenuItem::action("Play", play(false)).icon("play").disabled(count == 0),
+        MenuItem::action("Shuffle", play(true)).icon("shuffle").disabled(count == 0),
+        crate::flow::menu_entry(Rc::new(|arc, cx: &mut App| crate::playback::play_liked(cx, false, Some(arc))), count == 0),
+    ]
 }
 
 /// `smartMenuItems`
 pub fn smart_menu_items<V: EventEmitter<ListsEvent> + 'static>(this: WeakEntity<V>, sp: &SmartSummary, seed: u32, delete_nav: bool) -> Vec<MenuItem> {
     let empty = sp.track_count == 0;
-    let play = |id: String, shuffle: bool| {
-        move |_: &mut gpui::Window, cx: &mut App| {
-            let id = id.clone();
-            app::call(cx, move |b| {
-                let _ = b.player_play_smart(PlaySourceRequest { id, shuffle, start_track_id: None, seed });
-            });
-        }
-    };
+    let play = |id: String, shuffle: bool| move |_: &mut gpui::Window, cx: &mut App| crate::playback::play_smart(cx, id.clone(), shuffle, seed, None);
     let (sp_e, this_e) = (sp.clone(), this.clone());
     let edit = MenuItem::action("Edit rules…", move |_, cx| {
         if let Some(t) = this_e.upgrade() {
@@ -307,7 +207,10 @@ pub fn smart_menu_items<V: EventEmitter<ListsEvent> + 'static>(this: WeakEntity<
     vec![
         MenuItem::action("Play", play(sp.id.clone(), false)).icon("play").disabled(empty),
         MenuItem::action("Shuffle", play(sp.id.clone(), true)).icon("shuffle").disabled(empty),
-        flow_entry(empty),
+        {
+            let id = sp.id.clone();
+            crate::flow::menu_entry(Rc::new(move |arc, cx: &mut App| crate::playback::play_smart(cx, id.clone(), false, seed, Some(arc))), empty)
+        },
         MenuItem::separator(),
         edit,
         rename,

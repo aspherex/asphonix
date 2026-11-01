@@ -1,10 +1,12 @@
-//! Context-menu contents of the library routes (`menus.ts`: `trackMenuItems`, `albumMenuItems`, `artistMenuItems`,
-//! `playlistMenuItems` (play part), `flowMenuEntry`) wired to the `Backend`, plus the playback helpers of `playback.ts`.
+//! Context-menu contents of the library routes (`menus.ts`: `albumMenuItems`, `artistMenuItems`; tracks use the shared
+//! `crate::menus` builder, playlists the list routes' `playlistMenuItems`), plus the album/selection helpers of
+//! `playback.ts` (rolling sources are `crate::playback`).
 use super::navigate;
 use crate::app;
 use crate::router::Route;
 use crate::widgets::context_menu::MenuItem;
-use gpui::{App, ClipboardItem};
+use gpui::{App, Pixels, Point, px};
+use std::rc::Rc;
 use sonix_api::*;
 
 // ---------------------------------------------------------------- playback.ts
@@ -38,27 +40,16 @@ pub fn play_tracks(cx: &App, ids: Vec<String>, start: usize) {
 }
 
 pub fn play_artist(cx: &App, id: String, shuffle: bool) {
-    app::call(cx, move |b| {
-        let _ = b.player_play_artist(PlayArtistRequest { id, shuffle, start_track_id: None });
-    });
+    crate::playback::play_artist(cx, id, shuffle, None);
 }
 
 pub fn play_genre(cx: &App, name: String, shuffle: bool) {
-    app::call(cx, move |b| {
-        let _ = b.player_play_genre(PlayGenreRequest { name, shuffle, start_track_id: None });
-    });
+    crate::playback::play_genre(cx, name, shuffle, None);
 }
 
-/// `playPlaylist` through the existing `playlists_get` + `player_play_queue` until the playlists port wires the
-/// rolling-window source command. TODO(playlists-port): switch to `player_play_playlist`.
+/// `playPlaylist`: the rolling `player_play_playlist` source.
 pub fn play_playlist(cx: &App, id: String, shuffle: bool) {
-    app::call(cx, move |b| {
-        if let Ok(d) = b.playlists_get(&id) {
-            let ids: Vec<String> = d.tracks.into_iter().map(|t| t.id).collect();
-            let ids = if shuffle { shuffled(ids) } else { ids };
-            let _ = b.player_play_queue(PlayQueueRequest { track_ids: ids, start_index: 0 });
-        }
-    });
+    crate::playback::play_playlist(cx, id, shuffle, None);
 }
 
 pub fn enqueue(cx: &App, ids: Vec<String>, position: EnqueuePosition) {
@@ -81,57 +72,10 @@ fn album_ids(b: &dyn Backend, album: &str) -> Vec<String> {
     b.browse_get_album(album).map(|d| d.tracks.into_iter().map(|t| t.id).collect()).unwrap_or_default()
 }
 
-// ---------------------------------------------------------------- shared entries
-/// `flowMenuEntry`: "Flow >" with Steady / Build / Peak. Flow sequencing is not ported (docs/PORTING.md), the entries are inert.
-pub fn flow_entry(disabled: bool) -> MenuItem {
-    let arcs = [("Steady", "Smooth transitions, even energy"), ("Build", "Energy rises over each ~40 tracks"), ("Peak", "Rise, then cool down")];
-    MenuItem::submenu("Flow", arcs.iter().map(|(l, h)| MenuItem::action(*l, |_, _| {}).hint(*h)).collect()).icon("sliders").disabled(disabled)
-}
-
-/// `ratingSubmenu`: ★ .. ★★★★★ (1★ is the danger entry), separator, "Clear rating".
-fn rating_submenu(ids: Vec<String>, kind: StarTargetType) -> Vec<MenuItem> {
-    let apply = |ids: Vec<String>, value: u8| {
-        move |_: &mut gpui::Window, cx: &mut App| {
-            let ids = ids.clone();
-            app::call(cx, move |b| {
-                for id in ids {
-                    let _ = b.rating_set(SetRatingRequest { id, kind, rating: value });
-                }
-            });
-        }
-    };
-    let mut v: Vec<MenuItem> = (1..=5u8)
-        .map(|n| {
-            let it = MenuItem::action("★".repeat(n as usize), apply(ids.clone(), n));
-            if n == 1 { it.danger().hint("Purges from library on NAS nightly.") } else { it }
-        })
-        .collect();
-    v.push(MenuItem::separator());
-    v.push(MenuItem::action("Clear rating", apply(ids, 0)));
-    v
-}
-
-fn add_to_playlist(label: String, playlists: &[Playlist], ids: impl Fn(&dyn Backend) -> Vec<String> + Clone + Send + 'static) -> MenuItem {
-    let entries: Vec<MenuItem> = playlists
-        .iter()
-        .filter(|p| !p.read_only)
-        .map(|p| {
-            let (pid, ids) = (p.id.clone(), ids.clone());
-            MenuItem::action(p.name.clone(), move |_, cx| {
-                let (pid, ids) = (pid.clone(), ids.clone());
-                app::call(cx, move |b| {
-                    let track_ids = ids(b);
-                    let _ = b.playlists_add_tracks(AddToPlaylistRequest { id: pid, track_ids });
-                });
-            })
-        })
-        .collect();
-    MenuItem::submenu(label, entries).icon("add")
-}
-
 // ---------------------------------------------------------------- entities
 /// `albumMenuItems`.
-pub fn album_menu(album: &Album, playlists: &[Playlist]) -> Vec<MenuItem> {
+/// `at` = where the menu opened (the add-to-playlist popover anchors there, `anchorPoint()`).
+pub fn album_menu(album: &Album, at: Point<Pixels>) -> Vec<MenuItem> {
     let id = album.id.clone();
     let starred = album.starred.is_some();
     let mut items = vec![
@@ -172,10 +116,20 @@ pub fn album_menu(album: &Album, playlists: &[Playlist]) -> Vec<MenuItem> {
         })
         .icon("queue"),
     ];
-    // The web opens the AddToPlaylist popover here; the native menu lists the writable playlists as a submenu.
     {
         let id = id.clone();
-        items.push(add_to_playlist("Add to playlist".into(), playlists, move |b| album_ids(b, &id)));
+        items.push(
+            MenuItem::action("Add to playlist", move |_, cx| {
+                let id = id.clone();
+                let b = app::backend(cx);
+                cx.spawn(async move |cx| {
+                    let ids = cx.background_executor().spawn(async move { album_ids(&*b, &id) }).await;
+                    let _ = cx.update(|cx| crate::overlays::add_to_playlist(cx, ids, gpui::point(at.x + px(220.), at.y)));
+                })
+                .detach();
+            })
+            .icon("add"),
+        );
     }
     items.push(
         MenuItem::action(if starred { "Unstar" } else { "Star" }, {
@@ -184,9 +138,11 @@ pub fn album_menu(album: &Album, playlists: &[Playlist]) -> Vec<MenuItem> {
         })
         .icon(if starred { "star-filled" } else { "star" }),
     );
-    items.push(MenuItem::submenu("Rate", rating_submenu(vec![id.clone()], StarTargetType::Album)).icon("star"));
-    // `radio_start` is not part of the Backend contract yet: present for structural parity, inert.
-    items.push(MenuItem::action("Album radio", |_, _| {}).icon("equalizer"));
+    items.push(MenuItem::submenu("Rate", crate::menus::rating_submenu(vec![id.clone()], StarTargetType::Album)).icon("star"));
+    {
+        let id = id.clone();
+        items.push(MenuItem::action("Album radio", move |_, cx| crate::playback::radio(cx, RadioSeedKind::Album, id.clone())).icon("equalizer"));
+    }
     if let Some(ar) = album.artist_id.clone() {
         items.push(MenuItem::action("Go to artist", move |_, cx| navigate(cx, Route::Artist(ar.clone()))).icon("artist"));
     }
@@ -208,8 +164,18 @@ pub fn artist_menu(artist: &Artist) -> Vec<MenuItem> {
             move |_, cx| play_artist(cx, id.clone(), true)
         })
         .icon("shuffle"),
-        flow_entry(false),
-        MenuItem::action("Artist radio", |_, _| {}).icon("equalizer"),
+        crate::flow::menu_entry(
+            {
+                let id = id.clone();
+                Rc::new(move |arc, cx: &mut App| crate::playback::play_artist(cx, id.clone(), false, Some(arc)))
+            },
+            false,
+        ),
+        MenuItem::action("Artist radio", {
+            let id = id.clone();
+            move |_, cx| crate::playback::radio(cx, RadioSeedKind::Artist, id.clone())
+        })
+        .icon("equalizer"),
         MenuItem::action(if starred { "Unstar" } else { "Star" }, {
             let id = id.clone();
             move |_, cx| toggle_star(cx, id.clone(), StarTargetType::Artist, starred)
@@ -218,94 +184,7 @@ pub fn artist_menu(artist: &Artist) -> Vec<MenuItem> {
     ]
 }
 
-/// `playlistMenuItems` (the entries that exist without the dialogs: play / shuffle / flow / queue; rename, duplicate and
-/// delete need the Dialog component of the dialogs port and are listed inert). TODO(dialogs-port).
-pub fn playlist_menu(p: &Playlist) -> Vec<MenuItem> {
-    let empty = p.song_count == 0;
-    let id = p.id.clone();
-    let ids_of = |id: String| move |b: &dyn Backend| b.playlists_get(&id).map(|d| d.tracks.into_iter().map(|t| t.id).collect::<Vec<_>>()).unwrap_or_default();
-    let enq = |label: &'static str, icon: &'static str, pos: EnqueuePosition, id: String| {
-        MenuItem::action(label, move |_, cx| {
-            let f = ids_of(id.clone());
-            app::call(cx, move |b| {
-                let ids = f(b);
-                if !ids.is_empty() {
-                    let _ = b.player_enqueue(EnqueueRequest { track_ids: ids, position: pos });
-                }
-            })
-        })
-        .icon(icon)
-        .disabled(empty)
-    };
-    vec![
-        MenuItem::action("Play", {
-            let id = id.clone();
-            move |_, cx| play_playlist(cx, id.clone(), false)
-        })
-        .icon("play")
-        .disabled(empty),
-        MenuItem::action("Shuffle", {
-            let id = id.clone();
-            move |_, cx| play_playlist(cx, id.clone(), true)
-        })
-        .icon("shuffle")
-        .disabled(empty),
-        flow_entry(empty),
-        enq("Play next", "next", EnqueuePosition::Next, id.clone()),
-        enq("Add to queue", "queue", EnqueuePosition::End, id.clone()),
-        MenuItem::separator(),
-        read_only_hint(MenuItem::action("Rename", |_, _| {}).icon("edit").disabled(p.read_only), p.read_only),
-        MenuItem::action("Duplicate", |_, _| {}).icon("add"),
-        read_only_hint(MenuItem::action("Delete", |_, _| {}).icon("trash").danger().disabled(p.read_only), p.read_only),
-    ]
-}
-
-fn read_only_hint(it: MenuItem, read_only: bool) -> MenuItem {
-    if read_only { it.hint("Read-only playlist.") } else { it }
-}
-
-/// `trackMenuItems` for a selection (same order/labels as the Tracks route's menu; "Play now" is the caller's context).
-pub fn track_menu(tracks: &[Track], playlists: &[Playlist], on_play_now: impl Fn(&mut App) + 'static) -> Vec<MenuItem> {
-    let n = tracks.len();
-    let suffix = if n > 1 { format!(" ({n} tracks)") } else { String::new() };
-    let ids: Vec<String> = tracks.iter().map(|t| t.id.clone()).collect();
-    let all_starred = tracks.iter().all(|t| t.starred.is_some());
-    let enq = |label: String, pos: EnqueuePosition, icon: &'static str| {
-        let ids = ids.clone();
-        MenuItem::action(label, move |_, cx| enqueue(cx, ids.clone(), pos)).icon(icon)
-    };
-    let mut items = vec![MenuItem::action("Play now", move |_, cx| on_play_now(cx)).icon("play"), enq(format!("Play next{suffix}"), EnqueuePosition::Next, "next"), enq(format!("Add to queue{suffix}"), EnqueuePosition::End, "queue")];
-    if n == 1 {
-        items.push(MenuItem::action("Start radio", |_, _| {}).icon("equalizer"));
-    }
-    {
-        let ids = ids.clone();
-        items.push(add_to_playlist(format!("Add to playlist{suffix}"), playlists, move |_| ids.clone()));
-    }
-    items.push(
-        MenuItem::action(format!("{}{suffix}", if all_starred { "Unlike" } else { "Like" }), {
-            let ids = ids.clone();
-            move |_, cx| {
-                for id in ids.clone() {
-                    toggle_star(cx, id, StarTargetType::Track, all_starred);
-                }
-            }
-        })
-        .icon(if all_starred { "heart-filled" } else { "heart" }),
-    );
-    items.push(MenuItem::submenu(format!("Rate{suffix}"), rating_submenu(ids.clone(), StarTargetType::Track)).icon("star"));
-    if n == 1 {
-        let t = &tracks[0];
-        if let Some(al) = t.album_id.clone() {
-            items.push(MenuItem::action("Go to album", move |_, cx| navigate(cx, Route::Album(al.clone()))).icon("album"));
-        }
-        if let Some(ar) = t.artist_id.clone() {
-            items.push(MenuItem::action("Go to artist", move |_, cx| navigate(cx, Route::Artist(ar.clone()))).icon("artist"));
-        }
-        items.push(MenuItem::separator());
-        items.push(MenuItem::action("Track info", |_, _| {}).icon("eye")); // TODO(dialogs-port): TrackInfoDialog
-        let text = format!("{} – {}", t.artist, t.title);
-        items.push(MenuItem::action("Copy \"Artist – Title\"", move |_, cx| cx.write_to_clipboard(ClipboardItem::new_string(text.clone()))));
-    }
-    items
+/// `trackMenuItems` for a selection (the shared builder; "Play now" is the caller's context).
+pub fn track_menu(tracks: &[Track], at: Point<Pixels>, on_play_now: impl Fn(&mut App) + 'static) -> Vec<MenuItem> {
+    crate::menus::track_menu_items(crate::menus::TrackMenu::new(tracks.to_vec(), at, on_play_now))
 }

@@ -1,7 +1,7 @@
 //! Wire types of the list routes (history, liked, smart playlists, settings extras).
 //! Mirrors `src/lib/ipc/types.ts` (see each type's TS name). Kept in its own file so the
 //! branch that ports Playlists/Liked/History/Search/Settings merges additively.
-use crate::types::Track;
+use crate::types::{FlowArc, Track};
 use serde::{Deserialize, Serialize};
 
 /// `LikedSummary`
@@ -138,6 +138,9 @@ pub struct PlaySourceRequest {
     pub start_track_id: Option<String>,
     #[serde(default)]
     pub seed: u32,
+    /// Flow: play as a Flow source with this arc (overrides shuffle; `modeOf` in mock.ts).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub flow: Option<FlowArc>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
