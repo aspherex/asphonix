@@ -1,7 +1,6 @@
 //! `PlaylistDetail.svelte`, `Liked.svelte` and `SmartPlaylistDetail.svelte`: three pages with the same
 //! skeleton (120 px art + title block + actions, then the track table), one entity.
 use super::menus::{self, TrackMenu};
-use super::modal;
 use super::table::{Arrows, Fetch, RowItem, Table, TableCfg, TableEvent};
 use super::ui::{icon_btn40, play_btn, sec_btn, status_line};
 use super::{ListsEvent, hot_shadow};
@@ -486,8 +485,8 @@ impl TrackPage {
         let (id, name) = (d.playlist.id.clone(), d.playlist.name.clone());
         let this = cx.entity().downgrade();
         let shown = name.clone();
-        modal::prompt(cx, "Rename playlist", &shown, "", "Rename", move |new, _, cx| {
-            let Some(new) = new.filter(|n| *n != name) else { return };
+        crate::overlays::prompt(cx, "Rename playlist", "", "Rename", &shown, move |new, cx| {
+            let Some(new) = Some(new).filter(|n| *n != name) else { return };
             let (id2, n2) = (id.clone(), new.clone());
             app::call(cx, move |b| {
                 let _ = b.playlists_rename(RenamePlaylistRequest { id: id2, name: n2 });
@@ -511,10 +510,7 @@ impl TrackPage {
         }
         let (id, name) = (d.playlist.id.clone(), d.playlist.name.clone());
         let this = cx.entity().downgrade();
-        modal::confirm(cx, "Delete playlist", &format!("Delete \"{name}\"? This cannot be undone."), "Delete", true, move |ok, _, cx| {
-            if ok.is_none() {
-                return;
-            }
+        crate::overlays::confirm(cx, "Delete playlist", &format!("Delete \"{name}\"? This cannot be undone."), "Delete", true, move |cx| {
             let id2 = id.clone();
             app::call(cx, move |b| {
                 let _ = b.playlists_delete(DeletePlaylistRequest { id: id2 });

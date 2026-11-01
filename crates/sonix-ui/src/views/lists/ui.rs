@@ -144,7 +144,6 @@ pub fn panel(th: &Theme, title: &str, body: impl IntoElement) -> Div {
         .child(div().min_h_0().child(body))
 }
 
-pub type Callback = Box<dyn FnOnce(Option<String>, &mut Window, &mut App)>;
 
 /// A page that scrolls inside the stage (`.stage { overflow-y: auto }` with the shared 10 px scrollbar):
 /// `build(overflow)` gets whether the scrollbar currently takes its gutter (known from the previous layout).

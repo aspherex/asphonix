@@ -651,9 +651,7 @@ impl Render for Shell {
                 if this.overlays.update(cx, |o, cx| o.escape(cx)) {
                     return;
                 }
-                if this.lists_modal_open(cx) {
-                    this.lists_modal_cancel(window, cx);
-                } else if this.lists_editor_open(cx) {
+                if this.lists_editor_open(cx) {
                     this.lists_editor_close(window, cx);
                 } else if this.menu.read(cx).is_open() {
                     this.menu.update(cx, |m, cx| m.close(window, cx));
@@ -694,7 +692,6 @@ impl Render for Shell {
             )
             .child(self.menu.clone())
             .children(self.lists_editor_overlay())
-            .children(self.lists_modal_overlay())
             .child(self.overlays.clone())
             .children(self.boot.clone())
             .child(crate::widgets::smooth::host());

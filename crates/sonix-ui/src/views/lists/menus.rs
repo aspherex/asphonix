@@ -2,7 +2,6 @@
 //! playlists, Liked Songs and smart playlists. Items talk to the page through [`ListsEvent`]s and fire-and-forget
 //! backend calls, like the Tracks route's menu.
 use super::ListsEvent;
-use super::modal;
 use crate::app;
 use crate::router::Route;
 use crate::widgets::context_menu::MenuItem;
@@ -157,8 +156,7 @@ pub fn playlist_menu_items<V: EventEmitter<ListsEvent> + 'static>(this: WeakEnti
     let (id_r, name_r, this_r) = (p.id.clone(), p.name.clone(), this.clone());
     let rename = MenuItem::action("Rename", move |_, cx| {
         let (id, this) = (id_r.clone(), this_r.clone());
-        modal::prompt(cx, "Rename playlist", &name_r, "", "Rename", move |name, _, cx| {
-            let Some(name) = name else { return };
+        crate::overlays::prompt(cx, "Rename playlist", "", "Rename", &name_r, move |name, cx| {
             let id2 = id.clone();
             app::call(cx, move |b| {
                 let _ = b.playlists_rename(RenamePlaylistRequest { id: id2, name });
@@ -184,10 +182,7 @@ pub fn playlist_menu_items<V: EventEmitter<ListsEvent> + 'static>(this: WeakEnti
     let (id_x, name_x, this_x) = (p.id.clone(), p.name.clone(), this);
     let delete = MenuItem::action("Delete", move |_, cx| {
         let (id, this) = (id_x.clone(), this_x.clone());
-        modal::confirm(cx, "Delete playlist", &format!("Delete \"{name_x}\"? This cannot be undone."), "Delete", true, move |ok, _, cx| {
-            if ok.is_none() {
-                return;
-            }
+        crate::overlays::confirm(cx, "Delete playlist", &format!("Delete \"{name_x}\"? This cannot be undone."), "Delete", true, move |cx| {
             let id2 = id.clone();
             app::call(cx, move |b| {
                 let _ = b.playlists_delete(DeletePlaylistRequest { id: id2 });
@@ -257,8 +252,7 @@ pub fn smart_menu_items<V: EventEmitter<ListsEvent> + 'static>(this: WeakEntity<
     let (sp_r, this_r) = (sp.clone(), this.clone());
     let rename = MenuItem::action("Rename", move |_, cx| {
         let (sp, this) = (sp_r.clone(), this_r.clone());
-        modal::prompt(cx, "Rename smart playlist", &sp_r.input.name, "", "Rename", move |name, _, cx| {
-            let Some(name) = name else { return };
+        crate::overlays::prompt(cx, "Rename smart playlist", "", "Rename", &sp_r.input.name, move |name, cx| {
             let (id, mut input) = (sp.id.clone(), sp.input.clone());
             input.name = name;
             app::call(cx, move |b| {
@@ -293,10 +287,7 @@ pub fn smart_menu_items<V: EventEmitter<ListsEvent> + 'static>(this: WeakEntity<
     let (sp_x, this_x) = (sp.clone(), this);
     let delete = MenuItem::action("Delete", move |_, cx| {
         let (sp, this) = (sp_x.clone(), this_x.clone());
-        modal::confirm(cx, "Delete smart playlist", &format!("Delete \"{}\"? Only the rules are removed, never any tracks.", sp.input.name), "Delete", true, move |ok, _, cx| {
-            if ok.is_none() {
-                return;
-            }
+        crate::overlays::confirm(cx, "Delete smart playlist", &format!("Delete \"{}\"? Only the rules are removed, never any tracks.", sp.input.name), "Delete", true, move |cx| {
             let id = sp.id.clone();
             app::call(cx, move |b| {
                 let _ = b.smart_delete(&id);

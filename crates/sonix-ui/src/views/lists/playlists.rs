@@ -1,6 +1,5 @@
 //! `Playlists.svelte`: smart (local) and server playlists as a card grid.
 use super::menus;
-use super::modal;
 use super::smart_rules::describe_smart;
 use super::ui::scroll_page;
 use super::ListsEvent;
@@ -70,8 +69,7 @@ impl PlaylistsView {
 
     fn create(&mut self, cx: &mut Context<Self>) {
         let this = cx.entity().downgrade();
-        modal::prompt(cx, "New playlist", "", "Playlist name", "Create", move |name, _, cx| {
-            let Some(name) = name else { return };
+        crate::overlays::prompt(cx, "New playlist", "Playlist name", "Create", "", move |name, cx| {
             let b = app::backend(cx);
             cx.spawn(async move |cx| {
                 let r = cx.background_executor().spawn(async move { b.playlists_create(CreatePlaylistRequest { name, track_ids: vec![] }) }).await;
@@ -212,8 +210,8 @@ impl PlaylistsView {
                     let (id, name, me) = (p2.id.clone(), p2.name.clone(), cx.entity().downgrade());
                     let _ = this;
                     let name0 = name.clone();
-                    modal::prompt(cx, "Rename playlist", &name0, "", "Rename", move |n, _, cx| {
-                        let Some(n) = n.filter(|n| *n != name) else { return };
+                    crate::overlays::prompt(cx, "Rename playlist", "", "Rename", &name0, move |n, cx| {
+                        let Some(n) = Some(n).filter(|n| *n != name) else { return };
                         let id2 = id.clone();
                         app::call(cx, move |b| {
                             let _ = b.playlists_rename(RenamePlaylistRequest { id: id2, name: n });
@@ -227,10 +225,7 @@ impl PlaylistsView {
                 actions = actions.child(btn("trash", "pl-delete").on_click(cx.listener(move |_, _, _, cx| {
                     cx.stop_propagation();
                     let (id, name, me) = (p3.id.clone(), p3.name.clone(), cx.entity().downgrade());
-                    modal::confirm(cx, "Delete playlist", &format!("Delete \"{name}\"? This cannot be undone."), "Delete", true, move |ok, _, cx| {
-                        if ok.is_none() {
-                            return;
-                        }
+                    crate::overlays::confirm(cx, "Delete playlist", &format!("Delete \"{name}\"? This cannot be undone."), "Delete", true, move |cx| {
                         let id2 = id.clone();
                         app::call(cx, move |b| {
                             let _ = b.playlists_delete(DeletePlaylistRequest { id: id2 });

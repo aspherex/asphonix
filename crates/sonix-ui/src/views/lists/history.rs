@@ -1,7 +1,6 @@
 //! `History.svelte`: locally recorded plays, grouped by local day (the backend interleaves day-header
 //! rows into one flat paged list), single selection, no column header.
 use super::menus::{self, TrackMenu};
-use super::modal;
 use super::table::{Arrows, Fetch, RowItem, Table, TableCfg, TableEvent};
 use super::ListsEvent;
 use crate::app::{self, PlayerModel};
@@ -150,10 +149,7 @@ impl HistoryView {
 
     fn clear(&mut self, cx: &mut Context<Self>) {
         let this = cx.entity().downgrade();
-        modal::confirm(cx, "Clear history", "Remove all recorded plays from this device? This cannot be undone.", "Clear", true, move |ok, _, cx| {
-            if ok.is_none() {
-                return;
-            }
+        crate::overlays::confirm(cx, "Clear history", "Remove all recorded plays from this device? This cannot be undone.", "Clear", true, move |cx| {
             let b = app::backend(cx);
             cx.spawn(async move |cx| {
                 cx.background_executor().spawn(async move { let _ = b.history_clear(); }).await;

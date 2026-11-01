@@ -14,11 +14,10 @@ use gpui::{
     prelude::*, px, rgba,
 };
 use sonix_api::{Playlist, Track, UpdateInfo, UpdateProgress, format as fmt};
-use std::rc::Rc;
 use std::time::Duration;
 
 /// Callback of a prompt dialog: receives the trimmed text.
-pub type PromptDone = Rc<dyn Fn(String, &mut App)>;
+pub type PromptDone = Box<dyn FnOnce(String, &mut App)>;
 
 pub struct OverlayHandle(pub Entity<Overlays>);
 impl Global for OverlayHandle {}
@@ -30,7 +29,7 @@ fn hot_shadow(th: &Theme, off: f32) -> Vec<BoxShadow> {
 }
 
 enum Modal {
-    Confirm { title: SharedString, message: SharedString, confirm_label: SharedString, danger: bool, on_ok: Rc<dyn Fn(&mut App)> },
+    Confirm { title: SharedString, message: SharedString, confirm_label: SharedString, danger: bool, on_ok: Box<dyn FnOnce(&mut App)> },
     Prompt { title: SharedString, confirm_label: SharedString, input: Entity<TextInput>, on_ok: PromptDone, _sub: Subscription },
     TrackInfo(Box<Track>),
     Update,
@@ -142,7 +141,7 @@ impl Overlays {
             "Playlist name".into(),
             "Create".into(),
             String::new(),
-            Rc::new(move |name, cx| {
+            Box::new(move |name, cx| {
                 let ids = ids.clone();
                 app::call(cx, move |b| {
                     if let Ok(pl) = b.playlists_create(sonix_api::CreatePlaylistRequest { name, track_ids: Vec::new() }) {
@@ -196,19 +195,18 @@ fn with<R>(cx: &mut App, f: impl FnOnce(&mut Overlays, &mut Context<Overlays>) -
 }
 
 /// `confirmAction`
-pub fn confirm(cx: &mut App, title: &str, message: &str, confirm_label: &str, danger: bool, on_ok: impl Fn(&mut App) + 'static) {
+pub fn confirm(cx: &mut App, title: &str, message: &str, confirm_label: &str, danger: bool, on_ok: impl FnOnce(&mut App) + 'static) {
     let (title, message, confirm_label): (SharedString, SharedString, SharedString) = (title.to_string().into(), message.to_string().into(), confirm_label.to_string().into());
     with(cx, move |o, cx| {
-        o.modal = Some(Modal::Confirm { title, message, confirm_label, danger, on_ok: Rc::new(on_ok) });
+        o.modal = Some(Modal::Confirm { title, message, confirm_label, danger, on_ok: Box::new(on_ok) });
         o.want_focus = true;
         cx.notify();
     });
 }
-/// `promptText`. API for routes (playlist create/rename) ported by other agents; the add-to-playlist popover uses the same dialog.
-#[allow(dead_code)]
-pub fn prompt(cx: &mut App, title: &str, placeholder: &str, confirm_label: &str, value: &str, on_ok: impl Fn(String, &mut App) + 'static) {
+/// `promptText` (playlist create/rename, the add-to-playlist popover's "New playlist…"): `on_ok` gets the trimmed, non-empty value.
+pub fn prompt(cx: &mut App, title: &str, placeholder: &str, confirm_label: &str, value: &str, on_ok: impl FnOnce(String, &mut App) + 'static) {
     let (t, p, c, v) = (title.to_string(), placeholder.to_string(), confirm_label.to_string(), value.to_string());
-    with(cx, move |o, cx| o.open_prompt(t.into(), p.into(), c.into(), v, Rc::new(on_ok), cx));
+    with(cx, move |o, cx| o.open_prompt(t.into(), p.into(), c.into(), v, Box::new(on_ok), cx));
 }
 /// `showToast` (2.6 s)
 pub fn show_toast(cx: &mut App, msg: &str) {

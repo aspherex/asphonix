@@ -6,7 +6,6 @@ pub mod favorites;
 pub mod history;
 pub mod login;
 pub mod menus;
-pub mod modal;
 pub mod playlists;
 pub mod search;
 pub mod settings;
@@ -53,7 +52,6 @@ pub struct ListsHost {
     pub smart_side: Vec<SmartSummary>,
     bridge: Option<Entity<Bridge>>,
     editor: Option<Entity<smart_editor::SmartEditor>>,
-    pub modal: Option<Entity<modal::Modal>>,
     track_page: Option<Entity<track_page::TrackPage>>,
     history: Option<Entity<history::HistoryView>>,
     playlists: Option<Entity<playlists::PlaylistsView>>,
@@ -80,12 +78,8 @@ fn kind_of(r: &Route) -> Option<PageKind> {
 }
 
 impl Shell {
-    /// Shell startup: the (stand-in) dialog host lives for the whole run.
+    /// Shell startup: the smart editor host and the event bridge live for the whole run (dialogs are `crate::overlays`).
     pub(crate) fn lists_init(&mut self, cx: &mut Context<Self>) {
-        let th = self.th;
-        let m = cx.new(|cx| modal::Modal::new(&th, cx));
-        cx.set_global(modal::ModalHandle(m.clone()));
-        self.lists.modal = Some(m);
         let br = cx.new(|_| Bridge);
         self.lists.subs.push(cx.subscribe(&br, |sh: &mut Shell, _, ev: &ListsEvent, cx| sh.lists_event(ev, cx)));
         self.lists.bridge = Some(br);
@@ -93,10 +87,6 @@ impl Shell {
         let ed = cx.new(|cx| smart_editor::SmartEditor::new(b, &menu, cx));
         self.lists.subs.push(cx.subscribe(&ed, |sh: &mut Shell, _, ev: &ListsEvent, cx| sh.lists_event(ev, cx)));
         self.lists.editor = Some(ed);
-    }
-
-    pub(crate) fn lists_modal_overlay(&self) -> Option<AnyElement> {
-        self.lists.modal.as_ref().map(|m| m.clone().into_any_element())
     }
 
     pub(crate) fn lists_editor_overlay(&self) -> Option<AnyElement> {
@@ -110,16 +100,6 @@ impl Shell {
     pub(crate) fn lists_editor_close(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         if let Some(m) = self.lists.editor.clone() {
             m.update(cx, |m, cx| m.close(window, cx));
-        }
-    }
-
-    pub(crate) fn lists_modal_open(&self, cx: &gpui::App) -> bool {
-        self.lists.modal.as_ref().map(|m| m.read(cx).is_open()).unwrap_or(false)
-    }
-
-    pub(crate) fn lists_modal_cancel(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        if let Some(m) = self.lists.modal.clone() {
-            m.update(cx, |m, cx| m.cancel(window, cx));
         }
     }
 
@@ -259,8 +239,7 @@ impl Shell {
     pub(crate) fn lists_new_playlist(&mut self, cx: &mut Context<Self>) {
         let Some(br) = self.lists.bridge.clone() else { return };
         let br = br.downgrade();
-        modal::prompt(cx, "New playlist", "", "Playlist name", "Create", move |name, _, cx| {
-            let Some(name) = name else { return };
+        crate::overlays::prompt(cx, "New playlist", "Playlist name", "Create", "", move |name, cx| {
             let b = app::backend(cx);
             cx.spawn(async move |cx| {
                 let r = cx.background_executor().spawn(async move { b.playlists_create(sonix_api::CreatePlaylistRequest { name, track_ids: vec![] }) }).await;
