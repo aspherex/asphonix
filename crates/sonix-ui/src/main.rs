@@ -8,6 +8,7 @@ mod clock;
 mod columns;
 mod icons_gen;
 mod metrics;
+mod overlays;
 mod pager;
 mod playerkeys;
 #[cfg(feature = "parity")]

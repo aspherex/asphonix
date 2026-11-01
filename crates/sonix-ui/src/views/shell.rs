@@ -45,6 +45,7 @@ pub struct Shell {
     pub(crate) dock: Entity<DockView>,
     pub(crate) queue: Entity<QueueRail>,
     pub(crate) menu: Entity<ContextMenu>,
+    pub(crate) overlays: Entity<crate::overlays::Overlays>,
     pub(crate) search: Entity<TextInput>,
     pub(crate) focus: FocusHandle,
     pub(crate) playlists: Vec<Playlist>,
@@ -71,6 +72,8 @@ impl Shell {
         let th = app::theme(cx);
         let player = cx.new(|_| PlayerModel::default());
         let menu = cx.new(|cx| ContextMenu::new(th, cx));
+        let overlays = cx.new(crate::overlays::Overlays::new);
+        cx.set_global(crate::overlays::OverlayHandle(overlays.clone()));
         let tracks = cx.new(|cx| TracksView::new(backend.clone(), art_cache.clone(), &player, &menu, window, cx));
         let np = cx.new(|cx| NowPlayingView::new(backend.clone(), art_cache.clone(), &player, cx));
         let dock = cx.new(|cx| DockView::new(backend.clone(), art_cache.clone(), &player, cx));
@@ -118,6 +121,7 @@ impl Shell {
             dock,
             queue,
             menu,
+            overlays,
             search,
             focus,
             playlists: Vec::new(),
@@ -556,6 +560,9 @@ impl Render for Shell {
                 window.focus(&f);
             }))
             .on_action(cx.listener(|this, _: &Escape, window, cx| {
+                if this.overlays.update(cx, |o, cx| o.escape(cx)) {
+                    return;
+                }
                 if this.menu.read(cx).is_open() {
                     this.menu.update(cx, |m, cx| m.close(window, cx));
                 } else if *this.router.current() == Route::NowPlaying {
@@ -591,7 +598,8 @@ impl Render for Shell {
                     .child(crate::probe::pid("shell.body", body))
                     .when(!on_np, |d| d.child(self.dock.clone())),
             )
-            .child(self.menu.clone());
+            .child(self.menu.clone())
+            .child(self.overlays.clone());
         #[cfg(feature = "parity")]
         let root = root.child(crate::probe::frame_marker());
         root
@@ -624,13 +632,23 @@ impl Shell {
         match ev {
             NpEvent::Close => self.go_back(cx),
             NpEvent::Navigate(r) => self.navigate(r.clone(), cx),
-            NpEvent::Rate { id, rating, .. } => {
+            NpEvent::Rate { id, rating, title } => {
                 let (id, rating) = (id.clone(), *rating);
-                app::call(cx, move |b| {
-                    let _ = b.rating_set(sonix_api::SetRatingRequest { id, kind: sonix_api::StarTargetType::Track, rating });
-                });
+                let set = move |cx: &mut gpui::App| {
+                    let id = id.clone();
+                    app::call(cx, move |b| {
+                        let _ = b.rating_set(sonix_api::SetRatingRequest { id, kind: sonix_api::StarTargetType::Track, rating });
+                    });
+                };
+                if rating == 1 {
+                    // 1 star files are purged nightly: never a one-click misfire
+                    crate::overlays::confirm(cx, "Rate 1 star?", &format!("\"{title}\" will be purged from the library by the nightly cleanup."), "Rate 1★", true, set);
+                } else {
+                    set(cx);
+                }
             }
-            NpEvent::AddToPlaylist { .. } | NpEvent::TrackInfo(_) => {}
+            NpEvent::AddToPlaylist { id, at } => crate::overlays::add_to_playlist(cx, vec![id.clone()], *at),
+            NpEvent::TrackInfo(t) => crate::overlays::track_info(cx, (**t).clone()),
         }
     }
 }

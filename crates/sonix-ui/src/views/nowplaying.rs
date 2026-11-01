@@ -25,6 +25,7 @@ use crate::probe::pid;
 
 
 pub struct NowPlayingView {
+    add_btn: Rc<Cell<Bounds<gpui::Pixels>>>,
     backend: Arc<dyn Backend>,
     art: ArtHandle,
     player: Entity<PlayerModel>,
@@ -69,6 +70,7 @@ impl NowPlayingView {
             seek_preview: None,
             cover_area_h: Rc::new(Cell::new(0.0)),
             device: String::new(),
+            add_btn: Rc::new(Cell::new(Bounds::default())),
             wave_filled: 0,
             wave_hover: None,
             upnext_open: false,
@@ -746,6 +748,8 @@ impl Render for NowPlayingView {
         );
         let key_lbl = |k: &str| PLAYER_KEYS.iter().find(|p| p.keys[0] == k).map(|p| p.legend).unwrap_or("");
         let tid = t.id.clone();
+        let add_cell = self.add_btn.clone();
+        let add_cell2 = self.add_btn.clone();
         let t_for_info = t.clone();
         let rating = t.rating.unwrap_or(0);
         let lyr_on = self.lyrics_open;
@@ -764,7 +768,9 @@ impl Render for NowPlayingView {
                     chip("np-add", th, 30.0, 12.0, th.low, false)
                         .child(chip_icon(th, "add", 14., false))
                         .child(txt(&th, MONO_DATA, "ADD TO PLAYLIST"))
-                        .on_click(cx.listener(move |_, ev: &gpui::ClickEvent, _, cx| cx.emit(NpEvent::AddToPlaylist { id: tid.clone(), at: ev.position() }))),
+                        .child(canvas(move |b, _, _| add_cell.set(b), |_, _, _, _| ()).absolute().size_full())
+                        .relative()
+                        .on_click(cx.listener(move |_, _: &gpui::ClickEvent, _, cx| cx.emit(NpEvent::AddToPlaylist { id: tid.clone(), at: add_cell2.get().bottom_right() }))),
                 ))
                 .child(pid(
                     "np.abtn.lyrics",
@@ -789,7 +795,7 @@ impl Render for NowPlayingView {
                         let hover = if n == 1 { th.clip } else { th.text };
                         let id = t.id.clone();
                         let title: SharedString = t.title.clone().into();
-                        div()
+                        pid(format!("np.star.{n}"), div()
                             .id(("np-rate", n as usize))
                             .group("hv")
                             .w(px(22.))
@@ -802,7 +808,7 @@ impl Render for NowPlayingView {
                             .on_click(cx.listener(move |_, _, _, cx| {
                                 let next = if rating == n { 0 } else { n };
                                 cx.emit(NpEvent::Rate { id: id.clone(), title: title.clone(), rating: next });
-                            }))
+                            })))
                     })),
                 )),
         );
