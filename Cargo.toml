@@ -26,3 +26,10 @@ lto = false
 codegen-units = 16
 strip = false
 panic = "abort"
+
+# release code with symbols, for crash analysis (`--profile relsym`)
+[profile.relsym]
+inherits = "release"
+debug = true
+strip = false
+

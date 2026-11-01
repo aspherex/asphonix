@@ -54,6 +54,38 @@ pub fn log(msg: &str) {
     }
 }
 
+/// `%LOCALAPPDATA%\dev.sonix.native\logs\crash.log` (the main window's app id).
+fn crash_log_path() -> Option<std::path::PathBuf> {
+    let base = std::env::var_os("LOCALAPPDATA")
+        .map(std::path::PathBuf::from)
+        .or_else(|| std::env::var_os("HOME").map(|h| std::path::PathBuf::from(h).join(".local/share")))?;
+    Some(base.join("dev.sonix.native").join("logs").join("crash.log"))
+}
+
+/// Panics abort the process (`panic = "abort"`, GUI subsystem: no console, stderr goes nowhere), so this hook is
+/// the only place a panic leaves evidence: message, location, thread and a forced backtrace are appended to the
+/// crash log (and to $SONIX_LOG). Nothing in it may panic (a panic inside the hook aborts without a trace).
+fn install_crash_log() {
+    std::panic::set_hook(Box::new(|info| {
+        let thread = std::thread::current();
+        let name = thread.name().unwrap_or("<unnamed>").to_string();
+        let bt = std::backtrace::Backtrace::force_capture();
+        let epoch = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0);
+        let text = format!("=== panic @{epoch} (unix s) v{} thread '{name}'\n{info}\n{bt}\n", env!("CARGO_PKG_VERSION"));
+        log(&format!("PANIC thread '{name}': {info}"));
+        if let Some(p) = crash_log_path() {
+            if let Some(d) = p.parent() {
+                let _ = std::fs::create_dir_all(d);
+            }
+            if let Ok(mut f) = std::fs::OpenOptions::new().create(true).append(true).open(&p) {
+                let _ = f.write_all(text.as_bytes());
+                let _ = f.flush();
+            }
+        }
+        let _ = std::io::stderr().write_all(text.as_bytes());
+    }));
+}
+
 struct Assets;
 impl AssetSource for Assets {
     fn load(&self, path: &str) -> Result<Option<Cow<'static, [u8]>>> {
@@ -70,7 +102,7 @@ macro_rules! fonts {
 
 fn main() {
     T0.set(Instant::now()).ok();
-    std::panic::set_hook(Box::new(|i| log(&format!("PANIC {i}"))));
+    install_crash_log();
     log("main_start");
     #[cfg(not(feature = "parity"))]
     let prefs = settings::load();
