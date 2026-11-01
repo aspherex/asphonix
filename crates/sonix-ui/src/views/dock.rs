@@ -225,7 +225,7 @@ impl Render for DockView {
         } else {
             let full = vw >= 1680.0;
             let text = if full { format!("{readout}{}", if bit_perfect { " · BIT-PERFECT" } else { "" }) } else { short };
-            ellipsis_line(ts(&th, MONO_CODE)).text_color(if bit_perfect { th.accent_fg } else { th.muted }).when(!full, |d| d.flex_none()).child(SharedString::from(text)).into_any_element()
+            ellipsis_line(ts(&th, MONO_CODE)).text_color(if bit_perfect { th.accent_fg } else { th.muted }).child(SharedString::from(text)).into_any_element()
         };
         let aux = div()
             .flex_1()
