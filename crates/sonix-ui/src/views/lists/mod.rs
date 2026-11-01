@@ -279,7 +279,7 @@ impl Shell {
         });
     }
 
-    /// The bolt in the sidebar / Playlists header: the smart-playlist editor (TODO until `smart_editor` lands).
+    /// The bolt in the sidebar / Playlists header: opens the smart-playlist editor for a new list.
     pub(crate) fn lists_new_smart(&mut self, cx: &mut Context<Self>) {
         self.lists_event(&ListsEvent::EditSmart(None), cx);
     }

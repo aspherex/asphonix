@@ -690,7 +690,7 @@ impl Render for TracksView {
                     ))
                     .child(pid("page.btn.0", button("play-all", th, Variant::Secondary, "Play All", Some("play"), total == 0, window).on_click(cx.listener(|this, _, _, cx| this.play_all(false, cx)))))
                     .child(pid("page.btn.1", button("shuffle-all", th, Variant::Primary, "Shuffle All", Some("shuffle"), total == 0, window).on_click(cx.listener(|this, _, _, cx| this.play_all(true, cx)))))
-                    // Flow (rule-based radio) is not ported yet: the control is present for layout parity, inert.
+                    // Flow: the web Flow menu (coverage hint, Steady/Build/Peak) anchored under the button
                     .child(pid("page.btn.2", {
                         let cell = self.flow_btn.clone();
                         button("flow", th, Variant::Secondary, "Flow", Some("sliders"), total == 0, window)
