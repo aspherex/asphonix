@@ -26,7 +26,7 @@ thread_local! {
 
 /// The persistent focus handle of a card (`tabindex=0`): one per card id, bounded so scrolling a 5k-card grid
 /// does not accumulate handles.
-fn focus_handle<V: 'static>(cx: &mut Context<V>, key: usize) -> gpui::FocusHandle {
+pub(super) fn focus_handle<V: 'static>(cx: &mut Context<V>, key: usize) -> gpui::FocusHandle {
     FOCUS.with(|m| {
         let mut m = m.borrow_mut();
         if m.len() > 256 && !m.contains_key(&key) {
@@ -41,11 +41,18 @@ pub enum CardItem<'a> {
     Artist(&'a Artist),
 }
 
-fn key_of(prefix: &str, id: &str) -> usize {
+pub(super) fn key_of(prefix: &str, id: &str) -> usize {
     use std::hash::{Hash, Hasher};
     let mut h = std::collections::hash_map::DefaultHasher::new();
     (prefix, id).hash(&mut h);
     h.finish() as usize
+}
+
+/// Chromium's UA focus ring for keyboard focus (`:focus-visible { outline: auto 1px -webkit-focus-ring-color }`, the
+/// web app never restyles it): a 2 px rgb(16, 16, 16) ring just outside the element's border box. Add as a child of a
+/// relative element. An ancestor that clips (`VirtualGrid .cell { overflow: hidden }`) hides it, as on the web.
+pub fn focus_ring() -> gpui::Div {
+    div().absolute().top(px(-2.)).left(px(-2.)).right(px(-2.)).bottom(px(-2.)).border_2().border_color(gpui::rgb(0x101010))
 }
 
 /// Records the border box of the element it is placed in (for menus anchored under a button).
@@ -226,7 +233,7 @@ pub fn card<V: 'static>(
             open_menu_at(&ctx_menu, items_ctx(ev.position), ev.position, window, cx);
         })
         .child(track_bounds(&card_anchor))
-        .when(focused, |d| d.child(div().absolute().top_0().left_0().size_full().border_2().border_color(th.accent_fg)))
+        .when(focused, |d| d.child(focus_ring()))
         .child(match &ids {
             Some(p) => pid(format!("{p}.art"), art).into_any_element(),
             None => art.into_any_element(),
@@ -281,8 +288,12 @@ pub struct TileOverlays {
 pub fn tile<V: 'static>(ctx: &Ctx, th: &Theme, t: Tile<'_>, width: f32, window: &mut Window, cx: &mut Context<V>) -> Stateful<Div> {
     let th = *th;
     let key = key_of("tile", t.id);
+    // `role="button" tabindex="0"` (`<button>` for the recent-track tiles): keyboard focusable, `:focus-within` shows
+    // the overlays, the UA ring marks it; callers bind `CardOpen` (Enter/Space) and, for playlists, `CardMenu`.
+    let fh = focus_handle(cx, key);
+    let focused = fh.contains_focused(window, cx);
     let hovered = anim::hovered(key);
-    let ov = anim::transition(window, ("tile-ov", key), if hovered { 1.0 } else { 0.0 }, m::CARD_TRANSITION);
+    let ov = anim::transition(window, ("tile-ov", key), if hovered || focused { 1.0 } else { 0.0 }, m::CARD_TRANSITION);
     let slot = div().relative().size(px(m::PL_ART)).flex_none().overflow_hidden().flex().items_center().justify_center().bg(th.high).text_color(th.muted);
     let mut slot = match &t.art {
         TileArt::Cover(Some(id), _) => slot.child(crate::art::cover_bucket(&ctx.art, &ctx.backend, Some(id), m::PL_ART, 64, window, cx)),
@@ -324,6 +335,9 @@ pub fn tile<V: 'static>(ctx: &Ctx, th: &Theme, t: Tile<'_>, width: f32, window: 
     });
     let mut root = div()
         .id(("tile", key))
+        .track_focus(&fh)
+        .tab_stop(true)
+        .key_context("Card")
         .relative()
         .flex()
         .flex_row()
@@ -342,7 +356,8 @@ pub fn tile<V: 'static>(ctx: &Ctx, th: &Theme, t: Tile<'_>, width: f32, window: 
             window.refresh();
         })
         .child(slot)
-        .child(meta);
+        .child(meta)
+        .when(focused, |d| d.child(focus_ring()));
     if let Some(o) = &t.overlays {
         let (menu, anchor) = (o.menu.clone(), anchor_cell());
         let anchor2 = anchor.clone();

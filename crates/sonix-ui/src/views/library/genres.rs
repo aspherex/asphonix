@@ -102,8 +102,17 @@ impl Render for GenresView {
             for (i, g) in self.items.iter().enumerate() {
                 let name = g.name.clone();
                 let pct = ((g.track_count as f32 / max_tracks) * 100.0).max(2.0);
+                // a `<button>`: Tab stop, Enter/Space open, `:focus-visible` = focus border + the UA ring
+                let fh = super::cards::focus_handle(cx, super::cards::key_of("genre", &g.name));
+                let focused = fh.contains_focused(window, cx);
+                let open = name.clone();
                 let c = div()
                     .id(("genre-card", i))
+                    .track_focus(&fh)
+                    .tab_stop(true)
+                    .key_context("Card")
+                    .on_action(move |_: &super::cards::CardOpen, _, cx| navigate(cx, Route::Genre(open.clone())))
+                    .relative()
                     .flex()
                     .flex_col()
                     .gap(px(sp::XS))
@@ -113,9 +122,10 @@ impl Render for GenresView {
                     .p(px(sp::MD))
                     .bg(th.low)
                     .border_1()
-                    .border_color(th.border)
+                    .border_color(if focused { th.focus } else { th.border })
                     .cursor(CursorStyle::PointingHand)
                     .hover(move |s| s.border_color(th.focus))
+                    .when(focused, |d| d.child(super::cards::focus_ring()))
                     .child(div().flex().min_w_0().child(txt(&th, HEADLINE_SM, g.name.clone()).color(th.text).ellipsis()))
                     .child(div().flex().min_w_0().child(txt(&th, MONO_DATA, format!("{} ALBUMS · {} TRACKS", fmt_int(g.album_count as u64), fmt_int(g.track_count as u64))).color(th.muted)))
                     .child(div().mt(px(sp::XS)).h(px(m::GENRE_BAR_H)).bg(th.high).child(div().h_full().w(gpui::relative(pct / 100.0)).bg(th.accent)))

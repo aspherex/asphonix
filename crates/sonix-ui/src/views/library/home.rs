@@ -1,6 +1,6 @@
 //! `Home.svelte`: the telemetry panel, the "Resume from server" bar, Jump Back In, Recently Played Tracks, Heavy Rotation,
 //! Playlists // Vectors and the virtualized "Recently Ingested" list. A plain page inside the scrolling stage.
-use super::cards::{CardItem, Tile, TileArt, TileOverlays, anchor_cell, card, open_menu_at, tile};
+use super::cards::{CardItem, CardMenu, CardOpen, Tile, TileArt, TileOverlays, anchor_cell, card, open_menu_at, tile};
 use super::entity_link::{Kind, set_current};
 use super::fmtx;
 use super::grid::list_overflows;
@@ -335,7 +335,11 @@ impl HomeView {
                             .child(div().flex_1().min_w_0().flex().child(txt(&th, BODY_MD, a.name.clone()).color(th.text).ellipsis()))
                             .child(div().max_w(px(240.)).min_w_0().flex().child(txt(&th, MONO_DATA, a.artist.clone()).color(th.muted).ellipsis()))
                             .child(div().w(px(40.)).flex_none().flex().justify_end().child(txt(&th, MONO_CODE, a.year.map(|y| y.to_string()).unwrap_or_else(|| "—".into())).color(th.muted)))
-                            .on_click(move |_, _, cx| navigate(cx, Route::Album(id.clone())));
+                            .on_action({
+                    let id = id.clone();
+                    move |_: &CardOpen, _, cx| navigate(cx, Route::Album(id.clone()))
+                })
+                .on_click(move |_, _, cx| navigate(cx, Route::Album(id.clone())));
                         if ix < 8 { pid(format!("home.list.row.{ix}"), r).into_any_element() } else { r.into_any_element() }
                     })
                     .collect::<Vec<_>>()
@@ -397,6 +401,10 @@ impl Render for HomeView {
                     window,
                     cx,
                 )
+                .on_action({
+                    let id = id.clone();
+                    move |_: &CardOpen, _, cx| navigate(cx, Route::Album(id.clone()))
+                })
                 .on_click(move |_, _, cx| navigate(cx, Route::Album(id.clone())));
                 tiles.push(pid(format!("home.tile.{i}"), t).into_any_element());
             }
@@ -432,6 +440,10 @@ impl Render for HomeView {
                     window,
                     cx,
                 )
+                .on_action({
+                    let ids = ids.clone();
+                    move |_: &CardOpen, _, cx| menus::play_tracks(cx, ids.clone(), i)
+                })
                 .on_click(move |_, _, cx| menus::play_tracks(cx, ids.clone(), i));
                 tiles.push(pid(format!("home.recent.{i}"), t).into_any_element());
             }
@@ -477,6 +489,7 @@ impl Render for HomeView {
                     }),
                 };
                 let (mctx2, pl2) = (ctx.clone(), p.clone());
+                let card_anchor = anchor_cell();
                 let t = tile(
                     &ctx,
                     &th,
@@ -485,6 +498,20 @@ impl Render for HomeView {
                     window,
                     cx,
                 )
+                .on_action({
+                    let id = id_open.clone();
+                    move |_: &CardOpen, _, cx| navigate(cx, Route::Playlist(id.clone()))
+                })
+                .child(crate::flow::bounds_probe(card_anchor.clone()))
+                .on_action({
+                    let (mctx3, pl3, a) = (ctx.clone(), p.clone(), card_anchor.clone());
+                    move |_: &CardMenu, window, cx| {
+                        // `isContextMenuKey` on the card: `openContextMenuFor(card)` (left edge, 4 px below)
+                        let b = a.get();
+                        let pos = gpui::point(b.left(), b.bottom() + px(4.));
+                        open_menu_at(&mctx3, playlist_menu(&pl3, cx), pos, window, cx);
+                    }
+                })
                 .on_click(move |_, _, cx| navigate(cx, Route::Playlist(id_open.clone())))
                 .on_mouse_down(gpui::MouseButton::Right, move |ev, window, cx| {
                     cx.stop_propagation();
