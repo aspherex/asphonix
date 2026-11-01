@@ -50,6 +50,8 @@ pub struct SmartEditor {
     preview_error: String,
     preview_seq: u64,
     seed: u32,
+    /// `.body { overflow-y: auto; max-height: calc(100vh - 96px) }`
+    body_scroll: gpui::ScrollHandle,
     _subs: Vec<Subscription>,
 }
 
@@ -86,6 +88,7 @@ impl SmartEditor {
             preview_error: String::new(),
             preview_seq: 0,
             seed: 500_000,
+            body_scroll: gpui::ScrollHandle::new(),
             _subs: subs,
         }
     }
@@ -112,6 +115,7 @@ impl SmartEditor {
         self.limit.update(cx, |i, cx| i.set_content(&lim, cx));
         let rows = rules.iter().map(|r| self.make_row(&th, r.field, r.op, value_text(&r.value), cx)).collect();
         self.open = Some(Open { editing, rows, mode, sort, prev_focus });
+        self.body_scroll.set_offset(gpui::point(px(0.), px(0.)));
         self.save_error.clear();
         self.saving = false;
         let f = self.name.read(cx).focus_handle.clone();
@@ -612,6 +616,13 @@ impl Render for SmartEditor {
 
         let title: SharedString = if editing { "Edit smart playlist" } else { "New smart playlist" }.into();
         let _ = ctl::FIELD_H;
+        let (bar, overflow) = crate::widgets::scrollbar::passive(th, &self.body_scroll);
+        let body = div()
+            .relative()
+            .min_h_0()
+            .child(body.id("ed-body").track_scroll(&self.body_scroll).overflow_y_scroll().max_h(px(vh - 96.0)).when(overflow, |d| d.pr(px(space::MD + crate::metrics::tracks::SCROLLBAR_W))))
+            .child(bar)
+            .child(crate::widgets::smooth::drive(window, crate::widgets::smooth::Scrollable::div(std::ptr::addr_of!(self.body_scroll) as usize, &self.body_scroll)));
         div()
             .id("editor-overlay")
             .absolute()

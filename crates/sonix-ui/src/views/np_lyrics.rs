@@ -76,6 +76,14 @@ impl NowPlayingView {
     /// The lyrics section for a column `panel_w` wide.
     pub(super) fn lyrics_panel(&mut self, th: Theme, position_sec: f64, panel_w: f32, window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
         let now = crate::clock::now();
+        // a wheel notch the smooth-scroll host consumed counts as the user scrolling (pauses the auto-scroll)
+        let key = std::ptr::addr_of!(self.ly.scroll) as usize;
+        if let Some(t) = crate::widgets::smooth::last_wheel(key)
+            && t > self.ly.last_user
+        {
+            self.ly.last_user = t;
+            self.ly.anim = None;
+        }
         let lyrics = match &self.ly.load {
             Load::Ok(l) => Some(l.clone()),
             _ => None,
@@ -181,7 +189,7 @@ impl NowPlayingView {
         }
         pid(
             "np.lyrics",
-            div().flex().flex_col().min_h_0().min_w_0().h_full().flex_1().border_1().border_color(th.border).bg(th.low).child(head).child(pid("np.lyrics.scroll", div().relative().flex_1().min_h_0().child(scroll).child(sbar))),
+            div().flex().flex_col().min_h_0().min_w_0().h_full().flex_1().border_1().border_color(th.border).bg(th.low).child(head).child(pid("np.lyrics.scroll", div().relative().flex_1().min_h_0().child(scroll).child(sbar).child(crate::widgets::smooth::drive(window, crate::widgets::smooth::Scrollable::div(key, &self.ly.scroll))))),
         )
         .into_any_element()
     }

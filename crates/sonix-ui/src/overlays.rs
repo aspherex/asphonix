@@ -57,6 +57,8 @@ struct AddMenu {
 pub struct Overlays {
     modal: Option<Modal>,
     add_menu: Option<AddMenu>,
+    /// the popover's list (`max-height: 280px; overflow-y: auto`), wheel-animated by `widgets::smooth`
+    add_scroll: gpui::ScrollHandle,
     toast: Option<SharedString>,
     toast_gen: u64,
     focus: FocusHandle,
@@ -66,7 +68,7 @@ pub struct Overlays {
 
 impl Overlays {
     pub fn new(cx: &mut Context<Self>) -> Self {
-        Self { modal: None, add_menu: None, toast: None, toast_gen: 0, focus: cx.focus_handle(), want_focus: false, upd: UpdState::default() }
+        Self { modal: None, add_menu: None, add_scroll: gpui::ScrollHandle::new(), toast: None, toast_gen: 0, focus: cx.focus_handle(), want_focus: false, upd: UpdState::default() }
     }
 
     /// Escape: closes the topmost overlay; true when one was open.
@@ -109,6 +111,7 @@ impl Overlays {
             return;
         }
         self.add_menu = Some(AddMenu { ids, anchor, list: Vec::new() });
+        self.add_scroll.set_offset(gpui::point(px(0.), px(0.)));
         let b = app::backend(cx);
         cx.spawn(async move |this, cx| {
             let l = cx.background_executor().spawn(async move { b.playlists_list() }).await;
@@ -485,30 +488,37 @@ impl Render for Overlays {
             let item = |id: gpui::ElementId| {
                 div().id(id).group("hv").flex().flex_row().items_center().gap(px(8.)).w_full().px(px(12.)).py(px(4.)).text_color(th.text).cursor(CursorStyle::PointingHand).hover(move |s| s.bg(th.high).text_color(th.accent_fg))
             };
-            let menu = crate::probe::pid("menu", div()
+            let list = div()
                 .id("add-menu")
-                .absolute()
-                .top(px(top.min(vh - 40.)))
-                .left(px(left.min(vw - 228.)))
-                .w(px(220.))
-                .max_h(px(280.))
+                .track_scroll(&self.add_scroll)
+                .max_h(px(278.)) // 280 - the 1 px border on both sides
                 .overflow_y_scroll()
                 .flex()
                 .flex_col()
                 .py(px(4.))
-                .bg(th.mid)
-                .border_1()
-                .border_color(th.border)
-                .shadow(hard_shadow(&th, 2.))
-                .occlude()
-                .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
                 .child(crate::probe::pid("menu.child.0", div().px(px(12.)).py(px(4.)).child(txt(&th, LABEL_CAPS, header).color(th.muted))))
                 .child(crate::probe::pid("menu.child.1", item("add-new".into()).child(icon("add", 13., th.text)).child(txt(&th, BODY_SM, "New playlist…")).on_click(cx.listener(|this, _: &ClickEvent, _, cx| this.create_and_add(cx)))))
                 .children((!m.list.is_empty()).then(|| crate::probe::pid("menu.child.2", div().h(px(1.)).bg(th.border).my(px(4.)))))
                 .children(m.list.iter().enumerate().map(|(i, p)| {
                     let id = p.id.clone();
                     crate::probe::pid(format!("menu.child.{}", i + 3), item(("add-pl", i).into()).child(txt(&th, BODY_SM, p.name.clone())).on_click(cx.listener(move |this, _: &ClickEvent, _, cx| this.add_to(id.clone(), cx))))
-                })));
+                }));
+            let menu = crate::probe::pid(
+                "menu",
+                div()
+                    .absolute()
+                    .top(px(top.min(vh - 40.)))
+                    .left(px(left.min(vw - 228.)))
+                    .w(px(220.))
+                    .bg(th.mid)
+                    .border_1()
+                    .border_color(th.border)
+                    .shadow(hard_shadow(&th, 2.))
+                    .occlude()
+                    .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
+                    .child(list)
+                    .child(crate::widgets::smooth::drive(window, crate::widgets::smooth::Scrollable::div(std::ptr::addr_of!(self.add_scroll) as usize, &self.add_scroll))),
+            );
             root = root.child(
                 div().absolute().top_0().left_0().size_full().on_mouse_down(MouseButton::Left, cx.listener(|this, _, _, cx| {
                     this.add_menu = None;

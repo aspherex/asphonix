@@ -657,6 +657,7 @@ impl Render for Table {
                 )
                 .child(div().size_full().when(overflow, |d| d.pr(px(tr::SCROLLBAR_W))).child(list))
                 .children(overflow.then(|| scrollbar::scrollbar("lists-scrollbar", th, &self.list, &self.sb)))
+                .child(crate::widgets::smooth::drive(window, crate::widgets::smooth::Scrollable::list(&self.list)))
                 .into_any_element()
         };
 

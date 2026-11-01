@@ -122,7 +122,7 @@ impl Render for LoginView {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let th = app::theme(cx);
         let handle = self.scroll.clone();
-        scroll_page(th, "login-scroll", &handle, |overflow| {
+        scroll_page(th, "login-scroll", &handle, std::ptr::addr_of!(self.scroll) as usize, window, |overflow, window| {
             let avail = f32::from(window.viewport_size().width) - 2.0 * space::LG - if overflow { 10.0 } else { 0.0 };
             let card_w = avail.min(700.0);
             let url_f = field(&th, &self.url, None, "https://music.example.com:4533", window, cx).into_any_element();

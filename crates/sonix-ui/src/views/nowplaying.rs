@@ -1295,6 +1295,7 @@ impl Render for NowPlayingView {
             .size_full()
             .child(div().id("np-scroll").track_scroll(&self.np_scroll).size_full().overflow_y_scroll().when(overflow, |d| d.pr(px(crate::metrics::tracks::SCROLLBAR_W))).child(page))
             .child(sbar)
+            .child(crate::widgets::smooth::drive(window, crate::widgets::smooth::Scrollable::div(std::ptr::addr_of!(self.np_scroll) as usize, &self.np_scroll)))
             .into_any_element()
     }
 }

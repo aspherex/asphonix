@@ -303,7 +303,7 @@ impl Render for SettingsView {
             self.focused[k] = f;
         }
         let handle = self.scroll.clone();
-        scroll_page(th, "settings-scroll", &handle, |_| {
+        scroll_page(th, "settings-scroll", &handle, std::ptr::addr_of!(self.scroll) as usize, window, |_, window| {
             let this: WeakEntity<Self> = cx.entity().downgrade();
             // ---- Output
             let dev_label = {

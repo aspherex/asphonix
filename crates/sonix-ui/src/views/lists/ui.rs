@@ -148,13 +148,16 @@ pub type Callback = Box<dyn FnOnce(Option<String>, &mut Window, &mut App)>;
 
 /// A page that scrolls inside the stage (`.stage { overflow-y: auto }` with the shared 10 px scrollbar):
 /// `build(overflow)` gets whether the scrollbar currently takes its gutter (known from the previous layout).
-pub fn scroll_page(th: Theme, id: &'static str, h: &gpui::ScrollHandle, build: impl FnOnce(bool) -> AnyElement) -> AnyElement {
+pub fn scroll_page(th: Theme, id: &'static str, h: &gpui::ScrollHandle, key: usize, window: &mut Window, build: impl FnOnce(bool, &mut Window) -> AnyElement) -> AnyElement {
     let (bar, overflow) = crate::widgets::scrollbar::passive(th, h);
+    let content = build(overflow, window);
     div()
         .relative()
         .size_full()
-        .child(div().id(id).track_scroll(h).size_full().overflow_y_scroll().when(overflow, |d| d.pr(px(crate::metrics::tracks::SCROLLBAR_W))).child(build(overflow)))
+        .child(div().id(id).track_scroll(h).size_full().overflow_y_scroll().when(overflow, |d| d.pr(px(crate::metrics::tracks::SCROLLBAR_W))).child(content))
         .child(bar)
+        // wheel notches animate like Chromium (`widgets::smooth`); `key` = the address of the view's handle field
+        .child(crate::widgets::smooth::drive(window, crate::widgets::smooth::Scrollable::div(key, h)))
         .into_any_element()
 }
 

@@ -156,6 +156,14 @@ thread_local! {
     static ANIMS: RefCell<HashMap<usize, Curve>> = RefCell::new(HashMap::new());
     static SETTERS: RefCell<HashMap<usize, Scrollable>> = RefCell::new(HashMap::new());
     static TARGETS: RefCell<Vec<Target>> = const { RefCell::new(Vec::new()) };
+    /// frame-clock time of the last wheel event each container consumed
+    static LAST_WHEEL: RefCell<HashMap<usize, f64>> = RefCell::new(HashMap::new());
+}
+
+/// When the container `key` last took a wheel event. The host consumes wheel events in the capture phase, so a
+/// container's own `on_scroll_wheel` never sees them (the lyrics panel pauses its auto-scroll on this instead).
+pub fn last_wheel(key: usize) -> Option<f64> {
+    LAST_WHEEL.with(|l| l.borrow().get(&key).copied())
 }
 
 /// Drop every running animation (minimize).
@@ -223,6 +231,7 @@ pub fn host() -> AnyElement {
                         continue;
                     }
                     let target = (pending + dy as f64).clamp(0.0, max);
+                    LAST_WHEEL.with(|l| l.borrow_mut().insert(t.key, crate::clock::now()));
                     if precise {
                         ANIMS.with(|a| a.borrow_mut().remove(&t.key));
                         (sc.set)(target as f32);

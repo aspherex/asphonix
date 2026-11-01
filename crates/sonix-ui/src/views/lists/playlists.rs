@@ -308,7 +308,7 @@ impl Render for PlaylistsView {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let th = app::theme(cx);
         let handle = self.scroll.clone();
-        scroll_page(th, "playlists-scroll", &handle, |overflow| {
+        scroll_page(th, "playlists-scroll", &handle, std::ptr::addr_of!(self.scroll) as usize, window, |overflow, window| {
             let w = super::ui::page_content_width(window, overflow);
             let n = (((w + lm::GRID_GAP) / (lm::GRID_MIN + lm::GRID_GAP)).floor() as usize).max(1);
             let cw = (w - lm::GRID_GAP * (n as f32 - 1.0)) / n as f32;

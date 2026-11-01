@@ -314,7 +314,7 @@ impl Render for SearchView {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let th = app::theme(cx);
         let handle = self.scroll.clone();
-        scroll_page(th, "search-scroll", &handle, |_| {
+        scroll_page(th, "search-scroll", &handle, std::ptr::addr_of!(self.scroll) as usize, window, |_, window| {
             let flat = self.flat();
             let (counts, total) = match &self.results {
                 Some(r) => ([r.tracks.total, r.albums.total, r.artists.total, r.playlists.total], true),
