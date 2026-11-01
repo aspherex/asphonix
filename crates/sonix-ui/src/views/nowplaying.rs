@@ -980,7 +980,7 @@ impl Render for NowPlayingView {
                     div().absolute().bottom(gpui::relative(1.0)).mb(px(2.)).left(gpui::relative(hover_x)).ml(px(-20.)).bg(th.high).border_1().border_color(th.border).px(px(4.)).child(txt(&th, MONO_CODE, l).color(th.text))
                 })),
         ));
-        let shown_pos = if self.seek_preview.is_some() { seek_ratio as f64 * dur } else { ps.position_sec };
+        let shown_pos = ps.position_sec; // NowPlaying: POS never follows the drag preview
         let times = pid(
             "np.times",
             div()

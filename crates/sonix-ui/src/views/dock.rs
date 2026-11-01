@@ -60,7 +60,7 @@ impl Render for DockView {
         let backend_for_art = self.backend.clone();
         let cover = art::cover(&self.art, &backend_for_art, track.as_ref().and_then(|t| t.cover_art.as_deref()), dk::ART, window, cx);
 
-        let pos_label = fmt::format_duration(Some(if self.seek_preview.is_some() { seek_ratio as f64 * ps.duration_sec } else { ps.position_sec }));
+        let pos_label = fmt::format_duration(Some(ps.position_sec)); // PlayerDock: the label never follows the drag preview
         let dur_label = fmt::format_duration(Some(ps.duration_sec));
         let t_btn = |id: &'static str, name: &str, size: f32, on: bool| ghost_icon_with(id, th, name, size, dk::T_BTN, on, !has, th.muted);
 
