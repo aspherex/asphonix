@@ -166,6 +166,9 @@ impl SettingsView {
             SettingChange::McpEnabled(v) => self.s.mcp_enabled = *v,
             SettingChange::McpAllowControl(v) => self.s.mcp_allow_control = *v,
         }
+        if matches!(ch, SettingChange::TrackOverlay(_) | SettingChange::TrackOverlayCorner(_)) {
+            cx.emit(ListsEvent::TrackOverlay(self.s.track_overlay, self.s.track_overlay_corner));
+        }
         let mcp = matches!(ch, SettingChange::McpEnabled(_) | SettingChange::McpAllowControl(_));
         let b = self.backend.clone();
         cx.spawn(async move |this, cx| {

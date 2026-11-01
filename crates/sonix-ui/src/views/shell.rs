@@ -884,6 +884,18 @@ impl Shell {
 }
 
 impl Shell {
+    /// Settings > "Show track preview when SONIX is in the background" and its corner (`settings.trackOverlay*`).
+    /// Parity builds never open the second window (the harness captures one window only).
+    pub(crate) fn apply_track_overlay(&mut self, enabled: bool, corner: sonix_api::OverlayCorner) {
+        self.track_overlay = enabled && !cfg!(feature = "parity");
+        self.track_overlay_corner = match corner {
+            sonix_api::OverlayCorner::TopLeft => 0,
+            sonix_api::OverlayCorner::TopRight => 1,
+            sonix_api::OverlayCorner::BottomLeft => 2,
+            sonix_api::OverlayCorner::BottomRight => 3,
+        };
+    }
+
     /// `Sidebar.svelte onPlaylistDrop`: resolve the dragged tracks/album/artist, append them through `playlists_add_tracks`, toast.
     pub fn drop_on_playlist(&mut self, playlist_id: String, name: String, payload: crate::dnd::DragPayload, cx: &mut Context<Self>) {
         let b = self.backend.clone();

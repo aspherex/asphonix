@@ -36,6 +36,8 @@ pub enum ListsEvent {
     EditSmart(Option<Box<SmartSummary>>),
     /// history back, else Home (`Login` "Cancel")
     Back,
+    /// Settings > "Show track preview" / its corner changed (the shell owns the track-change card)
+    TrackOverlay(bool, sonix_api::OverlayCorner),
 }
 
 /// `--shadow-hot*`: accent in dark, ink in light.
@@ -100,6 +102,15 @@ impl Shell {
         let ed = cx.new(|cx| smart_editor::SmartEditor::new(b, &menu, cx));
         self.lists.subs.push(cx.subscribe(&ed, |sh: &mut Shell, _, ev: &ListsEvent, cx| sh.lists_event(ev, cx)));
         self.lists.editor = Some(ed);
+        // the persisted track-change card setting (`settings_get` off the UI thread)
+        let b = self.backend.clone();
+        cx.spawn(async move |this, cx| {
+            let s = cx.background_executor().spawn(async move { b.settings_get() }).await;
+            if let Ok(s) = s {
+                let _ = this.update(cx, |sh, _| sh.apply_track_overlay(s.track_overlay, s.track_overlay_corner));
+            }
+        })
+        .detach();
     }
 
     pub(crate) fn lists_editor_overlay(&self) -> Option<AnyElement> {
@@ -376,6 +387,7 @@ impl Shell {
     pub(crate) fn lists_event(&mut self, ev: &ListsEvent, cx: &mut Context<Self>) {
         match ev {
             ListsEvent::Navigate(r) => self.navigate(r.clone(), cx),
+            ListsEvent::TrackOverlay(on, corner) => self.apply_track_overlay(*on, *corner),
             ListsEvent::PlaylistsChanged | ListsEvent::SmartChanged => {
                 self.load_static(cx);
                 if matches!(ev, ListsEvent::SmartChanged)
