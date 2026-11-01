@@ -5086,6 +5086,7 @@ dependencies = [
  "serde_json",
  "sonix-api",
  "sonix-mock",
+ "sonix-real",
  "unicode-segmentation",
 ]
 

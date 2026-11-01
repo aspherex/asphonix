@@ -109,7 +109,7 @@ fn main() {
     #[cfg(feature = "parity")]
     let prefs = settings::UiPrefs { light: false };
     #[cfg(not(feature = "parity"))]
-    let backend: Arc<dyn Backend> = Arc::new(sonix_mock::MockBackend::new());
+    let backend: Arc<dyn Backend> = if std::env::args().any(|a| a == "--mock") || std::env::var_os("SONIX_MOCK").is_some() { Arc::new(sonix_mock::MockBackend::new()) } else { Arc::new(sonix_real::RealBackend::open()) };
     // Parity harness: deterministic mock (fixed seed, manual clock) when the runner asks for it.
     #[cfg(feature = "parity")]
     let backend: Arc<dyn Backend> = {

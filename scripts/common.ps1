@@ -104,6 +104,7 @@ function Start-Sonix([string]$Exe, [hashtable]$EnvVars = @{}, [string]$Log = $nu
     foreach ($k in $EnvVars.Keys) { Set-Item -Path "Env:$k" -Value $EnvVars[$k] | Out-Null }
     if ($Log) { Remove-Item $Log -ErrorAction SilentlyContinue; $env:SONIX_LOG = $Log }
     $sw = [Diagnostics.Stopwatch]::StartNew()
+    $env:SONIX_MOCK = "1"  # perf/shot scripts always use the mock backend
     $p = Start-Process -FilePath $Exe -PassThru
     foreach ($k in $EnvVars.Keys) { Remove-Item -Path "Env:$k" -ErrorAction SilentlyContinue }
     return @{ Proc = $p; Sw = $sw }

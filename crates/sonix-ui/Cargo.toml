@@ -11,6 +11,7 @@ path = "src/main.rs"
 [dependencies]
 sonix-api = { path = "../sonix-api" }
 sonix-mock = { path = "../sonix-mock" }
+sonix-real = { path = "../sonix-real" }
 gpui.workspace = true
 serde.workspace = true
 serde_json.workspace = true
