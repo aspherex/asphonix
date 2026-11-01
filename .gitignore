@@ -2,3 +2,5 @@ target/
 *.log
 perf-out/
 *.log
+parity/out/
+target-*.log

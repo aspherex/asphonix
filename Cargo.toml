@@ -1,6 +1,6 @@
 [workspace]
 resolver = "2"
-members = ["crates/sonix-api", "crates/sonix-mock", "crates/sonix-ui"]
+members = ["crates/sonix-api", "crates/sonix-mock", "crates/sonix-ui", "crates/sonix-parity"]
 
 [workspace.package]
 version = "0.1.0"

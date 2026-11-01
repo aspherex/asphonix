@@ -108,6 +108,21 @@ impl ContextMenu {
         self.open.is_some()
     }
 
+    /// Parity harness: open flag, item labels and the highlighted entry (top level and submenu).
+    #[cfg(feature = "parity")]
+    pub fn parity_state(&self) -> serde_json::Value {
+        match &self.open {
+            None => serde_json::json!({"open": false}),
+            Some(o) => serde_json::json!({
+                "open": true,
+                "items": o.items.iter().map(|i| i.label.to_string()).collect::<Vec<_>>(),
+                "active": o.active,
+                "subOpen": o.sub_open,
+                "subActive": o.sub_active,
+            }),
+        }
+    }
+
     pub fn show(&mut self, items: Vec<MenuItem>, pos: Point<Pixels>, window: &mut Window, cx: &mut Context<Self>) {
         let prev_focus = window.focused(cx);
         let active = step(&items, None, 1);

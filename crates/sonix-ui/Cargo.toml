@@ -18,3 +18,8 @@ futures = "0.3"
 unicode-segmentation = "1"
 raw-window-handle = "0.6"
 image = { version = "0.25.1", default-features = false, features = ["png"] }
+
+[features]
+# Parity automation hook (local control channel, test clock, bounds/state dump, PNG capture).
+# NEVER enabled in release builds; see docs/PARITY.md.
+parity = []

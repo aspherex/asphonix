@@ -10,10 +10,14 @@
 //! `sonix_api::Backend` seam; phase 2 swaps in a real backend built on `sonix-core`.
 mod app;
 mod art;
+mod clock;
 mod columns;
 mod icons_gen;
 mod pager;
+#[cfg(feature = "parity")]
+mod parity;
 mod perf;
+mod probe;
 mod router;
 mod selection;
 mod settings;
@@ -66,8 +70,18 @@ fn main() {
     T0.set(Instant::now()).ok();
     std::panic::set_hook(Box::new(|i| log(&format!("PANIC {i}"))));
     log("main_start");
+    #[cfg(not(feature = "parity"))]
     let prefs = settings::load();
+    #[cfg(feature = "parity")]
+    let prefs = settings::UiPrefs { light: false };
+    #[cfg(not(feature = "parity"))]
     let backend: Arc<dyn Backend> = Arc::new(sonix_mock::MockBackend::new());
+    // Parity harness: deterministic mock (fixed seed, manual clock) when the runner asks for it.
+    #[cfg(feature = "parity")]
+    let backend: Arc<dyn Backend> = {
+        let manual = Arc::new(sonix_mock::MockBackend::new_manual());
+        if parity::start(manual.clone()) { manual } else { Arc::new(sonix_mock::MockBackend::new()) }
+    };
     log("backend_ready");
 
     Application::new().with_assets(Assets).run(move |cx: &mut App| {

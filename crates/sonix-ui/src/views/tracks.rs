@@ -7,6 +7,7 @@ use crate::app::{self, PlayerEvent, PlayerModel};
 use crate::art::ArtHandle;
 use crate::columns::{Columns, visible_columns};
 use crate::pager::{PAGE, Pager};
+use crate::probe::pid;
 use crate::router::Route;
 use crate::selection::Selection;
 use crate::theme::{MONO, Theme};
@@ -108,6 +109,17 @@ impl TracksView {
 
     pub fn set_theme(&mut self, th: &Theme) {
         self.th = *th;
+    }
+
+    /// Parity harness: selection, scroll offset and which of this view's controls has focus.
+    #[cfg(feature = "parity")]
+    pub(crate) fn parity_state(&self, window: &Window) -> serde_json::Value {
+        let focus = if self.focus.is_focused(window) { "tracklist" } else { "body" };
+        serde_json::json!({
+            "focus": focus,
+            "selection": self.sel.indices(),
+            "scrollTop": f32::from(-self.list.0.borrow().base_handle.offset().y),
+        })
     }
 
     // ------------------------------------------------------------ data
@@ -428,7 +440,7 @@ impl TracksView {
 
     fn head_row(&self, cols: Columns, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement + use<> {
         let th = self.th;
-        div()
+        pid("table.head", div()
             .flex()
             .flex_row()
             .items_center()
@@ -440,15 +452,15 @@ impl TracksView {
             .border_b_1()
             .border_color(th.border)
             .child(div().w(px(36.)).flex_none())
-            .child(flex_cell(3.0).child(self.header_cell("h-title", "Title", TrackSortField::Title, false, window, cx)))
-            .child(flex_cell(2.0).child(self.header_cell("h-artist", "Artist", TrackSortField::Artist, false, window, cx)))
-            .child(flex_cell(2.0).child(self.header_cell("h-album", "Album", TrackSortField::Album, false, window, cx)))
-            .when(cols.year, |d| d.child(div().w(px(56.)).flex_none().child(self.header_cell("h-year", "Year", TrackSortField::Year, true, window, cx))))
-            .when(cols.added, |d| d.child(div().w(px(88.)).flex_none().child(self.header_cell("h-added", "Added", TrackSortField::DateAdded, true, window, cx))))
-            .child(div().w(px(96.)).flex_none().child(self.header_cell("h-format", "Format", TrackSortField::Format, true, window, cx)))
-            .child(div().w(px(48.)).flex_none().child(self.header_cell("h-time", "Time", TrackSortField::Duration, true, window, cx)))
+            .child(pid("table.head.title", flex_cell(3.0).child(self.header_cell("h-title", "Title", TrackSortField::Title, false, window, cx))))
+            .child(pid("table.head.artist", flex_cell(2.0).child(self.header_cell("h-artist", "Artist", TrackSortField::Artist, false, window, cx))))
+            .child(pid("table.head.album", flex_cell(2.0).child(self.header_cell("h-album", "Album", TrackSortField::Album, false, window, cx))))
+            .when(cols.year, |d| d.child(pid("table.head.year", div().w(px(56.)).flex_none().child(self.header_cell("h-year", "Year", TrackSortField::Year, true, window, cx)))))
+            .when(cols.added, |d| d.child(pid("table.head.added", div().w(px(88.)).flex_none().child(self.header_cell("h-added", "Added", TrackSortField::DateAdded, true, window, cx)))))
+            .child(pid("table.head.format", div().w(px(96.)).flex_none().child(self.header_cell("h-format", "Format", TrackSortField::Format, true, window, cx))))
+            .child(pid("table.head.time", div().w(px(48.)).flex_none().child(self.header_cell("h-time", "Time", TrackSortField::Duration, true, window, cx))))
             .child(div().w(px(24.)).flex_none())
-            .child(div().w(px(24.)).flex_none())
+            .child(div().w(px(24.)).flex_none()))
     }
 
     fn row(&mut self, ix: usize, cols: Columns, cx: &mut Context<Self>) -> AnyElement {
@@ -461,17 +473,19 @@ impl TracksView {
         let selected = self.sel.contains(ix);
         let starred = t.starred.is_some();
         let id_play = t.id.clone();
-        let idx_cell = div().w(px(36.)).flex_none().flex().items_center().justify_center().gap(px(2.)).text_color(th.muted).child(if active {
+        let idx_cell = pid(format!("track.row.{ix}.idx"), div().w(px(36.)).flex_none().flex().items_center().justify_center().gap(px(2.)).text_color(th.muted).child(if active {
             now_playing_bars(&th, self.playing).into_any_element()
         } else {
             ts(&th, MONO_CODE).child(SharedString::from(format!("{:02}", ix + 1))).into_any_element()
-        });
+        }));
         let cell = |d: Div| ellipsis(d.text_color(th.muted));
-        let artist = cell(flex_cell(2.0).font_family(MONO).text_size(px(12.)).line_height(px(16.)).font_weight(FontWeight::MEDIUM)).child(SharedString::from(t.artist.clone()));
-        let album = cell(flex_cell(2.0).font_family(MONO).text_size(px(12.)).line_height(px(16.)).font_weight(FontWeight::MEDIUM)).child(SharedString::from(t.album.clone().unwrap_or_else(|| "—".into())));
-        let right = |w: f32, s: String| div().w(px(w)).flex_none().text_right().font_family(MONO).text_size(px(12.)).line_height(px(16.)).font_weight(FontWeight::MEDIUM).text_color(th.muted).whitespace_nowrap().child(SharedString::from(s));
+        let artist = |d: Div| pid(format!("track.row.{ix}.artist"), d);
+        let album = |d: Div| pid(format!("track.row.{ix}.album"), d);
+        let artist = artist(cell(flex_cell(2.0).font_family(MONO).text_size(px(12.)).line_height(px(16.)).font_weight(FontWeight::MEDIUM)).child(SharedString::from(t.artist.clone())));
+        let album = album(cell(flex_cell(2.0).font_family(MONO).text_size(px(12.)).line_height(px(16.)).font_weight(FontWeight::MEDIUM)).child(SharedString::from(t.album.clone().unwrap_or_else(|| "—".into()))));
+        let right = |name: &str, w: f32, s: String| pid(format!("track.row.{ix}.{name}"), div().w(px(w)).flex_none().text_right().font_family(MONO).text_size(px(12.)).line_height(px(16.)).font_weight(FontWeight::MEDIUM).text_color(th.muted).whitespace_nowrap().child(SharedString::from(s)));
 
-        div()
+        pid(format!("track.row.{ix}"), div()
             .id(("trow", ix))
             .relative()
             .flex()
@@ -488,15 +502,15 @@ impl TracksView {
             .when(active || selected, |d| d.bg(th.mid))
             .when(!active && !selected, |d| d.hover(move |s| s.bg(th.mid)))
             .child(idx_cell)
-            .child(ellipsis(flex_cell(3.0).text_size(px(13.)).line_height(px(18.)).text_color(if active { th.accent_fg } else { th.text })).child(SharedString::from(t.title.clone())))
+            .child(pid(format!("track.row.{ix}.title"), ellipsis(flex_cell(3.0).text_size(px(13.)).line_height(px(18.)).text_color(if active { th.accent_fg } else { th.text })).child(SharedString::from(t.title.clone()))))
             .child(artist)
             .child(album)
-            .when(cols.year, |d| d.child(right(56., fmt::track_year(&t))))
-            .when(cols.added, |d| d.child(right(88., t.date_added.as_deref().map(fmt::date_part).unwrap_or("—").to_string())))
-            .child(right(96., fmt::format_track_format(&t.format)))
-            .child(right(48., fmt::format_duration(Some(t.duration))))
-            .child(self.star_button(ix, &t, starred, cx))
-            .child(self.more_button(ix, cx))
+            .when(cols.year, |d| d.child(right("year", 56., fmt::track_year(&t))))
+            .when(cols.added, |d| d.child(right("added", 88., t.date_added.as_deref().map(fmt::date_part).unwrap_or("—").to_string())))
+            .child(right("format", 96., fmt::format_track_format(&t.format)))
+            .child(right("time", 48., fmt::format_duration(Some(t.duration))))
+            .child(pid(format!("track.row.{ix}.star"), self.star_button(ix, &t, starred, cx)))
+            .child(pid(format!("track.row.{ix}.more"), self.more_button(ix, cx)))
             .when(active, |d| d.child(div().absolute().left_0().top_0().bottom_0().w(px(2.)).bg(th.accent_fg)))
             .when(selected, |d| d.child(div().absolute().top_0().left_0().size_full().border_1().border_color(th.accent_fg)))
             .on_click(cx.listener(move |this, ev: &ClickEvent, window, cx| {
@@ -515,7 +529,7 @@ impl TracksView {
                     window.focus(&this.focus);
                     this.open_menu(ix, ev.position, window, cx);
                 }),
-            )
+            ))
             .into_any_element()
     }
 
@@ -603,16 +617,16 @@ impl Render for TracksView {
             .justify_between()
             .gap(px(12.))
             .flex_none()
-            .child(tracked("Tracks", HEADLINE_MD, th.body_font, th.text, window))
+            .child(pid("page.title", tracked("Tracks", HEADLINE_MD, th.body_font, th.text, window)))
             .child(
                 div()
                     .flex()
                     .flex_row()
                     .items_center()
                     .gap(px(8.))
-                    .child(ts(&th, MONO_CODE).text_color(th.muted).child(count))
+                    .child(pid("page.count", ts(&th, MONO_CODE).text_color(th.muted).child(count)))
                     .child(
-                        div()
+                        pid("page.filter", div()
                             .flex()
                             .flex_row()
                             .items_center()
@@ -624,10 +638,10 @@ impl Render for TracksView {
                             .border_1()
                             .border_color(if filter_focused { th.focus } else { th.border })
                             .child(icon("search", 14., th.muted))
-                            .child(div().flex_1().min_w_0().child(self.filter_input.clone())),
+                            .child(div().flex_1().min_w_0().child(self.filter_input.clone()))),
                     )
-                    .child(button("play-all", th, Variant::Secondary, "Play All", Some("play"), total == 0).on_click(cx.listener(|this, _, _, cx| this.play_all(false, cx))))
-                    .child(button("shuffle-all", th, Variant::Primary, "Shuffle All", Some("shuffle"), total == 0).on_click(cx.listener(|this, _, _, cx| this.play_all(true, cx)))),
+                    .child(pid("page.btn.0", button("play-all", th, Variant::Secondary, "Play All", Some("play"), total == 0).on_click(cx.listener(|this, _, _, cx| this.play_all(false, cx)))))
+                    .child(pid("page.btn.1", button("shuffle-all", th, Variant::Primary, "Shuffle All", Some("shuffle"), total == 0).on_click(cx.listener(|this, _, _, cx| this.play_all(true, cx))))),
             );
 
         let list = uniform_list(
@@ -689,7 +703,7 @@ impl Render for TracksView {
                 .into_any_element()
         };
 
-        div()
+        pid("page", div()
             .size_full()
             .flex()
             .flex_col()
@@ -697,7 +711,7 @@ impl Render for TracksView {
             .p(px(16.))
             .child(header)
             .child(
-                div()
+                pid("table.panel", div()
                     .flex_1()
                     .min_h_0()
                     .flex()
@@ -706,7 +720,7 @@ impl Render for TracksView {
                     .border_color(th.border)
                     .bg(th.low)
                     .child(self.head_row(cols, window, cx))
-                    .child(div().flex_1().min_h_0().child(body)),
-            )
+                    .child(div().flex_1().min_h_0().child(body))),
+            ))
     }
 }

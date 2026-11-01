@@ -101,6 +101,16 @@ pub fn volume_db(volume: f64) -> Option<f64> {
 
 impl MockBackend {
     pub fn new() -> Self {
+        Self::build(false, None)
+    }
+
+    /// Deterministic variant for the parity harness: fixed RNG seed and **no ticker thread**;
+    /// time only moves when the caller invokes [`MockBackend::advance`].
+    pub fn new_manual() -> Self {
+        Self::build(true, Some(0x9e37_79b9_7f4a_7c15))
+    }
+
+    fn build(manual: bool, seed: Option<u64>) -> Self {
         let lib = Library::new();
         let total = lib.total_tracks();
         let names = ["Late Night Code", "Heavy Modular Synth", "Nordic Ambient", "90s Drill & Bass", "IDM Essentials"];
@@ -112,6 +122,24 @@ impl MockBackend {
         // The big one that exercises the rolling queue window (SoniX mocks it as "Spotify Import (1,980)").
         let big: Vec<u32> = (0..1980usize).map(|j| ((j * 27 + 5) % total) as u32).collect();
         playlists.push((Self::playlist_meta(&lib, "pl_big".into(), "Spotify Import (1,980)", &big), big));
+        // mock.ts: a server smart (.nsp) playlist and another user's public list (both read-only).
+        let smart: Vec<u32> = (0..50usize).map(|j| ((j * 977 + 123) % total) as u32).collect();
+        let mut meta = Self::playlist_meta(&lib, "pl_6".into(), "Recently Added (smart)", &smart);
+        meta.smart = true;
+        meta.read_only = true;
+        meta.comment = Some("Navidrome .nsp: added in the last 30 days".into());
+        playlists.push((meta, smart));
+        let lena: Vec<u32> = (0..18usize).map(|j| ((j * 411 + 9) % total) as u32).collect();
+        let mut meta = Self::playlist_meta(&lib, "pl_7".into(), "Sunday Records (by lena)", &lena);
+        meta.owner = Some("lena".into());
+        meta.public = true;
+        meta.read_only = true;
+        playlists.push((meta, lena));
+        // mock.ts seeds 400 likes: tr_{(k*1237+41) % 49000}, newest first, 3.1 h apart.
+        let mut stars = HashMap::new();
+        for k in 0..400i64 {
+            stars.insert(format!("tr_{}", (k * 1237 + 41) % 49000), crate::library::iso_from_ms(crate::library::EPOCH_MS - (k as f64 * 3.1 * 3_600_000.0) as i64));
+        }
 
         let inner = Arc::new(Inner {
             lib,
@@ -126,19 +154,52 @@ impl MockBackend {
                 repeat: RepeatMode::Off,
                 source: None,
                 window: QUEUE_WINDOW,
-                rng: 0x9e37_79b9_7f4a_7c15 ^ std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_nanos() as u64).unwrap_or(1),
+                rng: seed.unwrap_or_else(|| 0x9e37_79b9_7f4a_7c15 ^ std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_nanos() as u64).unwrap_or(1)),
                 output_mode: OutputMode::Exclusive,
             }),
             cv: Condvar::new(),
             subs: Mutex::new(Vec::new()),
             spectrum_active: AtomicBool::new(false),
             shutdown: AtomicBool::new(false),
-            starred: Mutex::new(HashMap::new()),
+            starred: Mutex::new(stars),
             playlists,
         });
-        let weak = Arc::downgrade(&inner);
-        std::thread::Builder::new().name("mock-ticker".into()).spawn(move || ticker(weak)).expect("spawn ticker");
+        if !manual {
+            let weak = Arc::downgrade(&inner);
+            std::thread::Builder::new().name("mock-ticker".into()).spawn(move || ticker(weak)).expect("spawn ticker");
+        }
         Self { inner }
+    }
+
+    /// Manual-clock step (parity harness; the ticker thread does not exist for `new_manual`):
+    /// position += `dt`, one player-state event, and (while the spectrum is active) one
+    /// spectrum frame evaluated at absolute clock time `t` seconds, like mock.ts's two intervals.
+    pub fn advance(&self, dt: f64, t: f64) {
+        let inner = &self.inner;
+        let mut core = inner.core.lock().unwrap();
+        let mut queue_changed = false;
+        if core.status == PlaybackStatus::Playing {
+            core.pos += dt;
+            let dur = core.current.and_then(|i| core.entries.get(i)).map(|e| inner.lib.sort_fields(e.ix as usize).duration as f64).unwrap_or(0.0);
+            if dur > 0.0 && core.pos >= dur {
+                if Inner::advance(&mut core) {
+                    core.pos = 0.0;
+                } else {
+                    core.status = PlaybackStatus::Stopped;
+                    core.pos = 0.0;
+                }
+                queue_changed = true;
+            }
+        }
+        inner.push_state(&core);
+        if queue_changed {
+            inner.emit(Event::QueueChanged);
+        }
+        let playing = core.status == PlaybackStatus::Playing;
+        drop(core);
+        if playing && inner.spectrum_active.load(Ordering::Relaxed) {
+            inner.emit(Event::Spectrum(synth_spectrum(t, None)));
+        }
     }
 
     fn playlist_meta(lib: &Library, id: String, name: &str, ids: &[u32]) -> Playlist {
@@ -331,6 +392,7 @@ impl Inner {
 }
 
 fn ticker(weak: Weak<Inner>) {
+    let t0 = Instant::now();
     let mut last = Instant::now();
     let mut state_acc = 0.0f64;
     let mut phase = 0.0f32;
@@ -375,29 +437,44 @@ fn ticker(weak: Weak<Inner>) {
         }
         drop(core);
         if inner.spectrum_active.load(Ordering::Relaxed) {
-            phase += 0.05;
-            inner.emit(Event::Spectrum(synth_spectrum(phase)));
+            phase += 1.0 / 30.0;
+            let mut rng = inner.core.lock().map(|c| c.rng ^ phase.to_bits() as u64).unwrap_or(1);
+            inner.emit(Event::Spectrum(synth_spectrum(t0.elapsed().as_secs_f64(), Some(&mut rng))));
         }
     }
 }
 
-/// Synthetic spectrum stand-in (MOCK): never real telemetry.
-pub fn synth_spectrum(t: f32) -> SpectrumFrame {
+/// Spectrum stand-in (MOCK, never real telemetry): the **exact formula of mock.ts**
+/// (`setInterval(..., 1000 / 30)`, 28 bands) as a pure function of `t` (seconds). `noise` is the
+/// source for the `Math.random()` terms; `None` means `Math.random() == 0.5` (no noise), which
+/// the parity harness pins on the web side so both apps produce identical frames.
+pub fn synth_spectrum(t: f64, mut noise: Option<&mut u64>) -> SpectrumFrame {
     const B: usize = SPECTRUM_BANDS;
-    let kick = (t * 2.2).sin().max(0.0).powi(3);
+    let rand = |n: &mut Option<&mut u64>| -> f64 {
+        match n {
+            Some(s) => (xorshift(s) >> 11) as f64 / (1u64 << 53) as f64,
+            None => 0.5,
+        }
+    };
+    // JS Math.round: halves round up (towards +inf), unlike f64::round.
+    let js_round = |x: f64| (x + 0.5).floor();
     let mut bands = Vec::with_capacity(B);
+    let mut sum = 0.0;
     for i in 0..B {
-        let f = i as f32 / B as f32;
-        let base = (1.0 - f * 0.75) * (0.45 + 0.4 * (t * (1.1 + f * 3.0) + i as f32 * 0.7).sin().abs());
-        let v = base + kick * (1.0 - f).powi(2) * 0.35 + 0.05 * (t * 17.0 + i as f32 * 3.1).sin();
-        bands.push((v.clamp(0.0, 1.0) * 255.0) as u8);
+        let fi = i as f64;
+        let base = 128.0 + 110.0 * (t * (1.5 + fi * 0.13) + fi).sin();
+        let v = js_round(base + (rand(&mut noise) - 0.5) * 40.0).clamp(0.0, 255.0);
+        sum += v;
+        bands.push(v as u8);
     }
-    let db = |a: f32| 20.0 * a.clamp(0.02, 1.0).log10();
-    SpectrumFrame {
-        bands,
-        peak_l: db(0.55 + 0.4 * (t * 1.7).sin() + kick * 0.1),
-        peak_r: db(0.5 + 0.4 * (t * 1.3 + 1.0).sin() + kick * 0.1),
-    }
+    let avg = sum / B as f64 / 255.0;
+    let peak = |skew: f64, n: &mut Option<&mut u64>| -> f32 {
+        let x = (avg * 1.15 + skew + (rand(n) - 0.5) * 0.12).clamp(0.02, 1.0);
+        (js_round(20.0 * x.log10() * 10.0) / 10.0) as f32
+    };
+    let peak_l = peak(0.03, &mut noise);
+    let peak_r = peak(-0.02, &mut noise);
+    SpectrumFrame { bands, peak_l, peak_r }
 }
 
 // ------------------------------------------------------------------ trait impls
@@ -405,11 +482,11 @@ impl AuthApi for MockBackend {
     fn auth_session_status(&self) -> ApiResult<SessionStatus> {
         Ok(SessionStatus {
             state: ConnectionState::Connected,
-            server_url: Some("mock://sonix".into()),
+            server_url: Some("https://music.monolith.internal:4533".into()),
             username: Some("architect".into()),
             server_version: Some("mock".into()),
             api_version: Some("1.16.1".into()),
-            ping_ms: Some(12),
+            ping_ms: Some(8),
             last_sync_at: None,
             track_count: Some(self.inner.lib.total_tracks() as u64),
         })
@@ -425,7 +502,11 @@ impl AuthApi for MockBackend {
     }
 }
 
-impl LibraryApi for MockBackend {}
+impl LibraryApi for MockBackend {
+    fn liked_count(&self) -> ApiResult<u32> {
+        Ok(self.inner.starred.lock().unwrap().keys().filter(|k| k.starts_with("tr_")).count() as u32)
+    }
+}
 impl SearchApi for MockBackend {}
 impl SettingsApi for MockBackend {
     fn settings_get(&self) -> ApiResult<Settings> {

@@ -2,6 +2,7 @@
 //! output readout, queue toggle. Its own entity: the 4 Hz position tick re-renders only
 //! the dock (and Now Playing), never the Tracks list.
 use crate::app::{self, PlayerModel};
+use crate::probe::pid;
 use crate::art::{self, ArtHandle};
 use crate::theme::Theme;
 use crate::tracking::{BODY_LG, MONO_CODE, MONO_DATA};
@@ -69,7 +70,8 @@ impl Render for DockView {
             .flex_row()
             .items_center()
             .gap(px(12.))
-            .child(
+            .child(pid(
+                "dock.art",
                 div()
                     .id("dock-art")
                     .size(px(44.))
@@ -82,36 +84,36 @@ impl Render for DockView {
                     .when(!has, |d| d.flex().items_center().justify_center().text_color(th.muted).child(icon("equalizer", 18., th.muted)))
                     .when(has, |d| d.child(cover))
                     .on_click(cx.listener(|_, _, _, cx| cx.emit(DockEvent::OpenNowPlaying))),
-            )
+            ))
             .child(
                 div()
                     .flex()
                     .flex_col()
                     .flex_1()
                     .min_w_0()
-                    .child(ellipsis_line(ts(&th, BODY_LG).text_color(th.text)).child(SharedString::from(track.as_ref().map(|t| t.title.clone()).unwrap_or_else(|| "No track loaded".into()))))
-                    .child(ellipsis_line(ts(&th, MONO_DATA).text_color(th.muted)).child(SharedString::from(match &track {
+                    .child(pid("dock.title", ellipsis_line(ts(&th, BODY_LG).text_color(th.text)).child(SharedString::from(track.as_ref().map(|t| t.title.clone()).unwrap_or_else(|| "No track loaded".into())))))
+                    .child(pid("dock.subtitle", ellipsis_line(ts(&th, MONO_DATA).text_color(th.muted)).child(SharedString::from(match &track {
                         Some(t) => match &t.album {
                             Some(a) => format!("{} · {}", t.artist, a),
                             None => t.artist.clone(),
                         },
                         None => "Pick an album or track to play".into(),
-                    }))),
+                    })))),
             )
             .children(track.as_ref().map(|t| {
                 let starred = t.starred.is_some();
                 let (id, on) = (t.id.clone(), starred);
-                ghost_icon("dock-like", th, if starred { "heart-filled" } else { "heart" }, 18., 28., starred, false).on_click(cx.listener(move |_, _, _, cx| {
+                pid("dock.like", ghost_icon("dock-like", th, if starred { "heart-filled" } else { "heart" }, 18., 28., starred, false).on_click(cx.listener(move |_, _, _, cx| {
                     let id = id.clone();
                     app::call(cx, move |b| {
                         let req = StarRequest { id, kind: StarTargetType::Track };
                         let _ = if on { b.star_remove(req) } else { b.star_add(req) };
                     });
-                }))
+                })))
             }));
 
         // --- transport
-        let play_btn = div()
+        let play_btn = pid("dock.play", div()
             .id("dock-play")
             .size(px(36.))
             .flex_none()
@@ -130,7 +132,7 @@ impl Render for DockView {
                         let _ = b.player_play_pause();
                     });
                 }
-            }));
+            })));
         let dur = ps.duration_sec;
         let seek_cb: slider::OnChange = {
             let this = cx.entity().downgrade();
@@ -151,7 +153,7 @@ impl Render for DockView {
                 }
             })
         };
-        let transport = div()
+        let transport = pid("dock.transport", div()
             .flex()
             .flex_col()
             .items_center()
@@ -203,10 +205,10 @@ impl Render for DockView {
                     .flex_row()
                     .items_center()
                     .gap(px(12.))
-                    .child(ts(&th, MONO_CODE).w(px(40.)).flex_none().text_center().text_color(th.muted).child(SharedString::from(pos_label)))
-                    .child(div().flex_1().child(slider("dock-seek", th, &self.seek, seek_ratio, None, seek_cb)))
-                    .child(ts(&th, MONO_CODE).w(px(40.)).flex_none().text_center().text_color(th.muted).child(SharedString::from(dur_label))),
-            );
+                    .child(pid("dock.scrub.pos", ts(&th, MONO_CODE).w(px(40.)).flex_none().text_center().text_color(th.muted).child(SharedString::from(pos_label))))
+                    .child(pid("dock.scrub.fader", div().flex_1().child(slider("dock-seek", th, &self.seek, seek_ratio, None, seek_cb))))
+                    .child(pid("dock.scrub.dur", ts(&th, MONO_CODE).w(px(40.)).flex_none().text_center().text_color(th.muted).child(SharedString::from(dur_label)))),
+            ));
 
         // --- aux zone
         let vol_cb: slider::OnChange = {
@@ -227,7 +229,7 @@ impl Render for DockView {
             let text = if full { format!("{readout}{}", if bit_perfect { " · BIT-PERFECT" } else { "" }) } else { short };
             ellipsis_line(ts(&th, MONO_CODE)).text_color(if bit_perfect { th.accent_fg } else { th.muted }).child(SharedString::from(text)).into_any_element()
         };
-        let aux = div()
+        let aux = pid("dock.aux", div()
             .flex_1()
             .min_w(px(260.))
             .flex()
@@ -237,7 +239,7 @@ impl Render for DockView {
             .gap(px(12.))
             .child(output)
             .child(
-                div()
+                pid("dock.volume", div()
                     .id("dock-volume")
                     .flex()
                     .flex_row()
@@ -263,19 +265,19 @@ impl Render for DockView {
                         }),
                     )
                     .child(icon("volume", 15., th.muted))
-                    .child(div().w(px(112.)).child(slider("dock-vol", th, &self.vol, ps.volume as f32, None, vol_cb)))
-                    .child(ts(&th, MONO_CODE).flex_none().min_w(px(52.)).text_right().whitespace_nowrap().text_color(th.muted).child(SharedString::from(vol_label)))
-                    .children(rg.map(|r| ts(&th, MONO_CODE).flex_none().whitespace_nowrap().text_color(th.muted).child(SharedString::from(r)))),
+                    .child(pid("dock.volume.fader", div().w(px(112.)).child(slider("dock-vol", th, &self.vol, ps.volume as f32, None, vol_cb))))
+                    .child(pid("dock.volume.db", ts(&th, MONO_CODE).flex_none().min_w(px(52.)).text_right().whitespace_nowrap().text_color(th.muted).child(SharedString::from(vol_label))))
+                    .children(rg.map(|r| ts(&th, MONO_CODE).flex_none().whitespace_nowrap().text_color(th.muted).child(SharedString::from(r))))),
             )
             .child({
                 let q = ps.queue_length;
-                tip(div().id("dock-queue").relative().size(px(28.)).flex_none().flex().items_center().justify_center().group("hv").cursor(CursorStyle::PointingHand).child(icon_g("queue", 16., th.muted, th.accent_fg)).children((q > 0).then(|| {
+                pid("dock.queue", tip(div().id("dock-queue").relative().size(px(28.)).flex_none().flex().items_center().justify_center().group("hv").cursor(CursorStyle::PointingHand).child(icon_g("queue", 16., th.muted, th.accent_fg)).children((q > 0).then(|| {
                     ts(&th, MONO_CODE).absolute().top(px(-2.)).right(px(-6.)).px(px(2.)).bg(th.base).text_color(th.accent_fg).child(SharedString::from(q.to_string()))
                 })), "Toggle queue rail", th)
-                .on_click(cx.listener(|_, _, _, cx| cx.emit(DockEvent::ToggleQueue)))
-            });
+                .on_click(cx.listener(|_, _, _, cx| cx.emit(DockEvent::ToggleQueue))))
+            }));
 
-        div()
+        pid("dock", div()
             .h(px(72.))
             .w_full()
             .flex_none()
@@ -289,7 +291,7 @@ impl Render for DockView {
             .border_color(th.frame)
             .child(np)
             .child(transport)
-            .child(aux)
+            .child(aux))
     }
 }
 

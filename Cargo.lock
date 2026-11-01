@@ -4962,6 +4962,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "sonix-parity"
+version = "0.1.0"
+dependencies = [
+ "image",
+ "serde_json",
+]
+
+[[package]]
 name = "sonix-ui"
 version = "0.1.0"
 dependencies = [

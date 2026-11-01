@@ -1,5 +1,6 @@
 //! Title bar, top bar and sidebar (`TitleBar.svelte`, `TopBar.svelte`, `Sidebar.svelte`).
 use super::shell::Shell;
+use crate::probe::pid;
 use crate::router::Route;
 use crate::theme::{MONO, Theme};
 use crate::tracking::{Family, HEADLINE_SM, LABEL_CAPS, MONO_CODE, MONO_DATA, TypeSpec, tracked};
@@ -61,8 +62,8 @@ impl Shell {
                     .flex_row()
                     .items_baseline()
                     .gap(px(8.))
-                    .child(div().flex().flex_row().child(tracked("SONIX", LOGO, th.body_font, th.text, window)).child(slash))
-                    .child(ts(&th, MONO_CODE).px(px(4.)).bg(th.high).text_color(th.muted).child(SharedString::from(version))),
+                    .child(pid("titlebar.logo", div().flex().flex_row().child(tracked("SONIX", LOGO, th.body_font, th.text, window)).child(slash)))
+                    .child(pid("titlebar.version", ts(&th, MONO_CODE).px(px(4.)).bg(th.high).text_color(th.muted).child(SharedString::from(version)))),
             )
             .child(div().flex_1())
             .child(
@@ -70,9 +71,9 @@ impl Shell {
                     .flex()
                     .flex_row()
                     .gap(px(2.))
-                    .child(ctrl("min", WindowControlArea::Min, "minimize", 12., false))
-                    .child(ctrl("max", WindowControlArea::Max, if maximized { "collapse" } else { "maximize" }, 11., false))
-                    .child(ctrl("close", WindowControlArea::Close, "close", 12., true)),
+                    .child(pid("titlebar.ctrl.min", ctrl("min", WindowControlArea::Min, "minimize", 12., false)))
+                    .child(pid("titlebar.ctrl.max", ctrl("max", WindowControlArea::Max, if maximized { "collapse" } else { "maximize" }, 11., false)))
+                    .child(pid("titlebar.ctrl.close", ctrl("close", WindowControlArea::Close, "close", 12., true))),
             )
     }
 
@@ -99,9 +100,9 @@ impl Shell {
             .flex_none()
             .border_1()
             .border_color(th.border)
-            .child(ghost_icon("nav-back", th, "chevron-left", 16., 28., false, !can_back).on_click(cx.listener(|this, _, _, cx| this.go_back(cx))))
+            .child(pid("topbar.nav.back", ghost_icon("nav-back", th, "chevron-left", 16., 28., false, !can_back).on_click(cx.listener(|this, _, _, cx| this.go_back(cx)))))
             .child(div().w(px(1.)).bg(th.border))
-            .child(ghost_icon("nav-fwd", th, "chevron-right", 16., 28., false, !can_fwd).on_click(cx.listener(|this, _, _, cx| this.go_forward(cx))));
+            .child(pid("topbar.nav.fwd", ghost_icon("nav-fwd", th, "chevron-right", 16., 28., false, !can_fwd).on_click(cx.listener(|this, _, _, cx| this.go_forward(cx)))));
         let pill = div()
             .flex()
             .flex_row()
@@ -114,7 +115,7 @@ impl Shell {
             .border_1()
             .border_color(th.border)
             .text_color(if connected { th.text } else { th.muted })
-            .child(div().size(px(6.)).flex_none().bg(if connected { th.accent } else { th.muted }))
+            .child(pid("topbar.pill.dot", div().size(px(6.)).flex_none().bg(if connected { th.accent } else { th.muted })))
             .child(ts(&th, MONO_DATA).child(if connected { "CONNECTED" } else { "DISCONNECTED" }))
             .when(connected, |d| d.child(ts(&th, MONO_DATA).text_color(th.border).child("·")).child(ts(&th, MONO_DATA).child(SharedString::from(ping))));
         let search = div()
@@ -132,7 +133,7 @@ impl Shell {
             .text_color(th.muted)
             .child(icon("search", 14., th.muted))
             .child(div().flex_1().min_w_0().child(self.search.clone()))
-            .child(ts(&th, MONO_CODE).px(px(4.)).py(px(1.)).bg(th.high).flex_none().text_color(th.muted).child("CTRL K"));
+            .child(pid("topbar.search.kbd", ts(&th, MONO_CODE).px(px(4.)).py(px(1.)).bg(th.high).flex_none().text_color(th.muted).child("CTRL K")));
         let collection = ts(&th, MONO_CODE)
             .ml_auto()
             .flex()
@@ -160,11 +161,11 @@ impl Shell {
             .bg(th.base)
             .border_b_1()
             .border_color(th.frame)
-            .child(nav)
-            .child(pill)
-            .child(search)
-            .child(collection)
-            .child(theme_btn)
+            .child(pid("topbar.nav", nav))
+            .child(pid("topbar.pill", pill))
+            .child(pid("topbar.search", search))
+            .child(pid("topbar.collection", collection))
+            .child(pid("topbar.theme", theme_btn))
     }
 
     fn nav_row(&self, id: impl Into<gpui::ElementId>, th: Theme, active: bool, window: &mut Window, icon_name: &str, label: &str) -> Stateful<Div> {
@@ -198,14 +199,14 @@ impl Shell {
             (Route::History, "list", "History"),
         ];
         let mut library = div().flex().flex_col().pt(px(4.)).pb(px(8.));
-        library = library.child(div().px(px(12.)).pt(px(12.)).pb(px(4.)).child(tracked("Library", LABEL_CAPS, th.body_font, th.muted, window)));
-        for (r, ic, label) in nav_items {
+        library = library.child(pid("sidebar.library.title", div().px(px(12.)).pt(px(12.)).pb(px(4.)).child(tracked("Library", LABEL_CAPS, th.body_font, th.muted, window))));
+        for (nav_ix, (r, ic, label)) in nav_items.into_iter().enumerate() {
             let active = *route == r;
             let target = r.clone();
-            library = library.child(
-                self.nav_row(SharedString::from(format!("nav-{label}")), th, active, window, ic, label)
-                    .on_click(cx.listener(move |this, _, _, cx| this.navigate(target.clone(), cx))),
-            );
+            library = library.child(pid(
+                format!("sidebar.nav.{nav_ix}"),
+                self.nav_row(SharedString::from(format!("nav-{label}")), th, active, window, ic, label).on_click(cx.listener(move |this, _, _, cx| this.navigate(target.clone(), cx))),
+            ));
         }
 
         let pl_row = |id: SharedString, active: bool, icon_name: &'static str, name: String, count: String| {
@@ -230,7 +231,7 @@ impl Shell {
                 .child(div().flex_none().text_size(px(11.)).child(SharedString::from(count)))
         };
         let mut lists = div().id("playlist-scroll").flex_1().min_h_0().overflow_y_scroll().border_t_1().border_color(th.border).flex().flex_col();
-        lists = lists.child(
+        lists = lists.child(pid("sidebar.playlists.title",
             div()
                 .flex()
                 .flex_row()
@@ -249,11 +250,11 @@ impl Shell {
                         .child(icon("bolt", 12., th.muted))
                         .child(icon("add", 12., th.muted)),
                 ),
-        );
-        lists = lists.child(
-            pl_row("pl-liked".into(), *route == Route::Liked, "heart-filled", "Liked Songs".into(), "2".into())
-                .on_click(cx.listener(|this, _, _, cx| this.navigate(Route::Liked, cx))),
-        );
+        ));
+        lists = lists.child(pid(
+            "sidebar.pl.liked",
+            pl_row("pl-liked".into(), *route == Route::Liked, "heart-filled", "Liked Songs".into(), "2".into()).on_click(cx.listener(|this, _, _, cx| this.navigate(Route::Liked, cx))),
+        ));
         lists = lists.child(div().h(px(1.)).mx(px(12.)).my(px(4.)).bg(th.border));
         for p in &self.playlists {
             let active = *route == Route::Playlist(p.id.clone());
@@ -269,7 +270,7 @@ impl Shell {
             .border_t_1()
             .border_color(th.frame)
             .py(px(4.))
-            .child(self.nav_row("nav-settings", th, *route == Route::Settings, window, "settings", "Settings").on_click(cx.listener(|this, _, _, cx| this.navigate(Route::Settings, cx))))
+            .child(pid("sidebar.settings", self.nav_row("nav-settings", th, *route == Route::Settings, window, "settings", "Settings").on_click(cx.listener(|this, _, _, cx| this.navigate(Route::Settings, cx)))))
             .child(
                 div()
                     .flex()

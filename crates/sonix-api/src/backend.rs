@@ -51,6 +51,10 @@ pub trait LibraryApi {
     fn library_sync_start(&self, _req: SyncStartRequest) -> ApiResult<()> {
         unimpl!("library_sync_start")
     }
+    /// `browse_get_liked_summary`.count: number of liked (starred) tracks (sidebar "Liked Songs").
+    fn liked_count(&self) -> ApiResult<u32> {
+        unimpl!("liked_count")
+    }
 }
 
 /// `browse_*`

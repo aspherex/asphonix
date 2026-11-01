@@ -7,6 +7,7 @@ use super::tracks::{TracksEvent, TracksView};
 use crate::app::{self, PlayerModel, Services};
 use crate::perf::FrameStats;
 use crate::router::{Route, Router};
+#[cfg(not(feature = "parity"))]
 use crate::settings::{self, UiPrefs};
 use crate::theme::{MONO, Theme};
 use crate::tracking::tracked;
@@ -127,6 +128,8 @@ impl Shell {
             }
         }
         this.debug_hooks(window, cx);
+        #[cfg(feature = "parity")]
+        this.parity_attach(window, cx);
         this
     }
 
@@ -339,6 +342,7 @@ impl Shell {
         self.th = self.th.toggled();
         let th = self.th;
         cx.set_global(th);
+        #[cfg(not(feature = "parity"))]
         settings::save(&UiPrefs { light: th.light });
         self.search.update(cx, |i, _| i.set_theme(&th));
         self.menu.update(cx, |m, _| m.set_theme(th));
@@ -460,6 +464,7 @@ impl Render for Shell {
         let docked = Self::rail_docked(vw, &route);
 
         self.fs.tick();
+        crate::probe::begin_frame();
         if !self.shown {
             self.shown = true;
             crate::log("first_render");
@@ -476,9 +481,9 @@ impl Render for Shell {
             other => self.placeholder(other, window),
         };
 
-        let title = self.title_bar(window, cx);
-        let top = self.top_bar(window, cx);
-        let side = self.sidebar(vw, &route, window, cx);
+        let title = crate::probe::pid("titlebar", self.title_bar(window, cx));
+        let top = crate::probe::pid("topbar", self.top_bar(window, cx));
+        let side = crate::probe::pid("sidebar", self.sidebar(vw, &route, window, cx));
 
         let body = div()
             .flex_1()
@@ -487,13 +492,13 @@ impl Render for Shell {
             .min_h_0()
             .relative()
             .child(side)
-            .child(div().flex_1().min_w_0().h_full().overflow_hidden().child(stage))
+            .child(crate::probe::pid("stage", div().flex_1().min_w_0().h_full().overflow_hidden().child(stage)))
             .when(docked, |d| d.child(self.queue.clone()))
             .when(!docked && !on_np && self.queue_drawer, |d| {
                 d.child(div().absolute().top_0().right_0().bottom_0().child(self.queue.clone()))
             });
 
-        div()
+        let root = div()
             .id("root")
             .key_context("Root")
             .track_focus(&self.focus)
@@ -543,10 +548,13 @@ impl Render for Shell {
                     .children(self.backdrop.clone().map(|b| {
                         div().absolute().top_0().left_0().size_full().child(img(ImageSource::Render(b)).size_full().object_fit(ObjectFit::Fill))
                     }))
-                    .child(body)
+                    .child(crate::probe::pid("shell.body", body))
                     .when(!on_np, |d| d.child(self.dock.clone())),
             )
-            .child(self.menu.clone())
+            .child(self.menu.clone());
+        #[cfg(feature = "parity")]
+        let root = root.child(crate::probe::frame_marker());
+        root
     }
 }
 
