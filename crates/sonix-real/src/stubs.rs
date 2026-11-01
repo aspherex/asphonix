@@ -2,12 +2,6 @@
 #![allow(unused_variables)]
 use crate::RealBackend;
 use sonix_api::*;
-impl BrowseApi for RealBackend {
-    fn browse_get_tracks(&self, req: GetTracksRequest) -> ApiResult<Paged<Track>> { Err(ApiError::unimplemented("browse_get_tracks")) }
-}
-impl PlaylistsApi for RealBackend {
-    fn playlists_list(&self) -> ApiResult<Vec<Playlist>> { Err(ApiError::unimplemented("playlists_list")) }
-}
 impl StarsApi for RealBackend {
     fn star_add(&self, req: StarRequest) -> ApiResult<()> { Err(ApiError::unimplemented("star_add")) }
     fn star_remove(&self, req: StarRequest) -> ApiResult<()> { Err(ApiError::unimplemented("star_remove")) }
@@ -36,6 +30,4 @@ impl OutputApi for RealBackend {
 impl ArtApi for RealBackend {
     fn art_get(&self, cover_art: &str, size: u32) -> ApiResult<ArtPixels> { Err(ApiError::unimplemented("art_get")) }
 }
-impl LibraryApi for RealBackend {}
-impl SearchApi for RealBackend {}
 impl SettingsApi for RealBackend {}

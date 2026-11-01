@@ -1,6 +1,7 @@
 //! `RealBackend`: the `Backend` trait over the vendored SONIX core (`sonix-core`).
 //! Phase 2 step 1: login, profiles, keychain, session status. Everything else
 //! returns `unimplemented` (see `stubs.rs`) until the later steps land.
+mod reads;
 mod stubs;
 
 use sonix_api::*;
@@ -8,10 +9,20 @@ use sonix_core::ipc::{IpcError, IpcErrorCode};
 use sonix_core::{secrets, subsonic::Client};
 use std::path::PathBuf;
 use std::sync::mpsc::{channel, Receiver, Sender};
+use std::sync::atomic::AtomicU64;
 use std::sync::{Arc, Mutex};
+use sonix_core::library::Db;
 
 /// Keychain service name and data-dir name: never the installed app's `dev.sonix.app`.
 pub const IDENTIFIER: &str = "dev.sonix.native";
+
+/// Library DB dir (`%LOCALAPPDATA%dev.sonix.native`).
+pub fn data_dir() -> PathBuf {
+    let base = std::env::var_os("LOCALAPPDATA").map(PathBuf::from).unwrap_or_else(|| PathBuf::from("."));
+    let d = base.join(IDENTIFIER);
+    let _ = std::fs::create_dir_all(&d);
+    d
+}
 
 /// Where a profile/session lives (`%APPDATA%\dev.sonix.native`).
 pub fn config_dir() -> PathBuf {
@@ -30,6 +41,8 @@ struct Session {
 struct Inner {
     rt: tokio::runtime::Runtime,
     dir: PathBuf,
+    db: Db,
+    epoch: AtomicU64,
     client: Mutex<Option<Client>>,
     session: Mutex<Session>,
     subs: Mutex<Vec<Sender<Event>>>,
@@ -38,7 +51,7 @@ struct Inner {
 #[derive(Clone)]
 pub struct RealBackend(Arc<Inner>);
 
-fn err(e: IpcError) -> ApiError {
+pub(crate) fn err(e: IpcError) -> ApiError {
     let code = match e.code {
         IpcErrorCode::NotConnected => ErrorCode::NotConnected,
         IpcErrorCode::Network => ErrorCode::Network,
@@ -81,6 +94,8 @@ impl RealBackend {
         let cfg = secrets::load_config(&dir);
         let me = Self(Arc::new(Inner {
             rt,
+            db: Db::open(&data_dir()).expect("library db"),
+            epoch: AtomicU64::new(0),
             dir,
             client: Mutex::new(None),
             session: Mutex::new(Session {
@@ -104,7 +119,32 @@ impl RealBackend {
         me
     }
 
-    fn emit(&self, ev: Event) {
+    /// Background sync (full catalog when the DB is empty or `full`, else incremental).
+    pub(crate) fn start_sync(&self, full: bool) {
+        let Some(client) = self.0.client.lock().unwrap().clone() else { return };
+        let me = self.clone();
+        let epoch = self.0.epoch.load(std::sync::atomic::Ordering::SeqCst);
+        self.0.rt.spawn(async move {
+            let sink = reads::Sink(me.clone(), epoch);
+            let res = if full || me.0.db.track_count().unwrap_or(0) == 0 {
+                sonix_core::library::run_full_sync(&client, &me.0.db, &sink).await
+            } else {
+                sonix_core::library::run_incremental_sync(&client, &me.0.db, &sink, None).await
+            };
+            if res.is_ok() {
+                let now = me.0.db.get_meta("lastSyncAt").ok().flatten();
+                let mut st = me.0.session.lock().unwrap();
+                if let Some(c) = st.cfg.as_mut() {
+                    c.last_sync_at = now;
+                    let _ = secrets::save_config(&me.0.dir, c);
+                }
+                st.track_count = me.0.db.track_count().ok();
+            }
+            me.emit(Event::LibraryChanged);
+        });
+    }
+
+    pub(crate) fn emit(&self, ev: Event) {
         self.0.subs.lock().unwrap().retain(|s| s.send(ev.clone()).is_ok());
     }
 
@@ -133,6 +173,11 @@ impl RealBackend {
             secrets::profiles::upsert(l, url, username);
             Ok(())
         });
+        let same = previous.as_ref().is_some_and(|p| p.url == url && p.username == username);
+        self.0.epoch.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        if !same && previous.is_some() {
+            self.0.db.clear_all().map_err(err)?;
+        }
         *self.0.client.lock().unwrap() = Some(client);
         {
             let mut s = self.0.session.lock().unwrap();
@@ -141,6 +186,7 @@ impl RealBackend {
             s.track_count = caps.track_count;
         }
         self.set_state(ConnectionState::Connected, None);
+        self.start_sync(false);
         Ok(wire)
     }
 }
