@@ -35,6 +35,9 @@ impl Shell {
                 .id(id)
                 .group("hv")
                 .window_control_area(area)
+                // occlude: otherwise the title bar's Drag hitbox (painted first, it contains the buttons) wins GPUI's
+                // window-control hit test and the min/max/close buttons answer HTCAPTION
+                .occlude()
                 .flex()
                 .items_center()
                 .justify_center()
@@ -84,6 +87,7 @@ impl Shell {
                     "titlebar.update",
                     div()
                         .id("update-badge")
+                        .occlude() // a client hitbox above the caption, so the click reaches on_click
                         .mr(px(8.))
                         .px(px(8.))
                         .py(px(2.))

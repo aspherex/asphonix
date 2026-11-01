@@ -28,6 +28,32 @@ pub fn empty_working_set() {
 #[cfg(not(windows))]
 pub fn empty_working_set() {}
 
+/// Non-client messages the main window must hand straight to `DefWindowProcW`, bypassing GPUI: a left press or
+/// double-click on the caption (`HTCAPTION` = 2, which GPUI answers for `WindowControlArea::Drag`) and a right
+/// click on it (system menu). GPUI 0.2.2 turns `WM_NCLBUTTONDOWN` into a `MouseDown` and swallows the message
+/// when the event was "handled"; the shell root `track_focus`es, and GPUI's focus listener `prevent_default`s
+/// every mouse down, so the press never reached `DefWindowProcW` and the title bar could not move the window
+/// (nor snap, drag-restore or double-click maximize). GPUI has no Windows `start_window_move` either.
+#[cfg(any(windows, test))]
+pub fn caption_passthrough(msg: u32, hit: usize) -> bool {
+    const HTCAPTION: usize = 2;
+    // WM_NCLBUTTONDOWN, WM_NCLBUTTONDBLCLK, WM_NCRBUTTONDOWN, WM_NCRBUTTONUP
+    hit == HTCAPTION && matches!(msg, 0x00A1 | 0x00A3 | 0x00A4 | 0x00A5)
+}
+
+/// The caption buttons, same cause: GPUI only arms its own min/max/close handling when the `MouseDown` it made of
+/// `WM_NCLBUTTONDOWN` was not handled, which the root focus listener always does. Returns the `WM_SYSCOMMAND`
+/// for a press + release on the same button (`HTMINBUTTON` 8, `HTMAXBUTTON` 9, `HTCLOSE` 20).
+#[cfg(any(windows, test))]
+pub fn caption_button_command(hit: usize, maximized: bool) -> Option<usize> {
+    match hit {
+        8 => Some(0xF020),                                     // SC_MINIMIZE
+        9 => Some(if maximized { 0xF120 } else { 0xF030 }), // SC_RESTORE / SC_MAXIMIZE
+        20 => Some(0xF060),                                    // SC_CLOSE
+        _ => None,
+    }
+}
+
 /// Minimize/restore hook (Windows). On other platforms `install` reports `false` and
 /// the app simply never suspends (macOS gets its own hook in a later phase).
 #[cfg(windows)]
@@ -40,13 +66,42 @@ pub mod size_hook {
     thread_local! {
         static HOOK: RefCell<Option<MinimizeCallback>> = const { RefCell::new(None) };
         static MIN: Cell<bool> = const { Cell::new(false) };
+        /// caption button under the last WM_NCLBUTTONDOWN (0 = none)
+        static NC_PRESSED: Cell<usize> = const { Cell::new(0) };
     }
     #[link(name = "comctl32")]
     unsafe extern "system" {
         fn SetWindowSubclass(h: Hwnd, f: SubProc, id: usize, data: usize) -> i32;
         fn DefSubclassProc(h: Hwnd, m: u32, w: usize, l: isize) -> isize;
     }
+    #[link(name = "user32")]
+    unsafe extern "system" {
+        fn DefWindowProcW(h: Hwnd, m: u32, w: usize, l: isize) -> isize;
+        fn PostMessageW(h: Hwnd, m: u32, w: usize, l: isize) -> i32;
+        fn IsZoomed(h: Hwnd) -> i32;
+    }
     unsafe extern "system" fn sub(h: Hwnd, msg: u32, w: usize, l: isize, _id: usize, _d: usize) -> isize {
+        if super::caption_passthrough(msg, w) {
+            // native caption drag (modal move loop: Aero Snap, drag-restore from maximized, per-monitor DPI via
+            // WM_DPICHANGED, which GPUI handles), caption double-click maximize/restore, system menu
+            return unsafe { DefWindowProcW(h, msg, w, l) };
+        }
+        match msg {
+            // WM_NCLBUTTONDOWN on a caption button: remember it (GPUI would drop it, see caption_button_command)
+            0x00A1 if super::caption_button_command(w, false).is_some() => {
+                NC_PRESSED.with(|p| p.set(w));
+                return 0;
+            }
+            // WM_NCLBUTTONUP: act like a native button (release over the button that was pressed)
+            0x00A2 if NC_PRESSED.with(|p| p.get()) != 0 => {
+                let pressed = NC_PRESSED.with(|p| p.replace(0));
+                if pressed == w && let Some(cmd) = super::caption_button_command(w, unsafe { IsZoomed(h) } != 0) {
+                    unsafe { PostMessageW(h, 0x0112, cmd, 0) }; // WM_SYSCOMMAND
+                }
+                return 0;
+            }
+            _ => {}
+        }
         if msg == 0x0005 {
             // WM_SIZE
             if let Some(now_min) = super::size_kind(w)
@@ -337,5 +392,18 @@ mod tests {
         assert_eq!(size_kind(2), Some(false));
         assert_eq!(size_kind(3), None);
         assert_eq!(size_kind(4), None);
+    }
+    #[test]
+    fn caption_messages_bypass_gpui() {
+        assert!(caption_passthrough(0x00A1, 2)); // WM_NCLBUTTONDOWN on the caption
+        assert!(caption_passthrough(0x00A3, 2)); // double-click
+        assert!(!caption_passthrough(0x00A1, 8)); // HTMINBUTTON stays with GPUI
+        assert!(!caption_passthrough(0x00A1, 20)); // HTCLOSE
+        assert!(!caption_passthrough(0x0201, 2)); // client WM_LBUTTONDOWN
+        assert_eq!(caption_button_command(8, false), Some(0xF020));
+        assert_eq!(caption_button_command(9, false), Some(0xF030));
+        assert_eq!(caption_button_command(9, true), Some(0xF120));
+        assert_eq!(caption_button_command(20, true), Some(0xF060));
+        assert_eq!(caption_button_command(2, false), None);
     }
 }

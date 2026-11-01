@@ -150,9 +150,21 @@ impl SearchView {
                     let _ = b.player_play_queue(PlayQueueRequest { track_ids: ids, start_index: start });
                 });
             }
-            Flat::Album(i) => cx.emit(ListsEvent::Navigate(Route::Album(r.albums.items[*i].id.clone()))),
-            Flat::Artist(i) => cx.emit(ListsEvent::Navigate(Route::Artist(r.artists.items[*i].id.clone()))),
-            Flat::Playlist(i) => cx.emit(ListsEvent::Navigate(Route::Playlist(r.playlists.items[*i].id.clone()))),
+            Flat::Album(i) => {
+                if let Some(a) = r.albums.items.get(*i) {
+                    cx.emit(ListsEvent::Navigate(Route::Album(a.id.clone())))
+                }
+            }
+            Flat::Artist(i) => {
+                if let Some(a) = r.artists.items.get(*i) {
+                    cx.emit(ListsEvent::Navigate(Route::Artist(a.id.clone())))
+                }
+            }
+            Flat::Playlist(i) => {
+                if let Some(p) = r.playlists.items.get(*i) {
+                    cx.emit(ListsEvent::Navigate(Route::Playlist(p.id.clone())))
+                }
+            }
         }
     }
 
@@ -161,7 +173,7 @@ impl SearchView {
         let flat = self.flat();
         let Some(item) = flat.get(self.selected).cloned() else { return };
         if shift && let (Flat::Track(i), Some(r)) = (&item, &self.results) {
-            let id = r.tracks.items[*i].id.clone();
+            let Some(id) = r.tracks.items.get(*i).map(|t| t.id.clone()) else { return };
             app::call(cx, move |b| {
                 let _ = b.player_enqueue(EnqueueRequest { track_ids: vec![id], position: EnqueuePosition::End });
             });
@@ -199,6 +211,18 @@ impl SearchView {
 
     fn context_menu(&mut self, item: Flat, pos: gpui::Point<gpui::Pixels>, cx: &mut Context<Self>) {
         let Some(r) = &self.results else { return };
+        // the row listener captured an index into the results of the frame it was painted in; a search that
+        // answered since then may have fewer rows (indexing would panic = abort)
+        let len = match item {
+            Flat::Track(_) => r.tracks.items.len(),
+            Flat::Album(_) => r.albums.items.len(),
+            Flat::Artist(_) => r.artists.items.len(),
+            Flat::Playlist(_) => r.playlists.items.len(),
+        };
+        let (Flat::Track(i) | Flat::Album(i) | Flat::Artist(i) | Flat::Playlist(i)) = item;
+        if i >= len {
+            return;
+        }
         let this = cx.entity().downgrade();
         let items = match item {
             Flat::Track(i) => {
