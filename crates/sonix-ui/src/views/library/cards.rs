@@ -195,8 +195,14 @@ pub fn card<V: 'static>(
     let (ctx_key, items_key, card_anchor) = (ctx.clone(), items_ctx.clone(), anchor_cell());
     let (route_key, anchor_key) = (route.clone(), card_anchor.clone());
     let fh_menu = fh.clone();
+    // `draggable="true"`: `{ kind: "album" | "artist", id, name }`
+    let drag = match &item {
+        CardItem::Album(a) => crate::dnd::DragPayload::Album { id: a.id.clone(), name: a.name.clone() },
+        CardItem::Artist(a) => crate::dnd::DragPayload::Artist { id: a.id.clone(), name: a.name.clone() },
+    };
     let root = div()
         .id(("card", key))
+        .on_drag(crate::dnd::SonixDrag(drag), crate::dnd::ghost(th))
         .key_context("Card")
         .track_focus(&fh)
         .tab_stop(true)

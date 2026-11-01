@@ -242,9 +242,17 @@ impl SearchView {
             }
         };
         let is_track = matches!(item, Flat::Track(_));
+        // `startSonixDrag`: tracks / album / artist rows are drag sources (playlists are not)
+        let drag = match &item {
+            Flat::Track(i) => Some(crate::dnd::DragPayload::Tracks(vec![r.tracks.items[*i].id.clone()])),
+            Flat::Album(i) => Some(crate::dnd::DragPayload::Album { id: r.albums.items[*i].id.clone(), name: r.albums.items[*i].name.clone() }),
+            Flat::Artist(i) => Some(crate::dnd::DragPayload::Artist { id: r.artists.items[*i].id.clone(), name: r.artists.items[*i].name.clone() }),
+            Flat::Playlist(_) => None,
+        };
         let (it_click, it_dbl, it_menu) = (item.clone(), item.clone(), item.clone());
         let el = div()
             .id(("sr", flat_ix))
+            .when_some(drag, |d, p| d.on_drag(crate::dnd::SonixDrag(p), crate::dnd::ghost(th)))
             .flex()
             .flex_row()
             .items_center()

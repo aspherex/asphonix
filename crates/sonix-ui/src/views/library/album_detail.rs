@@ -250,7 +250,10 @@ impl AlbumDetailView {
                 let _ = t_play.update(cx, |t, cx| t.play_from(ix, cx));
             }),
         };
+        // `dragIds={() => selection.forContextMenu(index)…}`: a selected row drags the whole selection
+        let drag_ids: Vec<String> = if self.sel.has(ix) { self.sel.set.iter().copied().filter_map(|i| self.tracks().get(i).map(|t| t.id.clone())).collect() } else { vec![t.id.clone()] };
         let r = rows::row(&th, &t, &st, o, tr::ROW_H, Some(format!("track.row.{}", self.web_row(ix))), cb, window)
+            .on_drag(crate::dnd::SonixDrag(crate::dnd::DragPayload::Tracks(drag_ids)), crate::dnd::ghost(th))
             .on_click(cx.listener(move |this, ev: &ClickEvent, window, cx| {
                 if ev.click_count() >= 2 {
                     this.play_from(ix, cx);

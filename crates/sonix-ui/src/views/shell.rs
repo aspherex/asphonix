@@ -904,9 +904,11 @@ impl Shell {
                     })
                 })
                 .await;
-            let _ = this.update(cx, |_, cx| {
+            let _ = this.update(cx, |sh, cx| {
                 if let Some(m) = msg {
                     crate::overlays::show_toast(cx, &m);
+                    // `notifyPlaylistsChanged()`: the sidebar counts and open playlist pages re-read
+                    sh.lists_event(&super::lists::ListsEvent::PlaylistsChanged, cx);
                 }
             });
         })

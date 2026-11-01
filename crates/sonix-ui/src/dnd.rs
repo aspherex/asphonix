@@ -4,16 +4,15 @@
 use crate::theme::Theme;
 use crate::text::txt;
 use crate::tracking::MONO_DATA;
-use gpui::{Context, IntoElement, Render, SharedString, Window, div, prelude::*, px};
+use gpui::{App, Context, Entity, IntoElement, Pixels, Point, Render, SharedString, Window, div, prelude::*, px};
 use sonix_api::Backend;
 
 #[derive(Clone, Debug)]
 pub enum DragPayload {
     Tracks(Vec<String>),
-    // Album and artist cards belong to routes other agents port; the targets already resolve them (`resolve_ids`).
-    #[allow(dead_code)]
+    /// `AlbumCard` / a Search album row
     Album { id: String, name: String },
-    #[allow(dead_code)]
+    /// `ArtistCard` / a Search artist row
     Artist { id: String, name: String },
 }
 
@@ -57,5 +56,13 @@ pub fn ghost_label(p: &DragPayload) -> String {
         DragPayload::Tracks(ids) => describe(p, ids.len()),
         DragPayload::Album { name, .. } => format!("album: {name}"),
         DragPayload::Artist { name, .. } => format!("artist: {name}"),
+    }
+}
+
+/// The `on_drag` constructor of every SONIX drag source: the chip with `ghost_label`.
+pub fn ghost(th: Theme) -> impl Fn(&SonixDrag, Point<Pixels>, &mut Window, &mut App) -> Entity<Ghost> + 'static {
+    move |d, _, _, cx| {
+        let label: SharedString = ghost_label(&d.0).into();
+        cx.new(|_| Ghost { label, th })
     }
 }

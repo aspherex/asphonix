@@ -273,11 +273,20 @@ impl Shell {
         self.lists_event(&ListsEvent::EditSmart(None), cx);
     }
 
-    /// ProfileSwitcher: the account menu (switch / remove / add / sign out).
+    /// ProfileSwitcher: the account menu (switch / remove / add / sign out). `profiles.list()` runs off the UI thread
+    /// (it reads the profile store), the menu opens when it answers.
     pub(crate) fn lists_profile_menu(&mut self, pos: gpui::Point<gpui::Pixels>, window: &mut Window, cx: &mut Context<Self>) {
+        let b = self.backend.clone();
+        cx.spawn_in(window, async move |this, cx| {
+            let list = cx.background_executor().spawn(async move { b.profiles_list().unwrap_or_default() }).await;
+            let _ = this.update_in(cx, |sh, window, cx| sh.lists_profile_menu_show(list, pos, window, cx));
+        })
+        .detach();
+    }
+
+    fn lists_profile_menu_show(&mut self, list: Vec<sonix_api::Profile>, pos: gpui::Point<gpui::Pixels>, window: &mut Window, cx: &mut Context<Self>) {
         use crate::widgets::context_menu::MenuItem;
         let Some(br) = self.lists.bridge.clone() else { return };
-        let list = self.backend.profiles_list().unwrap_or_default();
         let host = |u: &str| u.split("://").nth(1).unwrap_or(u).split('/').next().unwrap_or(u).to_string();
         let mut items: Vec<MenuItem> = list
             .iter()
@@ -289,13 +298,20 @@ impl Shell {
                     let b = app::backend(cx);
                     cx.spawn(async move |cx| {
                         let r = cx.background_executor().spawn(async move { b.profiles_switch(&id) }).await;
-                        if let (Some(t), Ok(_)) = (br2.upgrade(), r) {
+                        let ok = r.is_ok();
+                        if let (Some(t), true) = (br2.upgrade(), ok) {
                             let _ = t.update(cx, |_, cx| {
                                 cx.emit(ListsEvent::PlaylistsChanged);
                                 cx.emit(ListsEvent::Navigate(Route::Home));
                             });
                         }
-                        let _ = label;
+                        // `showToast(`Switched to ${user} @ ${host}`)` / the error
+                        let msg = match r {
+                            Ok(_) => format!("Switched to {label}"),
+                            Err(e) if !e.message.is_empty() => format!("Could not switch: {}", e.message),
+                            Err(_) => "Could not switch profile".to_string(),
+                        };
+                        let _ = cx.update(|cx| crate::overlays::show_toast(cx, &msg));
                     })
                     .detach();
                 })
@@ -311,9 +327,14 @@ impl Shell {
                     let id = p.id.clone();
                     MenuItem::action(format!("{} @ {}", p.username, host(&p.url)), move |_, cx| {
                         let id = id.clone();
-                        app::call(cx, move |b| {
-                            let _ = b.profiles_remove(&id);
-                        });
+                        let b = app::backend(cx);
+                        cx.spawn(async move |cx| {
+                            let r = cx.background_executor().spawn(async move { b.profiles_remove(&id) }).await;
+                            if r.is_ok() {
+                                let _ = cx.update(|cx| crate::overlays::show_toast(cx, "Profile removed"));
+                            }
+                        })
+                        .detach();
                     })
                     .danger()
                 })
