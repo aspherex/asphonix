@@ -13,7 +13,7 @@ use gpui::{
     App, BoxShadow, ClickEvent, Context, CursorStyle, Entity, FocusHandle, Focusable, Global, IntoElement, MouseButton, Pixels, Point, Render, SharedString, Subscription, Window, div, point,
     prelude::*, px, rgba,
 };
-use sonix_api::{Playlist, Track, format as fmt};
+use sonix_api::{Playlist, Track, UpdateInfo, UpdateProgress, format as fmt};
 use std::rc::Rc;
 use std::time::Duration;
 
@@ -30,6 +30,18 @@ enum Modal {
     Confirm { title: SharedString, message: SharedString, confirm_label: SharedString, danger: bool, on_ok: Rc<dyn Fn(&mut App)> },
     Prompt { title: SharedString, confirm_label: SharedString, input: Entity<TextInput>, on_ok: Rc<dyn Fn(String, &mut App)>, _sub: Subscription },
     TrackInfo(Box<Track>),
+    Update,
+}
+
+/// `updates.svelte.ts` UpdateStore: the pending release and the install progress.
+#[derive(Default)]
+struct UpdState {
+    info: Option<UpdateInfo>,
+    installing: bool,
+    downloaded: u64,
+    total: Option<u64>,
+    error: Option<String>,
+    playing: bool,
 }
 
 struct AddMenu {
@@ -46,11 +58,12 @@ pub struct Overlays {
     toast_gen: u64,
     focus: FocusHandle,
     want_focus: bool,
+    upd: UpdState,
 }
 
 impl Overlays {
     pub fn new(cx: &mut Context<Self>) -> Self {
-        Self { modal: None, add_menu: None, toast: None, toast_gen: 0, focus: cx.focus_handle(), want_focus: false }
+        Self { modal: None, add_menu: None, toast: None, toast_gen: 0, focus: cx.focus_handle(), want_focus: false, upd: UpdState::default() }
     }
 
     pub fn is_open(&self) -> bool {
@@ -60,6 +73,9 @@ impl Overlays {
     /// Escape: closes the topmost overlay; true when one was open.
     pub fn escape(&mut self, cx: &mut Context<Self>) -> bool {
         if self.modal.is_some() {
+            if matches!(self.modal, Some(Modal::Update)) && self.upd.installing {
+                return true;
+            }
             self.modal = None;
             cx.notify();
             true
@@ -319,6 +335,55 @@ impl Render for Overlays {
                         panel(&th, title, None, div().flex().flex_col().gap(px(12.)).p(px(12.)).child(field).child(div().flex().flex_row().justify_end().gap(px(8.)).child(cancel).child(ok))).into_any_element(),
                     )
                 }
+                Modal::Update => {
+                    let u = &self.upd;
+                    let info = u.info.clone().unwrap_or(UpdateInfo { available: false, current_version: String::new(), version: None, notes: None, date: None });
+                    let pct = u.total.filter(|t| *t > 0).map(|t| ((u.downloaded as f64 / t as f64) * 100.0).round().min(100.0) as u32);
+                    let later = button("upd-later", th, Variant::Secondary, "Later", None, u.installing, window).on_click(cx.listener(|this, _, _, cx| {
+                        if !this.upd.installing {
+                            this.modal = None;
+                            cx.notify();
+                        }
+                    }));
+                    let install = crate::probe::pid("upd.install", button("upd-install", th, Variant::Primary, "Install & restart", None, u.installing, window).on_click(cx.listener(|this, _, _, cx| this.install_update(cx))));
+                    let versions = div()
+                        .flex()
+                        .flex_row()
+                        .child(txt(&th, MONO_DATA, format!("v{} → ", info.current_version)).color(th.muted))
+                        .child(txt(&th, MONO_DATA, format!("v{}", info.version.clone().unwrap_or_default())).color(th.accent_fg));
+                    let mut body = div().flex().flex_col().gap(px(12.)).p(px(12.)).child(versions);
+                    if let Some(n) = &info.notes {
+                        // plain text only (never markup), `pre-wrap`
+                        body = body.child(
+                            div()
+                                .max_h(px(220.))
+                                .p(px(8.))
+                                .bg(th.base)
+                                .border_1()
+                                .border_color(th.border)
+                                .overflow_hidden()
+                                .child(crate::typo::ts(&th, BODY_SM).text_color(th.text).child(n.clone())),
+                        );
+                    }
+                    if u.playing {
+                        body = body.child(crate::typo::ts(&th, BODY_SM).text_color(th.clip).child("Playback will stop while SONIX updates and restarts."));
+                    }
+                    if u.installing {
+                        let frac = pct.map(|p| p as f32 / 100.0).unwrap_or(0.0);
+                        body = body.child(div().h(px(6.)).w_full().bg(th.high).overflow_hidden().child(div().h_full().w(gpui::relative(frac)).bg(th.accent)));
+                        let text = match pct {
+                            None => "Downloading…".to_string(),
+                            Some(p) if p >= 100 => "Verifying & installing…".to_string(),
+                            Some(p) => format!("Downloading {p}% · {}", format_bytes(u.downloaded as f64)),
+                        };
+                        body = body.child(txt(&th, MONO_CODE, text).color(th.muted));
+                    }
+                    if let Some(e) = &u.error {
+                        body = body.child(crate::typo::ts(&th, BODY_SM).text_color(th.clip).child(e.clone()));
+                    }
+                    body = body.child(div().flex().flex_row().justify_end().gap(px(8.)).child(later).child(install));
+                    (460.0f32.min(vw - 32.0), panel(&th, "Update available", info.date.as_deref(), body).into_any_element())
+                }
                 Modal::TrackInfo(t) => {
                     let f = &t.format;
                     let mut rows: Vec<(&str, String, bool)> = vec![("Format", f.suffix.to_uppercase(), false)];
@@ -397,8 +462,10 @@ impl Render for Overlays {
                             cx.stop_propagation();
                             match ev.keystroke.key.as_str() {
                                 "escape" => {
-                                    this.modal = None;
-                                    cx.notify();
+                                    if !(matches!(this.modal, Some(Modal::Update)) && this.upd.installing) {
+                                        this.modal = None;
+                                        cx.notify();
+                                    }
                                 }
                                 "enter" if matches!(this.modal, Some(Modal::Confirm { .. })) => this.submit_confirm(cx),
                                 "enter" if matches!(this.modal, Some(Modal::TrackInfo(_))) => {
@@ -494,4 +561,51 @@ fn format_bytes(b: f64) -> String {
         i += 1;
     }
     format!("{:.*} {}", if v < 10.0 { 2 } else { 1 }, v, units[i])
+}
+
+impl Overlays {
+    /// `installUpdate`: explicit user action only; on success the real app restarts (the mock just stays at 100 %).
+    fn install_update(&mut self, cx: &mut Context<Self>) {
+        if self.upd.installing {
+            return;
+        }
+        self.upd.installing = true;
+        self.upd.downloaded = 0;
+        self.upd.total = None;
+        self.upd.error = None;
+        cx.notify();
+        let b = app::backend(cx);
+        cx.spawn(async move |this, cx| {
+            let r = cx.background_executor().spawn(async move { b.updates_install() }).await;
+            let _ = this.update(cx, |t, cx| {
+                if let Err(e) = r {
+                    t.upd.error = Some(e.to_string());
+                    t.upd.installing = false;
+                    cx.notify();
+                }
+            });
+        })
+        .detach();
+    }
+}
+
+/// `openUpdateDialog` (title-bar badge click): `playing` adds the "Playback will stop" warning.
+pub fn open_update(cx: &mut App, info: UpdateInfo, playing: bool) {
+    with(cx, move |o, cx| {
+        o.upd.info = Some(info);
+        o.upd.error = None;
+        o.upd.playing = playing;
+        o.modal = Some(Modal::Update);
+        o.want_focus = true;
+        cx.notify();
+    });
+}
+
+/// `update-progress` event.
+pub fn update_progress(cx: &mut App, p: UpdateProgress) {
+    with(cx, move |o, cx| {
+        o.upd.downloaded = p.downloaded;
+        o.upd.total = p.total;
+        cx.notify();
+    });
 }

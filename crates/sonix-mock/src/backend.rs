@@ -81,6 +81,9 @@ struct Inner {
     core: Mutex<Core>,
     cv: Condvar,
     subs: Mutex<Vec<Sender<Event>>>,
+    mock_update: AtomicBool,
+    /// Manual-clock install progress: (seconds since the last tick, bytes downloaded).
+    install: Mutex<Option<(f64, u64)>>,
     spectrum_active: AtomicBool,
     shutdown: AtomicBool,
     starred: Mutex<HashMap<String, String>>,
@@ -186,6 +189,8 @@ impl MockBackend {
             cv: Condvar::new(),
             subs: Mutex::new(Vec::new()),
             spectrum_active: AtomicBool::new(false),
+            mock_update: AtomicBool::new(std::env::var_os("SONIX_MOCK_UPDATE").is_some()),
+            install: Mutex::new(None),
             shutdown: AtomicBool::new(false),
             starred: Mutex::new(stars),
             playlists,
@@ -202,6 +207,17 @@ impl MockBackend {
     /// spectrum frame evaluated at absolute clock time `t` seconds, like mock.ts's two intervals.
     pub fn advance(&self, dt: f64, t: f64) {
         let inner = &self.inner;
+        {
+            let mut ins = inner.install.lock().unwrap();
+            if let Some((acc, got)) = ins.as_mut() {
+                *acc += dt;
+                while *acc >= 0.2 - 1e-9 && *got < 12_000_000 {
+                    *acc -= 0.2;
+                    *got = (*got + 1_500_000).min(12_000_000);
+                    inner.emit(Event::UpdateProgress(UpdateProgress { downloaded: *got, total: Some(12_000_000) }));
+                }
+            }
+        }
         let mut core = inner.core.lock().unwrap();
         let mut queue_changed = false;
         if core.status == PlaybackStatus::Playing {
@@ -252,6 +268,11 @@ impl MockBackend {
     }
 
     /// Sorted, filtered permutation of all track indices; one (sort, dir, filter) is cached.
+    /// `?mockUpdate=1`: `updates_check` finds a (fake) newer release.
+    pub fn set_mock_update(&self, on: bool) {
+        self.inner.mock_update.store(on, Ordering::Relaxed);
+    }
+
     pub fn permutation(&self, sort: TrackSortField, dir: SortDir, filter: Option<&str>) -> Arc<Vec<u32>> {
         self.inner.permutation(sort, dir, filter)
     }
@@ -905,6 +926,39 @@ impl PlayerApi for MockBackend {
         self.inner.push_state(&c);
         drop(c);
         self.inner.emit(Event::QueueChanged);
+        Ok(())
+    }
+
+    fn updates_check(&self) -> ApiResult<UpdateInfo> {
+        let cur = env!("CARGO_PKG_VERSION").to_string();
+        let info = if self.inner.mock_update.load(Ordering::Relaxed) {
+            UpdateInfo { available: true, current_version: cur, version: Some("9.9.9".into()), date: Some("2026-01-01".into()), notes: Some("Features
+- Example feature
+
+Fixes
+- Example fix <b>not bold</b>".into()) }
+        } else {
+            UpdateInfo { available: false, current_version: cur, version: None, notes: None, date: None }
+        };
+        if info.available {
+            self.inner.emit(Event::UpdateAvailable(info.clone()));
+        }
+        Ok(info)
+    }
+
+    fn updates_install(&self) -> ApiResult<()> {
+        let total = 12_000_000u64;
+        let mut downloaded = 0u64;
+        if self.inner.core.lock().unwrap().det_half {
+            // parity: the harness advances the clock; progress ticks come from `advance`
+            *self.inner.install.lock().unwrap() = Some((0.0, 0));
+            return Ok(());
+        }
+        while downloaded < total {
+            downloaded = (downloaded + 1_500_000).min(total);
+            self.inner.emit(Event::UpdateProgress(UpdateProgress { downloaded, total: Some(total) }));
+            std::thread::sleep(Duration::from_millis(200));
+        }
         Ok(())
     }
 

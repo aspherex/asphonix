@@ -27,7 +27,7 @@ fn host(url: &str) -> String {
 }
 
 impl Shell {
-    pub(crate) fn title_bar(&self, window: &mut Window, _cx: &mut Context<Self>) -> impl IntoElement + use<> {
+    pub(crate) fn title_bar(&self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement + use<> {
         let th = self.th;
         let maximized = window.is_maximized();
         let ctrl = move |id: &'static str, area: WindowControlArea, name: &'static str, size: f32, danger: bool| {
@@ -78,6 +78,25 @@ impl Shell {
                     .children(mock.map(|m| div().mt(px(VERSION_DY)).px(px(tb::VERSION_PAD_X)).bg(th.high).child(txt(&th, MONO_CODE, m).color(th.accent_fg)))),
             )
             .child(div().flex_1())
+            .children(self.update.clone().filter(|u| u.available).map(|u| {
+                // `.update { margin-right: var(--space-sm); padding: 2px var(--space-sm); accent fill }`
+                pid(
+                    "titlebar.update",
+                    div()
+                        .id("update-badge")
+                        .mr(px(8.))
+                        .px(px(8.))
+                        .py(px(2.))
+                        .bg(th.accent)
+                        .cursor(CursorStyle::PointingHand)
+                        .hover(|s| s.opacity(0.85))
+                        .child(txt(&th, LABEL_CAPS, format!("Update {}", u.version.clone().unwrap_or_default())).color(th.accent_text))
+                        .on_click(cx.listener(move |this, _, _, cx| {
+                            let playing = this.player.read(cx).state.status == sonix_api::PlaybackStatus::Playing;
+                            crate::overlays::open_update(cx, u.clone(), playing);
+                        })),
+                )
+            }))
             .child(
                 div()
                     .flex()

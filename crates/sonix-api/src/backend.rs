@@ -188,6 +188,14 @@ pub trait PlayerApi {
     fn radio_start(&self, _req: RadioStartRequest) -> ApiResult<()> {
         Ok(())
     }
+    /// `updates_check`: the newer release, if any (also announced as `Event::UpdateAvailable`).
+    fn updates_check(&self) -> ApiResult<UpdateInfo> {
+        Ok(UpdateInfo { available: false, current_version: String::new(), version: None, notes: None, date: None })
+    }
+    /// `updates_install`: download + install + restart (progress as `Event::UpdateProgress`); explicit user action only.
+    fn updates_install(&self) -> ApiResult<()> {
+        Ok(())
+    }
     /// `lyrics_get`: None = no lyrics for the track.
     fn lyrics_get(&self, _track_id: &str) -> ApiResult<Option<Lyrics>> {
         Ok(None)

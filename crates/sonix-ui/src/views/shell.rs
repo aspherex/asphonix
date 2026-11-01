@@ -47,6 +47,8 @@ pub struct Shell {
     pub(crate) menu: Entity<ContextMenu>,
     pub(crate) overlays: Entity<crate::overlays::Overlays>,
     pub(crate) boot: Option<Entity<super::boot::BootIntro>>,
+    /// `updateStore.info`: the newer release found by `updates_check` (title-bar badge, UpdateDialog).
+    pub(crate) update: Option<sonix_api::UpdateInfo>,
     pub(crate) card: Option<CardHandle>,
     card_gen: u64,
     prev_track_id: Option<String>,
@@ -137,6 +139,7 @@ impl Shell {
             menu,
             overlays,
             boot: None,
+            update: None,
             card: None,
             card_gen: 0,
             prev_track_id: None,
@@ -317,6 +320,13 @@ impl Shell {
                     self.tracks.update(cx, |t, cx| t.refresh_rows(cx));
                 }
             }
+            Event::UpdateAvailable(i) => {
+                if i.available {
+                    self.update = Some(i);
+                    cx.notify();
+                }
+            }
+            Event::UpdateProgress(p) => crate::overlays::update_progress(cx, p),
             Event::SyncProgress(_) | Event::Connection(_) => {}
         }
     }

@@ -731,6 +731,10 @@ pub enum Event {
     Connection(ConnectionStatusEvent),
     /// The queue changed (rows, order, source); re-fetch `player_get_queue`.
     QueueChanged,
+    /// `update-available`: a newer release was found.
+    UpdateAvailable(UpdateInfo),
+    /// `update-progress` while `updates_install` downloads.
+    UpdateProgress(UpdateProgress),
     /// Stars/ratings/playlists changed server side or by another view.
     LibraryChanged,
 }
@@ -939,4 +943,29 @@ pub struct RadioSeed {
 #[serde(rename_all = "camelCase")]
 pub struct RadioStartRequest {
     pub seed: RadioSeed,
+}
+
+// --------------------------------------------------------------- updater
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct UpdateInfo {
+    pub available: bool,
+    pub current_version: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub version: Option<String>,
+    /// Release notes, PLAIN TEXT - never render as markup.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub notes: Option<String>,
+    /// `YYYY-MM-DD`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub date: Option<String>,
+}
+
+/// `update-progress` event while `updates_install` downloads.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct UpdateProgress {
+    pub downloaded: u64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub total: Option<u64>,
 }

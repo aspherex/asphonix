@@ -254,6 +254,18 @@ impl Shell {
                     _ => err("card capture failed"),
                 }
             }
+            "mockupdate" => {
+                if let Some(m) = MOCK.get() {
+                    m.set_mock_update(true);
+                }
+                json!({"ok": true})
+            }
+            "updcheck" => {
+                crate::app::call(cx, |b| {
+                    let _ = b.updates_check();
+                });
+                json!({"ok": true})
+            }
             "boot" => {
                 self.start_boot(window, cx);
                 window.refresh();
