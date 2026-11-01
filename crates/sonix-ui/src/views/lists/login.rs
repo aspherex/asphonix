@@ -64,6 +64,7 @@ impl LoginView {
         this
     }
 
+#[allow(dead_code)]
     pub fn release(&mut self) {}
 
     #[cfg(feature = "parity")]

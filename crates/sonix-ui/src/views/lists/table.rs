@@ -65,6 +65,7 @@ pub struct TableCfg {
     /// trailing action buttons the head reserves (`actionCount`)
     pub action_count: usize,
     pub empty: &'static str,
+#[allow(dead_code)]
     pub aria_loading: &'static str,
 }
 
@@ -160,6 +161,7 @@ impl Table {
     }
 
     /// Re-read from page 0 (a like/unlike elsewhere, a clear): drops rows and selection, keeps nothing stale.
+#[allow(dead_code)]
     pub fn reset(&mut self, cx: &mut Context<Self>) {
         if let Data::Paged { fetch, .. } = &self.data {
             let fetch = fetch.clone();
@@ -239,6 +241,7 @@ impl Table {
             pager.release();
         }
     }
+#[allow(dead_code)]
     pub fn refresh_visible(&mut self, cx: &mut Context<Self>) {
         if let Data::Paged { .. } = &self.data {
             let (a, z) = (self.vis.start / PAGE, self.vis.end.saturating_sub(1) / PAGE);
@@ -261,7 +264,13 @@ impl Table {
     pub(crate) fn parity_state(&self, window: &Window) -> serde_json::Value {
         let sel = self.sel.indices();
         let scroll = f32::from(-self.list.0.borrow().base_handle.offset().y);
+        let titles: Vec<String> = if scroll < 36.0 {
+            (0..3).map(|i| match self.item(i) { Some(RowItem::Track { t, .. }) => t.title.clone(), _ => String::new() }).collect()
+        } else {
+            vec![]
+        };
         serde_json::json!({
+            "titles": titles,
             "tableFocus": self.focus.is_focused(window),
             "selectionCount": if sel.len() > 1 { sel.len() } else { 0 },
             "selection": sel.iter().filter(|i| **i < 12).collect::<Vec<_>>(),
@@ -544,7 +553,8 @@ impl Table {
                 } else {
                     let m = ev.modifiers();
                     if this.cfg.multi {
-                        this.sel.click(ix, m.control || m.platform, m.shift);
+                        // TrackSelection.range keeps the existing selection and the anchor
+                        this.sel.click(ix, m.control || m.platform || m.shift, m.shift);
                     } else {
                         this.sel.move_to(ix, false);
                     }

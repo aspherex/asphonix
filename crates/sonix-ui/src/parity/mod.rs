@@ -312,8 +312,8 @@ impl Shell {
                 tracks[k] = lp[k].clone();
             }
             tracks["sort"] = serde_json::Value::Null;
-            tracks["trackCount"] = lp["listTotal"].clone();
-            tracks["titles"] = serde_json::json!([]);
+            tracks["trackCount"] = serde_json::Value::Null;
+            tracks["titles"] = lp["titles"].clone();
             tracks["focus"] = if lp["tableFocus"] == true { "tracklist".into() } else { "body".into() };
         }
         let menu_open = self.menu.read(cx).is_open();

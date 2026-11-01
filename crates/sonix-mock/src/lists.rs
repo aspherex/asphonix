@@ -7,6 +7,7 @@ use sonix_api::*;
 use std::collections::HashMap;
 use std::sync::Arc;
 
+#[allow(dead_code)]
 pub const HISTORY_MAX: usize = 10_000;
 
 pub(crate) struct Cols {

@@ -9,6 +9,7 @@ use gpui::{App, CursorStyle, Div, Hsla, Stateful, Window, div, prelude::*, px};
 pub enum Tone {
     Default,
     Accent,
+#[allow(dead_code)]
     Clip,
 }
 

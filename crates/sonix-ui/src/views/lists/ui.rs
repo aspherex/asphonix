@@ -144,6 +144,7 @@ pub fn panel(th: &Theme, title: &str, body: impl IntoElement) -> Div {
         .child(div().min_h_0().child(body))
 }
 
+#[allow(dead_code)]
 pub fn any(e: impl IntoElement) -> AnyElement {
     e.into_any_element()
 }

@@ -254,11 +254,34 @@ impl TrackPage {
         });
     }
 
+    /// Tracks of the menu selection; pages the table has evicted (or never loaded, after Ctrl+A) are fetched
+    /// again (`resolveTracks`).
     fn selected_tracks(&mut self, ix: usize, cx: &mut Context<Self>) -> Vec<Track> {
-        self.table.update(cx, |t, _| {
+        let (idx, have) = self.table.update(cx, |t, _| {
             let idx = t.menu_indices(ix);
-            t.tracks_at(&idx)
-        })
+            let have = t.tracks_at(&idx);
+            (idx, have)
+        });
+        if have.len() == idx.len() || matches!(self.kind, PageKind::Playlist(_)) {
+            return have;
+        }
+        let mut pages: Vec<usize> = idx.iter().map(|i| i / crate::pager::PAGE).collect();
+        pages.sort_unstable();
+        pages.dedup();
+        let (b, kind, seed) = (self.backend.clone(), self.kind.clone(), self.seed);
+        let mut fetched: std::collections::HashMap<usize, Vec<Track>> = Default::default();
+        for p in pages {
+            let req = PageRequest { offset: p * crate::pager::PAGE, limit: crate::pager::PAGE };
+            let r = match &kind {
+                PageKind::Liked => b.liked_get(req),
+                PageKind::Smart(id) => b.smart_tracks(id, seed, req),
+                PageKind::Playlist(_) => continue,
+            };
+            if let Ok(r) = r {
+                fetched.insert(p, r.items);
+            }
+        }
+        idx.iter().filter_map(|i| fetched.get(&(i / crate::pager::PAGE)).and_then(|v| v.get(i % crate::pager::PAGE)).cloned()).collect()
     }
 
     fn read_only(&self) -> bool {

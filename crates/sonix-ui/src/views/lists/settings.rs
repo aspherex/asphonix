@@ -121,6 +121,7 @@ impl SettingsView {
         .detach();
     }
 
+#[allow(dead_code)]
     pub fn release(&mut self) {}
 
     #[cfg(feature = "parity")]
