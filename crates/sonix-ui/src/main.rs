@@ -9,6 +9,7 @@ mod columns;
 mod icons_gen;
 mod metrics;
 mod pager;
+mod playerkeys;
 #[cfg(feature = "parity")]
 mod parity;
 mod perf;

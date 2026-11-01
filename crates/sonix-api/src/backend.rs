@@ -172,6 +172,10 @@ pub trait PlayerApi {
     fn player_get_waveform(&self, _track_id: &str) -> ApiResult<Waveform> {
         unimpl!("player_get_waveform")
     }
+    /// `fullPlayer.loopCycle`: A-B loop (set A, set B, clear).
+    fn player_loop_cycle(&self) -> ApiResult<()> {
+        Ok(())
+    }
 }
 
 /// `output_*`

@@ -100,7 +100,7 @@ impl Shell {
                 }
             }
         }));
-        subs.push(cx.subscribe(&np, |this: &mut Shell, _, _: &NpEvent, cx| this.go_back(cx)));
+        subs.push(cx.subscribe(&np, |this: &mut Shell, _, ev: &NpEvent, cx| this.on_np_event(ev, cx)));
         // `TopBar.svelte: onSearchFocus`: focusing the search box navigates to the Search route
         let search_focus = search.read(cx).focus_handle.clone();
         subs.push(cx.on_focus(&search_focus, window, |this: &mut Shell, _, cx| this.navigate(Route::Search, cx)));
@@ -533,6 +533,15 @@ impl Render for Shell {
             .id("root")
             .key_context("Root")
             .track_focus(&self.focus)
+            .on_key_down(cx.listener(|this, ev: &gpui::KeyDownEvent, window, cx| {
+                let m = ev.keystroke.modifiers;
+                if *this.router.current() == Route::NowPlaying && this.focus.is_focused(window) && !m.control && !m.alt && !m.platform && !m.shift {
+                    let key = ev.keystroke.key.clone();
+                    if this.np.update(cx, |n, cx| n.key(&key, cx)) {
+                        cx.stop_propagation();
+                    }
+                }
+            }))
             .on_action(cx.listener(|_, _: &PlayPause, _, cx| {
                 app::call(cx, |b| {
                     let _ = b.player_play_pause();
@@ -609,3 +618,19 @@ impl Shell {
     }
 }
 
+
+impl Shell {
+    fn on_np_event(&mut self, ev: &NpEvent, cx: &mut Context<Self>) {
+        match ev {
+            NpEvent::Close => self.go_back(cx),
+            NpEvent::Navigate(r) => self.navigate(r.clone(), cx),
+            NpEvent::Rate { id, rating, .. } => {
+                let (id, rating) = (id.clone(), *rating);
+                app::call(cx, move |b| {
+                    let _ = b.rating_set(sonix_api::SetRatingRequest { id, kind: sonix_api::StarTargetType::Track, rating });
+                });
+            }
+            NpEvent::AddToPlaylist { .. } | NpEvent::TrackInfo(_) => {}
+        }
+    }
+}

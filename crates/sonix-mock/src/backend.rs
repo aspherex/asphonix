@@ -55,6 +55,12 @@ struct Core {
     window: usize,
     rng: u64,
     output_mode: OutputMode,
+    /// Virtual seconds of playback (advances with `pos`): the waveform scan clock.
+    vt: f64,
+    wave_start: HashMap<String, f64>,
+    loop_a: Option<f64>,
+    loop_b: Option<f64>,
+    loop_track: Option<String>,
 }
 
 struct Inner {
@@ -156,6 +162,11 @@ impl MockBackend {
                 window: QUEUE_WINDOW,
                 rng: seed.unwrap_or_else(|| 0x9e37_79b9_7f4a_7c15 ^ std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_nanos() as u64).unwrap_or(1)),
                 output_mode: OutputMode::Exclusive,
+                vt: 0.0,
+                wave_start: HashMap::new(),
+                loop_a: None,
+                loop_b: None,
+                loop_track: None,
             }),
             cv: Condvar::new(),
             subs: Mutex::new(Vec::new()),
@@ -180,6 +191,8 @@ impl MockBackend {
         let mut queue_changed = false;
         if core.status == PlaybackStatus::Playing {
             core.pos += dt;
+            core.vt += dt;
+            Inner::loop_wrap(&mut core);
             let dur = core.current.and_then(|i| core.entries.get(i)).map(|e| inner.lib.sort_fields(e.ix as usize).duration as f64).unwrap_or(0.0);
             if dur > 0.0 && core.pos >= dur {
                 if Inner::advance(&mut core) {
@@ -297,6 +310,10 @@ impl Inner {
         s.float_mix = if shared && track.is_some() { Some(true) } else { None };
         s.format_label = track.as_ref().map(|t| t.format.suffix.to_uppercase());
         s.volume = c.volume;
+        if c.loop_track.is_some() && c.loop_track == c.current.and_then(|i| c.entries.get(i)).map(|e| format!("tr_{}", e.ix)) {
+            s.loop_a = c.loop_a;
+            s.loop_b = c.loop_b;
+        }
         s.volume_db = volume_db(c.volume);
         s.bit_perfect = track.is_some() && c.status != PlaybackStatus::Stopped && !shared && c.volume >= 1.0;
         s.shuffle = c.shuffle;
@@ -330,6 +347,19 @@ impl Inner {
                 c.current = Some(cu - keep_from);
             }
         }
+    }
+
+    /// mock.ts position ticker: reaching B jumps back to A.
+    fn loop_wrap(c: &mut Core) {
+        if let (Some(a), Some(b)) = (c.loop_a, c.loop_b)
+            && c.pos >= b
+        {
+            c.pos = a;
+        }
+    }
+
+    fn current_id(&self, c: &Core) -> Option<String> {
+        c.current.and_then(|i| c.entries.get(i)).map(|e| format!("tr_{}", e.ix))
     }
 
     fn start_current(c: &mut Core) {
@@ -416,6 +446,8 @@ fn ticker(weak: Weak<Inner>) {
         last = Instant::now();
         core.pos += dt;
         state_acc += dt;
+        core.vt += dt;
+        Inner::loop_wrap(&mut core);
         let dur = core.current.and_then(|i| core.entries.get(i)).map(|e| inner.lib.sort_fields(e.ix as usize).duration as f64).unwrap_or(0.0);
         let mut queue_changed = false;
         if dur > 0.0 && core.pos >= dur {
@@ -791,8 +823,41 @@ impl PlayerApi for MockBackend {
     }
 
     fn player_get_waveform(&self, track_id: &str) -> ApiResult<Waveform> {
-        let ix = track_index(track_id).ok_or_else(|| ApiError::not_found("track"))?;
-        Ok(Waveform { track_id: track_id.into(), buckets: synth_waveform(ix), filled: WAVEFORM_BUCKETS, done: true })
+        mock_waveform(self, track_id)
+    }
+
+    fn player_loop_cycle(&self) -> ApiResult<()> {
+        let mut c = self.inner.core.lock().unwrap();
+        let Some(id) = self.inner.current_id(&c) else { return Ok(()) };
+        if c.loop_track.as_deref() != Some(id.as_str()) {
+            c.loop_a = None;
+            c.loop_b = None;
+        }
+        const MIN: f64 = 0.5;
+        let pos = c.pos;
+        match (c.loop_a, c.loop_b) {
+            (None, _) => {
+                c.loop_a = Some(pos);
+                c.loop_b = None;
+                c.loop_track = Some(id);
+            }
+            (Some(a), None) => {
+                if pos >= a + MIN {
+                    c.loop_b = Some(pos);
+                    c.loop_track = Some(id);
+                } else if pos + MIN <= a {
+                    c.loop_a = Some(pos);
+                    c.loop_b = Some(a);
+                    c.loop_track = Some(id);
+                }
+            }
+            (Some(_), Some(_)) => {
+                c.loop_a = None;
+                c.loop_b = None;
+            }
+        }
+        self.inner.push_state(&c);
+        Ok(())
     }
 }
 
@@ -817,7 +882,7 @@ impl OutputApi for MockBackend {
         let st = self.inner.state(&c);
         Ok(OutputStatus {
             device_id: Some("mock".into()),
-            device_name: Some("MOCK OUTPUT (no audio)".into()),
+            device_name: Some("Topping E30 II (USB Audio)".into()),
             mode: c.output_mode,
             sample_rate: st.sample_rate,
             bit_depth: st.bit_depth,
@@ -827,7 +892,7 @@ impl OutputApi for MockBackend {
         })
     }
     fn output_list_devices(&self) -> ApiResult<Vec<OutputDevice>> {
-        Ok(vec![OutputDevice { id: "mock".into(), name: "MOCK OUTPUT (no audio)".into(), is_default: true }])
+        Ok(vec![OutputDevice { id: "mock".into(), name: "Topping E30 II (USB Audio)".into(), is_default: true }])
     }
     fn output_set_mode(&self, mode: OutputMode) -> ApiResult<()> {
         let mut c = self.inner.core.lock().unwrap();
@@ -973,4 +1038,41 @@ mod tests {
         assert_eq!(a, b.art_get("al_5", 64).unwrap());
         assert_ne!(a.rgba, b.art_get("al_6", 64).unwrap().rgba);
     }
+}
+
+/// mock.ts `mockWaveform`: only the track playback holds is scanned (a stopped/other track answers
+/// "no waveform"); the scan fills in over ~1.5 s of (virtual) playback time, 240 RMS buckets.
+fn mock_waveform(b: &MockBackend, track_id: &str) -> ApiResult<Waveform> {
+    let ix = track_index(track_id).ok_or_else(|| ApiError::not_found("track"))?;
+    let mut c = b.inner.core.lock().unwrap();
+    let t0 = match c.wave_start.get(track_id) {
+        Some(t) => *t,
+        None => {
+            if b.inner.current_id(&c).as_deref() != Some(track_id) || c.status == PlaybackStatus::Stopped {
+                return Ok(Waveform { track_id: track_id.into(), buckets: vec![0; WAVEFORM_BUCKETS], filled: 0, done: true });
+            }
+            let t = c.vt;
+            c.wave_start.insert(track_id.into(), t);
+            while c.wave_start.len() > 8 {
+                let k = c.wave_start.keys().next().cloned().unwrap();
+                c.wave_start.remove(&k);
+            }
+            t
+        }
+    };
+    let filled = (((c.vt - t0) / 1.5 * WAVEFORM_BUCKETS as f64).floor().max(0.0) as usize).min(WAVEFORM_BUCKETS);
+    let seed = (ix + 1) as f64;
+    let buckets: Vec<u8> = (0..WAVEFORM_BUCKETS)
+        .map(|i| {
+            if i >= filled {
+                return 0;
+            }
+            let x = i as f64 / (WAVEFORM_BUCKETS - 1) as f64;
+            let section = 0.55 + 0.35 * (x * std::f64::consts::PI * (2.0 + ((ix + 1) % 3) as f64) + seed).sin();
+            let env = (x * 12.0).min(1.0) * ((1.0 - x) * 8.0).min(1.0);
+            let grit = 0.75 + 0.25 * (i as f64 * 2.3 + seed * 1.7).sin() * (i as f64 * 0.9 + seed).cos();
+            (255.0 * env * section * grit).round().clamp(3.0, 255.0) as u8
+        })
+        .collect();
+    Ok(Waveform { track_id: track_id.into(), buckets, filled, done: filled >= WAVEFORM_BUCKETS })
 }
