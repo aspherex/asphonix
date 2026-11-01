@@ -57,11 +57,12 @@ impl GridHost<Album> for FavoritesView {
     fn grid(&mut self) -> &mut GridState<Album> {
         &mut self.grid
     }
-    fn cell(&mut self, _ix: usize, item: Option<Album>, geo: Geo, window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
+    fn cell(&mut self, ix: usize, item: Option<Album>, geo: Geo, window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
         let th = app::theme(cx);
         // `{#if !album}<div class="loading">`
         let Some(a) = item else { return div().w(px(geo.cell_w)).h(px(geo.cell_h)).flex_none().bg(th.low).into_any_element() };
-        card(&self.ctx.clone(), &th, CardItem::Album(&a), geo.cell_w, Some(geo.cell_h), None, window, cx)
+        let ids = crate::views::library::pages::web_index(&self.grid, ix, geo).filter(|n| *n < 8).map(|n| format!("lib.card.{n}"));
+        card(&self.ctx.clone(), &th, CardItem::Album(&a), geo.cell_w, Some(geo.cell_h), ids, window, cx)
     }
     fn request(&mut self, page: usize, cx: &mut Context<Self>) {
         if self.grid.pager.want(page) {

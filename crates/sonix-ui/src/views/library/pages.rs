@@ -18,7 +18,7 @@ use sonix_api::*;
 
 /// The id of the n-th card of the web's rendered window (`.window > .cell:nth-child(n)`): the web renders from
 /// `max(0, floor(scrollTop / rowHeight) - 2)` rows.
-fn web_index<T>(g: &GridState<T>, ix: usize, geo: Geo) -> Option<usize> {
+pub(crate) fn web_index<T>(g: &GridState<T>, ix: usize, geo: Geo) -> Option<usize> {
     let start = ((g.scroll_top() / geo.row_h()).floor() as i64 - 2).max(0) as usize * geo.cols;
     ix.checked_sub(start)
 }
