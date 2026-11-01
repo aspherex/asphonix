@@ -49,6 +49,7 @@ pub struct TrackPage {
     liked: Option<LikedSummary>,
     smart: Option<SmartSummary>,
     seed: u32,
+    more_bounds: std::rc::Rc<std::cell::Cell<gpui::Bounds<gpui::Pixels>>>,
     playlists: Vec<Playlist>,
     rev: u64,
     _subs: Vec<Subscription>,
@@ -122,6 +123,7 @@ impl TrackPage {
             liked: None,
             smart: None,
             seed: initial_seed(),
+            more_bounds: Default::default(),
             playlists: Vec::new(),
             rev: 0,
             _subs: subs,
@@ -675,12 +677,19 @@ impl Render for TrackPage {
                         })
                         .detach();
                     }))))
-                    .child(pid(names.next().unwrap(), icon_btn40("pg-more", &th, "more", false).on_click(cx.listener(|this, ev: &ClickEvent, _, cx| {
-                        let Some(s) = this.smart.clone() else { return };
-                        let items = menus::smart_menu_items(cx.entity().downgrade(), &s, this.seed, true);
-                        let r = ev.position();
-                        this.show_menu(items, r, cx);
-                    }))));
+                    .child({
+                        let mb = self.more_bounds.clone();
+                        pid(
+                            names.next().unwrap(),
+                            icon_btn40("pg-more", &th, "more", false).relative().child(gpui::canvas(move |b, _, _| mb.set(b), |_, _, _, _| ()).absolute().size_full()).on_click(cx.listener(|this, _: &ClickEvent, _, cx| {
+                                let Some(s) = this.smart.clone() else { return };
+                                let items = menus::smart_menu_items(cx.entity().downgrade(), &s, this.seed, true);
+                                // : left edge, 4 px below the button
+                                let b = this.more_bounds.get();
+                                this.show_menu(items, gpui::point(b.origin.x, b.origin.y + b.size.height + px(4.)), cx);
+                            })),
+                        )
+                    });
             }
         }
         info = info.child(actions);

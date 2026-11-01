@@ -304,7 +304,18 @@ impl Shell {
     }
 
     fn parity_state(&self, window: &mut Window, cx: &mut Context<Self>) -> Value {
-        let tracks = self.tracks.read(cx).parity_state(window, cx);
+        let mut tracks = self.tracks.read(cx).parity_state(window, cx);
+        // list routes (port-lists): the visible table reports through the same fields as the Tracks route
+        let lp = self.lists_parity_state(window, cx);
+        if lp.get("selection").is_some() {
+            for k in ["selection", "selectionCount", "scrollTop"] {
+                tracks[k] = lp[k].clone();
+            }
+            tracks["sort"] = serde_json::Value::Null;
+            tracks["trackCount"] = lp["listTotal"].clone();
+            tracks["titles"] = serde_json::json!([]);
+            tracks["focus"] = if lp["tableFocus"] == true { "tracklist".into() } else { "body".into() };
+        }
         let menu_open = self.menu.read(cx).is_open();
         let _ = menu_open;
         let focus = if menu_open && self.menu.read(cx).has_focus(window) {
@@ -327,6 +338,7 @@ impl Shell {
             "trackCount": tracks["trackCount"],
             "titles": tracks["titles"],
             "scrollTop": tracks["scrollTop"],
+            "lists": lp,
             "menu": self.menu.read(cx).parity_state(),
             "queueDrawer": self.queue_drawer,
             "player": {

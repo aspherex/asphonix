@@ -300,7 +300,7 @@ impl Shell {
     pub(crate) fn load_static(&mut self, cx: &mut Context<Self>) {
         let b = self.backend.clone();
         cx.spawn(async move |this, cx| {
-            let (pl, st, albums, artists, liked) = cx
+            let (pl, st, albums, artists, liked, smart) = cx
                 .background_executor()
                 .spawn(async move {
                     (
@@ -309,11 +309,13 @@ impl Shell {
                         b.browse_get_albums(sonix_api::GetAlbumsRequest { offset: 0, limit: 1, sort: sonix_api::AlbumSort::Alphabetical, filter: None }),
                         b.browse_get_artists(sonix_api::GetArtistsRequest { offset: 0, limit: 1, sort: None }),
                         b.liked_count(),
+                        b.smart_list(),
                     )
                 })
                 .await;
             let _ = this.update(cx, |sh, cx| {
                 sh.playlists = pl.unwrap_or_default();
+                sh.lists.smart_side = smart.unwrap_or_default();
                 sh.counts = Counts { tracks: st.as_ref().ok().and_then(|s| s.track_count).map(|n| n as usize), albums: albums.ok().map(|p| p.total), artists: artists.ok().map(|p| p.total), liked: liked.ok() };
                 sh.status = st.ok();
                 cx.notify();
@@ -567,6 +569,8 @@ impl Render for Shell {
             .on_action(cx.listener(|this, _: &Escape, window, cx| {
                 if this.lists_modal_open(cx) {
                     this.lists_modal_cancel(window, cx);
+                } else if this.lists_editor_open(cx) {
+                    this.lists_editor_close(window, cx);
                 } else if this.menu.read(cx).is_open() {
                     this.menu.update(cx, |m, cx| m.close(window, cx));
                 } else if this.lists_search_escape(cx) {
@@ -605,6 +609,7 @@ impl Render for Shell {
                     .when(!on_np && !is_login, |d| d.child(self.dock.clone())),
             )
             .child(self.menu.clone())
+            .children(self.lists_editor_overlay())
             .children(self.lists_modal_overlay());
         #[cfg(feature = "parity")]
         let root = root.child(crate::probe::frame_marker());

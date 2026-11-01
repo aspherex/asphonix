@@ -763,6 +763,13 @@ impl BrowseApi for MockBackend {
     }
 
     fn browse_get_albums(&self, req: GetAlbumsRequest) -> ApiResult<Paged<Album>> {
+        if req.filter.as_ref().is_some_and(|f| f.starred_only) {
+            // mock.ts: `starred.has("al_<i>")` (no album is starred by default)
+            let ids: Vec<usize> = self.inner.starred.lock().unwrap().keys().filter_map(|k| k.strip_prefix("al_")?.parse().ok()).collect();
+            let end = (req.offset + req.limit).min(ids.len());
+            let items = ids[req.offset.min(end)..end].iter().map(|i| self.inner.lib.album(*i)).collect();
+            return Ok(Paged { items, total: ids.len(), offset: req.offset });
+        }
         let total = crate::library::NUM_ALBUMS;
         let end = (req.offset + req.limit).min(total);
         let items = (req.offset.min(end)..end).map(|i| self.inner.lib.album(i)).collect();
