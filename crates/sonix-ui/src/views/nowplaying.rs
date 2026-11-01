@@ -965,11 +965,11 @@ impl Render for NowPlayingView {
                 }
             })
             .child(div().absolute().size_full().child(wave_canvas(th, wd)));
-        let wavebox = pid(
+        let wavebox = div().h(px(wavebox_h)).w_full().child(pid(
             "np.wavebox",
             div()
                 .relative()
-                .h(px(wavebox_h))
+                .h_full()
                 .min_h(px(40.))
                 .w_full()
                 .bg(th.base)
@@ -979,7 +979,7 @@ impl Render for NowPlayingView {
                 .children(hover_label.map(|l| {
                     div().absolute().bottom(gpui::relative(1.0)).mb(px(2.)).left(gpui::relative(hover_x)).ml(px(-20.)).bg(th.high).border_1().border_color(th.border).px(px(4.)).child(txt(&th, MONO_CODE, l).color(th.text))
                 })),
-        );
+        ));
         let shown_pos = if self.seek_preview.is_some() { seek_ratio as f64 * dur } else { ps.position_sec };
         let times = pid(
             "np.times",
@@ -1141,7 +1141,7 @@ impl Render for NowPlayingView {
                 .relative()
                 .flex_basis(px(un_w.min(220.0)))
                 .flex_grow()
-                .max_w(px(un_w))
+                .when(!compact, |d| d.max_w(px(un_w)))
                 .min_w(px(if narrow { 180.0 } else { 220.0 }))
                 .flex_shrink()
                 .flex()
@@ -1227,10 +1227,10 @@ impl Render for NowPlayingView {
                         }))
                 })),
         );
-        let transport = pid("np.transport", div().flex().flex_row().gap(px(if narrow { 8.0 } else { 12.0 })).child(c1).child(c2).child(c3).child(upnext));
+        let transport = pid("np.transport", div().flex().flex_row().flex_wrap().gap(px(if narrow { 8.0 } else { 12.0 })).child(c1).child(c2).child(c3).child(upnext));
         let deck = pid("np.deck", div().flex().flex_col().gap(px(8.)).w_full().flex_none().px(px(16.)).py(px(8.)).bg(th.low).border_t_1().border_b_1().border_color(th.border).child(seek).child(transport));
 
-        let legend_wrap = |inner: AnyElement| pid("np.legend", div().px(px(16.)).pb(px(8.)).flex_none().child(inner));
+        let legend_wrap = |inner: AnyElement| div().px(px(16.)).flex_none().child(pid("np.legend", div().pb(px(8.)).child(inner)));
         let legend = pid(
             "np.legend.row",
             div().flex().flex_row().flex_wrap().gap_x(px(16.)).gap_y(px(4.)).flex_none().children(PLAYER_KEYS.iter().filter(|k| k.in_legend).map(|k| {
@@ -1243,7 +1243,8 @@ impl Render for NowPlayingView {
             })),
         );
 
-        div().size_full().min_h(px(600.)).flex().flex_col().gap(px(8.)).child(strip).child(cover_area).child(title_block).child(fft_row).child(deck).when(!short, |d| d.child(legend_wrap(legend.into_any_element()))).into_any_element()
+        div().size_full().min_h(px(600.)).flex().flex_col().gap(px(8.)).child(strip).child(cover_area).child(title_block).child(fft_row).child(deck).when(!short, |d| d.child(legend_wrap(legend.into_any_element())))
+            .when(short, |d| d.child(div().h(px(0.)).flex_none())).into_any_element()
     }
 }
 
