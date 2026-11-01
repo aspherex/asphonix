@@ -1,0 +1,28 @@
+[workspace]
+resolver = "2"
+members = ["crates/sonix-api", "crates/sonix-mock", "crates/sonix-ui"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+publish = false
+
+[workspace.dependencies]
+gpui = "=0.2.2"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+[profile.release]
+opt-level = 3
+lto = true
+codegen-units = 1
+panic = "abort"
+strip = true
+
+# quick iteration only; all reported numbers come from `release`
+[profile.fast]
+inherits = "release"
+lto = false
+codegen-units = 16
+strip = false
+panic = "abort"
