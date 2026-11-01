@@ -47,6 +47,8 @@ struct Inner {
     client: Arc<std::sync::RwLock<Option<Client>>>,
     engine: sonix_core::audio::EngineHandle,
     prefs: Arc<sonix_core::audio::Prefs>,
+    /// Keeps the watch channel's value updating (`watch::Sender::send` is a no-op without receivers).
+    _state_rx: tokio::sync::watch::Receiver<sonix_core::ipc::PlayerState>,
     session: Mutex<Session>,
     subs: Mutex<Vec<Sender<Event>>>,
 }
@@ -107,6 +109,7 @@ impl RealBackend {
         let me = Self(Arc::new(Inner {
             rt,
             db,
+            _state_rx: engine.subscribe_player_state(),
             engine,
             prefs,
             epoch: AtomicU64::new(0),
@@ -234,6 +237,7 @@ impl AuthApi for RealBackend {
             secrets::delete_profile_password(&cfg.url, &cfg.username, false).map_err(err)?;
         }
         secrets::clear_config(&self.0.dir).map_err(err)?;
+        self.0.engine.send(sonix_core::audio::EngineCommand::Stop);
         *self.0.client.write().unwrap() = None;
         *self.0.session.lock().unwrap() = Session { state: Some(ConnectionState::Disconnected), ..Default::default() };
         self.set_state(ConnectionState::Disconnected, None);

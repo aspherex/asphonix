@@ -5451,6 +5451,7 @@ name = "sonix-real"
 version = "0.1.0"
 dependencies = [
  "image",
+ "log",
  "serde",
  "serde_json",
  "sonix-api",
