@@ -1,0 +1,10 @@
+[package]
+name = "sonix-real"
+version.workspace = true
+edition.workspace = true
+publish.workspace = true
+
+[dependencies]
+sonix-api = { path = "../sonix-api" }
+sonix-core = { path = "../sonix-core" }
+tokio = { version = "1", features = ["rt-multi-thread", "time", "sync"] }
