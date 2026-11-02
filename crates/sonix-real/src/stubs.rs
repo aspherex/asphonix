@@ -2,10 +2,6 @@
 #![allow(unused_variables)]
 use crate::RealBackend;
 use sonix_api::*;
-impl StarsApi for RealBackend {
-    fn star_add(&self, req: StarRequest) -> ApiResult<()> { Err(ApiError::unimplemented("star_add")) }
-    fn star_remove(&self, req: StarRequest) -> ApiResult<()> { Err(ApiError::unimplemented("star_remove")) }
-}
 impl SettingsApi for RealBackend {
     fn mcp_status(&self) -> ApiResult<McpStatus> {
         self.mcp_status_impl()

@@ -68,16 +68,6 @@ impl SearchApi for RealBackend {
     }
 }
 
-impl PlaylistsApi for RealBackend {
-    fn playlists_list(&self) -> ApiResult<Vec<Playlist>> {
-        r!(library::playlists_list(&self.0.db))
-    }
-    fn playlists_get(&self, id: &str) -> ApiResult<PlaylistDetail> {
-        let d = library::playlist_detail(&self.0.db, id).map_err(err)?.ok_or_else(|| nf("playlist", id))?;
-        conv(d)
-    }
-}
-
 impl LibraryApi for RealBackend {
     fn library_sync_start(&self, req: SyncStartRequest) -> ApiResult<()> {
         self.start_sync(req.full);
@@ -98,6 +88,33 @@ impl LibraryApi for RealBackend {
     }
     fn history_clear(&self) -> ApiResult<()> {
         library::discovery::history_clear(&self.0.db).map_err(err)
+    }
+    fn smart_list(&self) -> ApiResult<Vec<SmartSummary>> {
+        self.smart_list_impl()
+    }
+    fn smart_get(&self, id: &str, seed: u32) -> ApiResult<SmartSummary> {
+        self.smart_get_impl(id, seed)
+    }
+    fn smart_create(&self, input: SmartInput) -> ApiResult<SmartSummary> {
+        self.smart_create_impl(input)
+    }
+    fn smart_update(&self, id: &str, input: SmartInput) -> ApiResult<SmartSummary> {
+        self.smart_update_impl(id, input)
+    }
+    fn smart_delete(&self, id: &str) -> ApiResult<()> {
+        self.smart_delete_impl(id)
+    }
+    fn smart_duplicate(&self, id: &str) -> ApiResult<SmartSummary> {
+        self.smart_duplicate_impl(id)
+    }
+    fn smart_presets(&self) -> ApiResult<Vec<SmartPreset>> {
+        conv(sonix_core::smartlists::presets())
+    }
+    fn smart_tracks(&self, id: &str, seed: u32, req: PageRequest) -> ApiResult<Paged<Track>> {
+        self.smart_tracks_impl(id, seed, req)
+    }
+    fn smart_preview(&self, input: SmartInput, seed: u32, req: PageRequest) -> ApiResult<Paged<Track>> {
+        self.smart_preview_impl(input, seed, req)
     }
 }
 

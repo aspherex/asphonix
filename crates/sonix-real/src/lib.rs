@@ -5,6 +5,7 @@ mod player;
 mod reads;
 mod stubs;
 mod services;
+mod writes;
 
 use sonix_api::*;
 use sonix_core::ipc::{IpcError, IpcErrorCode};
@@ -54,6 +55,8 @@ struct Inner {
     subs: Mutex<Vec<Sender<Event>>>,
     /// OS integration + background services (listen flush, SMTC, MCP bridge, updater).
     svc: services::Services,
+    /// Local smart-playlist definitions (`smart_playlists.json` in the config dir).
+    smart: sonix_core::smartlists::SmartStore,
 }
 
 #[derive(Clone)]
@@ -95,10 +98,15 @@ impl RealBackend {
     /// Opens the backend; with a saved connection it reconnects in the background
     /// using the keychain password (state `Connecting` until the probe answers).
     pub fn open() -> Self {
+        Self::open_in(config_dir(), data_dir())
+    }
+
+    /// `open` with explicit config (`connection.json`, profiles, smart playlists) and data (library DB) dirs.
+    pub fn open_in(dir: PathBuf, data: PathBuf) -> Self {
         secrets::set_service_name(IDENTIFIER);
-        let dir = config_dir();
         let _ = std::fs::create_dir_all(&dir);
-        let db = Arc::new(Db::open(&data_dir()).expect("library db"));
+        let _ = std::fs::create_dir_all(&data);
+        let db = Arc::new(Db::open(&data).expect("library db"));
         let client: Arc<std::sync::RwLock<Option<Client>>> = Arc::new(std::sync::RwLock::new(None));
         let prefs = Arc::new(sonix_core::audio::Prefs::default());
         let (ev_tx, ev_rx) = channel::<Event>();
@@ -111,6 +119,7 @@ impl RealBackend {
         let rt = tokio::runtime::Builder::new_multi_thread().worker_threads(2).enable_all().build().expect("tokio");
         let cfg = secrets::load_config(&dir);
         let me = Self(Arc::new(Inner {
+            smart: sonix_core::smartlists::SmartStore::new(&dir),
             rt,
             db,
             _state_rx: engine.subscribe_player_state(),
