@@ -590,7 +590,7 @@ impl Render for Table {
         let bounds = self.body_bounds.clone();
         // Chromium shows the 10 px scrollbar only when the rows overflow the viewport (VirtualList .viewport)
         let bh = f32::from(self.body_bounds.get().size.height);
-        let overflow = scrollbar::overflow_or_last("lists-table", (bh > 0.0 && total > 0).then(|| total as f32 * tr::ROW_H > bh + 0.5));
+        let overflow = scrollbar::overflow_or_last("lists-table", (bh > 0.0 && total > 0).then_some(total as f32 * tr::ROW_H > bh + 0.5));
         let bounds_for_canvas = bounds.clone();
 
         let list = uniform_list(
