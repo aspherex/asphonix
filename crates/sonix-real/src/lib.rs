@@ -50,6 +50,13 @@ struct Inner {
     data: PathBuf,
     db: Arc<Db>,
     epoch: AtomicU64,
+    /// Reference `state.rs`: held for a whole library sync, so at most one runs at a time (background
+    /// resyncs skip while one runs, full syncs wait). Two overlapping catalog syncs get different
+    /// generations and the later one's stale-row sweep deletes pages the earlier one re-wrote.
+    sync_lock: tokio::sync::Mutex<()>,
+    /// Reference `full_sync_pending`: `epoch + 1` while a full sync of this session runs or waits, so
+    /// `auth_connect` + the login screen's `library_sync_start { full: true }` fetch the catalog once.
+    full_sync_pending: AtomicU64,
     client: Arc<std::sync::RwLock<Option<Client>>>,
     engine: sonix_core::audio::EngineHandle,
     waveform: sonix_core::audio::waveform::WaveformStore,
@@ -144,6 +151,8 @@ impl RealBackend {
             engine,
             prefs,
             epoch: AtomicU64::new(0),
+            sync_lock: tokio::sync::Mutex::new(()),
+            full_sync_pending: AtomicU64::new(0),
             dir,
             data,
             client,
@@ -215,13 +224,40 @@ impl RealBackend {
         let me = self.clone();
         let epoch = self.0.epoch.load(std::sync::atomic::Ordering::SeqCst);
         self.0.rt.spawn(async move {
+            use std::sync::atomic::Ordering::SeqCst;
+            // Reference `perform_sync`: coalesce duplicate full requests within one session.
+            let pending_marker = epoch + 1;
+            if full && me.0.full_sync_pending.swap(pending_marker, SeqCst) == pending_marker {
+                return;
+            }
+            struct ClearPending<'a>(&'a AtomicU64, u64, bool);
+            impl Drop for ClearPending<'_> {
+                fn drop(&mut self) {
+                    if self.2 {
+                        let _ = self.0.compare_exchange(self.1, 0, SeqCst, SeqCst);
+                    }
+                }
+            }
+            let _clear_pending = ClearPending(&me.0.full_sync_pending, pending_marker, full);
+            let _guard = if full {
+                me.0.sync_lock.lock().await
+            } else {
+                match me.0.sync_lock.try_lock() {
+                    Ok(g) => g,
+                    Err(_) => return,
+                }
+            };
+            // the session may have changed while this sync waited for the lock
+            if me.0.epoch.load(SeqCst) != epoch {
+                return;
+            }
             let sink = reads::Sink(me.clone(), epoch);
             let res = if full || me.0.db.track_count().unwrap_or(0) == 0 {
                 sonix_core::library::run_full_sync(&client, &me.0.db, &sink).await
             } else {
                 sonix_core::library::run_incremental_sync(&client, &me.0.db, &sink, None).await
             };
-            if res.is_ok() {
+            if res.is_ok() && me.0.epoch.load(SeqCst) == epoch {
                 let now = me.0.db.get_meta("lastSyncAt").ok().flatten();
                 let mut st = me.0.session.lock().unwrap();
                 if let Some(c) = st.cfg.as_mut() {
