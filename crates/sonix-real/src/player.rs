@@ -27,11 +27,20 @@ impl RealBackend {
         self.0.engine.send(c);
         Ok(())
     }
+    /// A command that changes the queue (play / reorder / enqueue / remove / jump / shuffle): once the engine has
+    /// processed it (a `GetQueue` round trip is ordered behind it), the UI is told with `Event::QueueChanged`, like the
+    /// reference's `queue-changed`, so the rail and the "which source is playing" state refresh.
+    fn send_queue(&self, c: EngineCommand) -> ApiResult<()> {
+        self.0.engine.send(c);
+        let _ = self.0.engine.request_blocking(|reply| EngineCommand::GetQueue { offset: 0, limit: 0, reply });
+        self.emit(Event::QueueChanged);
+        Ok(())
+    }
 }
 
 impl PlayerApi for RealBackend {
     fn player_play_queue(&self, req: PlayQueueRequest) -> ApiResult<()> {
-        self.send(EngineCommand::PlayQueue { track_ids: req.track_ids, start_index: req.start_index as u32 })
+        self.send_queue(EngineCommand::PlayQueue { track_ids: req.track_ids, start_index: req.start_index as u32 })
     }
     fn player_play_all(&self, req: PlayAllRequest) -> ApiResult<()> {
         let q: core::PlayAllRequest = conv(req)?;
@@ -41,7 +50,7 @@ impl PlayerApi for RealBackend {
         };
         let rows = library::get_all_track_ids(&self.0.db, sort, dir, q.filter.as_deref(), q.start_track_id.as_deref()).map_err(err)?;
         let (track_ids, artists): (Vec<String>, Vec<Option<String>>) = rows.into_iter().map(|(id, a)| (id, (!a.is_empty()).then_some(a))).unzip();
-        self.send(EngineCommand::PlaySource {
+        self.send_queue(EngineCommand::PlaySource {
             kind: core::SourceKind::AllTracks,
             label: "All Tracks".into(),
             source_id: None,
@@ -117,7 +126,7 @@ impl PlayerApi for RealBackend {
         self.send(EngineCommand::SetVolume(req.volume as f32))
     }
     fn player_set_shuffle(&self, enabled: bool) -> ApiResult<()> {
-        self.send(EngineCommand::SetShuffle(enabled))
+        self.send_queue(EngineCommand::SetShuffle(enabled))
     }
     fn player_set_repeat(&self, mode: RepeatMode) -> ApiResult<()> {
         self.send(EngineCommand::SetRepeat(conv(mode)?))
@@ -131,16 +140,16 @@ impl PlayerApi for RealBackend {
         conv(q)
     }
     fn player_jump_to(&self, index: usize) -> ApiResult<()> {
-        self.send(EngineCommand::JumpTo(index as u32))
+        self.send_queue(EngineCommand::JumpTo(index as u32))
     }
     fn player_enqueue(&self, req: EnqueueRequest) -> ApiResult<()> {
-        self.send(EngineCommand::Enqueue { track_ids: req.track_ids, position: conv(req.position)? })
+        self.send_queue(EngineCommand::Enqueue { track_ids: req.track_ids, position: conv(req.position)? })
     }
     fn player_remove_from_queue(&self, index: usize) -> ApiResult<()> {
-        self.send(EngineCommand::RemoveFromQueue(index as u32))
+        self.send_queue(EngineCommand::RemoveFromQueue(index as u32))
     }
     fn player_reorder_queue(&self, from: usize, to: usize) -> ApiResult<()> {
-        self.send(EngineCommand::ReorderQueue { from_index: from as u32, to_index: to as u32 })
+        self.send_queue(EngineCommand::ReorderQueue { from_index: from as u32, to_index: to as u32 })
     }
 }
 
@@ -177,7 +186,7 @@ impl RealBackend {
             None if shuffle => (core::SourceMode::Shuffle, Default::default()),
             None => (core::SourceMode::InOrder, Default::default()),
         };
-        self.send(EngineCommand::PlaySource { kind, label, source_id, mode, arc, track_ids, artists, start_track_id: start })
+        self.send_queue(EngineCommand::PlaySource { kind, label, source_id, mode, arc, track_ids, artists, start_track_id: start })
     }
 }
 

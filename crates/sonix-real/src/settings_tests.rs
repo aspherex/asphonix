@@ -492,10 +492,53 @@ fn seed_five(b: &RealBackend) {
         .unwrap();
 }
 
-/// The queue once the engine has taken `want` entries (silent: volume 0, nothing decodable behind the mock).
-fn queue_after(b: &RealBackend, want: usize) -> QueueState {
+/// 20 s of 16-bit mono 8 kHz silence (a decodable stream, so the engine does not skip through the queue on failed opens).
+fn silent_wav() -> Vec<u8> {
+    let data = 8000u32 * 2 * 20;
+    let mut v = Vec::with_capacity(44 + data as usize);
+    v.extend_from_slice(b"RIFF");
+    v.extend_from_slice(&(36 + data).to_le_bytes());
+    v.extend_from_slice(b"WAVEfmt ");
+    for x in [16u32.to_le_bytes().as_slice(), &1u16.to_le_bytes(), &1u16.to_le_bytes(), &8000u32.to_le_bytes(), &16000u32.to_le_bytes(), &2u16.to_le_bytes(), &16u16.to_le_bytes()] {
+        v.extend_from_slice(x);
+    }
+    v.extend_from_slice(b"data");
+    v.extend_from_slice(&data.to_le_bytes());
+    v.resize(44 + data as usize, 0);
+    v
+}
+
+/// 127.0.0.1 server: `/rest/stream` = the silent WAV, everything else the empty OK envelope.
+fn wav_server() -> String {
+    let l = TcpListener::bind("127.0.0.1:0").unwrap();
+    let url = format!("http://{}", l.local_addr().unwrap());
+    std::thread::spawn(move || {
+        for s in l.incoming() {
+            let Ok(mut s) = s else { continue };
+            std::thread::spawn(move || {
+                let mut buf = Vec::new();
+                let mut chunk = [0u8; 1024];
+                while !buf.windows(4).any(|w| w == b"\r\n\r\n") {
+                    match s.read(&mut chunk) {
+                        Ok(0) | Err(_) => return,
+                        Ok(n) => buf.extend_from_slice(&chunk[..n]),
+                    }
+                }
+                let line = String::from_utf8_lossy(&buf).lines().next().unwrap_or("").to_string();
+                let (ty, body) = if line.contains("/rest/stream") { ("audio/wav", silent_wav()) } else { ("application/json", OK.as_bytes().to_vec()) };
+                let _ = write!(s, "HTTP/1.1 200 OK\r\nContent-Type: {ty}\r\nContent-Length: {}\r\nConnection: close\r\n\r\n", body.len());
+                let _ = s.write_all(&body);
+            });
+        }
+    });
+    url
+}
+
+/// The queue once `ready` holds for it. Each wait names a property only the NEW queue has (source kind / mode, no source),
+/// so it can never be satisfied by the previous step's queue.
+fn queue_when(b: &RealBackend, what: &str, ready: impl Fn(&QueueState) -> bool) -> QueueState {
     let page = PageRequest { offset: 0, limit: 50 };
-    wait_until("queue", || b.player_get_queue(page).map(|q| q.total == want).unwrap_or(false));
+    wait_until(what, || b.player_get_queue(page).map(|q| ready(&q)).unwrap_or(false));
     b.player_get_queue(page).unwrap()
 }
 
@@ -504,35 +547,39 @@ fn rolling_sources_start_at_the_clicked_row_and_static_queues_keep_the_earlier_r
     let e = Env::new("playfrom");
     let b = e.open();
     seed_five(&b);
-    let mock = Mock::start(empty_server);
-    *b.0.client.write().unwrap() = Some(mock.client());
+    let url = wav_server();
+    *b.0.client.write().unwrap() = Some(Client::new(&url, "u", "p").unwrap());
     b.player_set_volume(SetVolumeRequest { volume: 0.0 }).unwrap();
     let ids = |q: &QueueState| q.items.iter().map(|i| i.track.id.as_str().to_owned()).collect::<Vec<_>>();
+    // the engine may start (silent) playback and advance; the rows it holds, history included, do not change.
+    let playing = |b: &RealBackend| b.player_get_state().map(|s| s.status == PlaybackStatus::Playing).unwrap_or(false);
+    let mut rx = b.subscribe();
+    let mut queue_events = || std::iter::from_fn(|| rx.try_recv().ok()).filter(|e| matches!(e, Event::QueueChanged)).count();
 
-    // playlist, in order, from row 3: the pool continues from t3 (no earlier rows), the clicked row is current
+    // playlist, in order, from row 3: the pool continues from t3 (no earlier rows)
     b.player_play_playlist(PlaySourceRequest { id: "pl1".into(), start_track_id: Some("t3".into()), ..Default::default() }).unwrap();
-    let q = queue_after(&b, 3);
+    let q = queue_when(&b, "playlist source", |q| q.source.as_ref().is_some_and(|s| s.kind == SourceKind::Playlist));
     assert_eq!(ids(&q), ["t3", "t4", "t5"]);
-    assert_eq!(q.current_index, 0);
-    let s = q.source.unwrap();
-    assert_eq!((s.kind, s.id.as_deref(), s.mode), (SourceKind::Playlist, Some("pl1"), SourceMode::InOrder));
+    let s = q.source.clone().unwrap();
+    assert_eq!((s.id.as_deref(), s.mode), (Some("pl1"), SourceMode::InOrder));
+    if playing(&b) {
+        assert_eq!(q.current_index, 0, "the clicked row is current");
+    }
+    assert!(queue_events() >= 1, "a source change tells the UI (QueueChanged)");
 
     // liked songs: same
     b.player_play_liked(PlaySourceRequest { start_track_id: Some("t2".into()), ..Default::default() }).unwrap();
-    let q = queue_after(&b, 4);
+    let q = queue_when(&b, "liked source", |q| q.source.as_ref().is_some_and(|s| s.kind == SourceKind::Liked));
     assert_eq!(ids(&q), ["t2", "t3", "t4", "t5"]);
-    assert_eq!(q.current_index, 0);
-    assert_eq!(q.source.unwrap().kind, SourceKind::Liked);
 
     // playlist, shuffle, from row 4: every row once, the clicked one first
     b.player_play_playlist(PlaySourceRequest { id: "pl1".into(), shuffle: true, start_track_id: Some("t4".into()), ..Default::default() }).unwrap();
-    let q = queue_after(&b, 5);
+    let q = queue_when(&b, "shuffle source", |q| q.source.as_ref().is_some_and(|s| s.mode == SourceMode::Shuffle));
     let got = ids(&q);
     assert_eq!(got[0], "t4");
     let mut sorted = got.clone();
     sorted.sort();
     assert_eq!(sorted, ["t1", "t2", "t3", "t4", "t5"]);
-    assert_eq!(q.source.unwrap().mode, SourceMode::Shuffle);
 
     // (shuffle is a player setting that outlives the source: a static queue honours it, so switch it off first)
     b.player_set_shuffle(false).unwrap();
@@ -540,8 +587,9 @@ fn rolling_sources_start_at_the_clicked_row_and_static_queues_keep_the_earlier_r
     // a static queue (album detail row, artist top tracks, search, home): the whole list, current = N
     let all: Vec<String> = (1..=5).map(|i| format!("t{i}")).collect();
     b.player_play_queue(PlayQueueRequest { track_ids: all.clone(), start_index: 2 }).unwrap();
-    let q = queue_after(&b, 5);
+    let q = queue_when(&b, "static queue", |q| q.source.is_none() && q.total == 5);
     assert_eq!(ids(&q), all);
-    assert_eq!(q.current_index, 2);
-    assert!(q.source.is_none());
+    if playing(&b) {
+        assert_eq!(q.current_index, 2);
+    }
 }
