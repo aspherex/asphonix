@@ -418,7 +418,7 @@ impl AlbumDetailView {
             .border_color(th.border)
             .child(txt(&th, LABEL_CAPS, "Track Vectors").color(th.muted))
             .child(txt(&th, MONO_CODE, count).color(th.muted));
-        let overflow = super::grid::list_overflows(&self.list).unwrap_or(false);
+        let overflow = crate::widgets::scrollbar::overflow_or_last("album-tracks", super::grid::list_overflows(&self.list).filter(|_| total > 0));
         let list = uniform_list(
             "album-tracks",
             total,

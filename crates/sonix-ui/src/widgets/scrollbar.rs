@@ -169,3 +169,21 @@ mod tests {
         assert!((scroll_for_thumb_top(vp, content, len, 9999.0) - (content - vp)).abs() < 0.5);
     }
 }
+
+thread_local! {
+    static LAST_OVERFLOW: std::cell::RefCell<std::collections::HashMap<&'static str, bool>> = std::cell::RefCell::new(std::collections::HashMap::new());
+}
+
+/// Gutter decision for a list that is created on navigation. Chromium decides the scrollbar gutter in the same
+/// layout pass that adds the rows; natively the overflow is only known after a layout, so a fresh list would draw
+/// one frame without the 10 px gutter and then shift every column. `measured` is `None` while that is not known
+/// yet (container not laid out, rows not loaded): then the state this list (`key`) had last time is used.
+pub fn overflow_or_last(key: &'static str, measured: Option<bool>) -> bool {
+    LAST_OVERFLOW.with(|m| match measured {
+        Some(v) => {
+            m.borrow_mut().insert(key, v);
+            v
+        }
+        None => m.borrow().get(key).copied().unwrap_or(false),
+    })
+}
