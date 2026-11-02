@@ -417,3 +417,77 @@ fn hidden_and_stale_entries_never_edit_the_wrong_row() {
     assert_eq!(local_ids(&b, "st"), ["t1", "t2"]);
     assert!(changed(&events(&rx)));
 }
+
+/// Reference `connect_account`: switching to another account (no keychain write: `save = false`) stops the engine and
+/// wipes the library mirror and the art cache before the new client is installed; nothing of the old account is pushed.
+#[test]
+fn account_switch_stops_the_engine_and_wipes_mirror_and_art_cache() {
+    let tmp = TmpDir::new("switch");
+    let b = RealBackend::open_in(tmp.0.join("config"), tmp.0.join("data"));
+    let mock = Mock::start();
+    b.connect(&mock.url, "me", "pw", false).unwrap();
+    // let the first (empty) sync settle, then fake an old-account library + cached cover
+    std::thread::sleep(Duration::from_millis(500));
+    exec(&b, "INSERT INTO tracks (id,title,artist,suffix,duration) VALUES ('t1','One','A','flac',10);");
+    let art = b.art_dir();
+    std::fs::create_dir_all(&art).unwrap();
+    std::fs::write(art.join("c1_160.img"), b"x").unwrap();
+    assert_eq!(b.0.db.track_count().unwrap(), 1);
+    let page = PageRequest { offset: 0, limit: 10 };
+    b.player_enqueue(EnqueueRequest { track_ids: vec!["t1".into()], position: EnqueuePosition::End }).unwrap();
+    let t = std::time::Instant::now();
+    while b.player_get_queue(page).unwrap().total == 0 && t.elapsed() < Duration::from_secs(5) {
+        std::thread::sleep(Duration::from_millis(20));
+    }
+    assert_eq!(b.player_get_queue(page).unwrap().total, 1, "old-account queue");
+    mock.take();
+    b.connect(&mock.url, "other", "pw", false).unwrap();
+    assert_eq!(b.0.db.track_count().unwrap(), 0, "the other account's mirror is wiped");
+    assert!(!art.join("c1_160.img").exists(), "the other account's covers are dropped");
+    assert_eq!(b.player_get_queue(page).unwrap().total, 0, "the engine queue is cleared (Stop)");
+    let reqs = mock.take();
+    assert!(find(&reqs, "savePlayQueue").is_empty() && find(&reqs, "scrobble").is_empty(), "{reqs:?}");
+}
+
+/// Reference `auth_logout`: stop + flush the listen writer first (ordering of the Stop row vs. the flush is covered by
+/// `engine::tests::stop_goes_through_the_writer_and_flush_follows_it`), drop the client, cancel the old sync (epoch),
+/// then wipe the mirror (listen history included) and the art cache, so the next account inherits nothing.
+/// The keychain step only deletes (an entry this test never created).
+#[test]
+fn logout_stops_flushes_and_wipes_everything_local() {
+    let tmp = TmpDir::new("logout");
+    let b = RealBackend::open_in(tmp.0.join("config"), tmp.0.join("data"));
+    let mock = Mock::start();
+    b.connect(&mock.url, "me", "pw", false).unwrap();
+    std::thread::sleep(Duration::from_millis(500));
+    exec(
+        &b,
+        "INSERT INTO tracks (id,title,artist,suffix,duration) VALUES ('t1','One','A','flac',10);
+         INSERT INTO listen_events (track_id,started_at,ended_at,listened_ms,duration_ms,end_reason,origin) VALUES ('t1',1,2,1,10000,'stopped','user');",
+    );
+    let page = PageRequest { offset: 0, limit: 10 };
+    b.player_enqueue(EnqueueRequest { track_ids: vec!["t1".into()], position: EnqueuePosition::End }).unwrap();
+    let t = std::time::Instant::now();
+    while b.player_get_queue(page).unwrap().total == 0 && t.elapsed() < Duration::from_secs(5) {
+        std::thread::sleep(Duration::from_millis(20));
+    }
+    let art = b.art_dir();
+    std::fs::create_dir_all(&art).unwrap();
+    std::fs::write(art.join("c1_160.img"), b"x").unwrap();
+    let epoch = b.0.epoch.load(std::sync::atomic::Ordering::SeqCst);
+    mock.take();
+    let t = std::time::Instant::now();
+    b.auth_logout().unwrap();
+    assert!(t.elapsed() < Duration::from_secs(5), "bounded: {:?}", t.elapsed());
+    assert!(b.0.epoch.load(std::sync::atomic::Ordering::SeqCst) > epoch, "a running sync of the old account stops writing");
+    assert!(b.0.client.read().unwrap().is_none());
+    assert_eq!(b.player_get_queue(page).unwrap().total, 0, "engine stopped, queue cleared");
+    assert_eq!(b.0.db.track_count().unwrap(), 0);
+    let listens: i64 = b.0.db.read(|c| c.query_row("SELECT COUNT(*) FROM listen_events", [], |r| r.get(0))).unwrap();
+    assert_eq!(listens, 0, "listen history goes with the old account");
+    assert!(!art.join("c1_160.img").exists());
+    assert_eq!(b.auth_session_status().unwrap().state, ConnectionState::Disconnected);
+    assert!(!tmp.0.join("config").join("connection.json").exists());
+    let reqs = mock.take();
+    assert!(find(&reqs, "savePlayQueue").is_empty() && find(&reqs, "scrobble").is_empty(), "{reqs:?}");
+}

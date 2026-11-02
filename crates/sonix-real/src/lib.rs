@@ -203,6 +203,12 @@ impl RealBackend {
         self.0.data.join("art")
     }
 
+    /// Drops every cached cover/mosaic (account switch / logout: the ids belong to the other library).
+    pub(crate) fn clear_art_cache(&self) {
+        let _ = std::fs::remove_dir_all(self.art_dir());
+        crate::art::reset_cache_bytes();
+    }
+
     /// Background sync (full catalog when the DB is empty or `full`, else incremental).
     pub(crate) fn start_sync(&self, full: bool) {
         let Some(client) = self.0.client.read().unwrap().clone() else { return };
@@ -259,10 +265,13 @@ impl RealBackend {
         });
         let same = previous.as_ref().is_some_and(|p| p.url == url && p.username == username);
         self.0.epoch.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
-        if !same && previous.is_some() {
-            // Stop + wait for the closing listen row before the wipe, so it goes with the old account.
+        if !same {
+            // Reference `connect_account`: a different server/user (also the first login after a logout) starts clean.
+            // Stop + wait for the closing listen row before the wipe, so it goes with the old account; the art cache
+            // ids belong to the other library too.
             self.flush_listen();
             self.0.db.clear_all().map_err(err)?;
+            self.clear_art_cache();
         }
         *self.0.client.write().unwrap() = Some(client);
         {
@@ -288,21 +297,31 @@ impl AuthApi for RealBackend {
         Ok(wire_caps(&caps))
     }
 
+    /// Reference `auth_logout`: stop the engine and flush the listen writer first, drop the client, cancel a running
+    /// sync, then clear everything local (profile entry, keychain, `connection.json`, library mirror, art cache) even if
+    /// one step fails; the first error is reported.
     fn auth_logout(&self) -> ApiResult<()> {
-        let cfg = self.0.session.lock().unwrap().cfg.clone();
-        if let Some(cfg) = &cfg {
-            let _ = secrets::profiles::update(&self.0.dir, Some(cfg), |l| {
-                l.retain(|p| !p.matches(&cfg.url, &cfg.username));
-                Ok(())
-            });
-            secrets::delete_profile_password(&cfg.url, &cfg.username, false).map_err(err)?;
-        }
-        secrets::clear_config(&self.0.dir).map_err(err)?;
         self.flush_listen();
         *self.0.client.write().unwrap() = None;
+        self.0.epoch.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        let cfg = self.0.session.lock().unwrap().cfg.clone();
+        let keychain = match &cfg {
+            Some(cfg) => {
+                let _ = secrets::profiles::update(&self.0.dir, Some(cfg), |l| {
+                    l.retain(|p| !p.matches(&cfg.url, &cfg.username));
+                    Ok(())
+                });
+                secrets::delete_profile_password(&cfg.url, &cfg.username, false)
+            }
+            None => Ok(()),
+        };
+        let config = secrets::clear_config(&self.0.dir);
+        let db = self.0.db.clear_all();
+        self.clear_art_cache();
         *self.0.session.lock().unwrap() = Session { state: Some(ConnectionState::Disconnected), ..Default::default() };
         self.set_state(ConnectionState::Disconnected, None);
-        Ok(())
+        self.emit(Event::LibraryChanged);
+        keychain.and(config).and(db).map_err(err)
     }
 
     fn auth_session_status(&self) -> ApiResult<SessionStatus> {

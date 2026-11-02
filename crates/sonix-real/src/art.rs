@@ -115,6 +115,11 @@ static CACHE_BYTES: AtomicU64 = AtomicU64::new(u64::MAX);
 static EVICTING: AtomicBool = AtomicBool::new(false);
 static TMP_SEQ: AtomicU64 = AtomicU64::new(0);
 
+/// The art dir was emptied: rescan before the next eviction decision.
+pub(crate) fn reset_cache_bytes() {
+    CACHE_BYTES.store(u64::MAX, Ordering::Relaxed);
+}
+
 /// `<dir>/<key>_<size>.img`; `dir` = [`RealBackend::art_dir`].
 pub(crate) fn cache_path(dir: &Path, id: &str, size: u32) -> PathBuf {
     let key: String = id.chars().map(|c| if c.is_ascii_alphanumeric() || c == '-' { c } else { '_' }).collect();
