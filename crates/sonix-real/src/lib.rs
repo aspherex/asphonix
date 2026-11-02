@@ -4,6 +4,7 @@
 mod player;
 mod reads;
 mod stubs;
+mod writes;
 
 use sonix_api::*;
 use sonix_core::ipc::{IpcError, IpcErrorCode};
@@ -51,6 +52,8 @@ struct Inner {
     _state_rx: tokio::sync::watch::Receiver<sonix_core::ipc::PlayerState>,
     session: Mutex<Session>,
     subs: Mutex<Vec<Sender<Event>>>,
+    /// Local smart-playlist definitions (`smart_playlists.json` in the config dir).
+    smart: sonix_core::smartlists::SmartStore,
 }
 
 #[derive(Clone)]
@@ -107,6 +110,7 @@ impl RealBackend {
         let rt = tokio::runtime::Builder::new_multi_thread().worker_threads(2).enable_all().build().expect("tokio");
         let cfg = secrets::load_config(&dir);
         let me = Self(Arc::new(Inner {
+            smart: sonix_core::smartlists::SmartStore::new(&dir),
             rt,
             db,
             _state_rx: engine.subscribe_player_state(),

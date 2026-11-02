@@ -58,6 +58,12 @@ impl PlayerApi for RealBackend {
     fn player_play_liked(&self, req: PlaySourceRequest) -> ApiResult<()> {
         self.play_liked_impl(req)
     }
+    fn player_play_smart(&self, req: PlaySourceRequest) -> ApiResult<()> {
+        self.play_smart_impl(req)
+    }
+    fn flow_get_coverage(&self, req: FlowCoverageRequest) -> ApiResult<FlowCoverage> {
+        self.flow_coverage_impl(req)
+    }
     fn player_play_artist(&self, req: PlayArtistRequest) -> ApiResult<()> {
         self.play_artist_impl(req)
     }
@@ -138,7 +144,7 @@ impl OutputApi for RealBackend {
 
 impl RealBackend {
     /// Rolling `PlaySource` from `(id, artist)` rows (playlist/artist/genre/liked), like the WebView app's `*_source_cmd`.
-    fn play_rows(&self, kind: core::SourceKind, label: String, source_id: Option<String>, rows: Vec<(String, String)>, shuffle: bool, flow: Option<FlowArc>, start: Option<String>) -> ApiResult<()> {
+    pub(crate) fn play_rows(&self, kind: core::SourceKind, label: String, source_id: Option<String>, rows: Vec<(String, String)>, shuffle: bool, flow: Option<FlowArc>, start: Option<String>) -> ApiResult<()> {
         let (track_ids, artists): (Vec<String>, Vec<Option<String>>) = rows.into_iter().map(|(id, a)| (id, (!a.is_empty()).then_some(a))).unzip();
         let (mode, arc) = match flow {
             Some(f) => (core::SourceMode::Flow, conv(f)?),

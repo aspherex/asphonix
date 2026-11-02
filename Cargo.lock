@@ -5450,8 +5450,10 @@ dependencies = [
 name = "sonix-real"
 version = "0.1.0"
 dependencies = [
+ "chrono",
  "image",
  "log",
+ "rand 0.8.8",
  "serde",
  "serde_json",
  "sonix-api",
