@@ -3,6 +3,7 @@
 //! returns `unimplemented` (see `stubs.rs`) until the later steps land.
 mod player;
 mod reads;
+mod settings;
 mod stubs;
 
 use sonix_api::*;
@@ -51,6 +52,12 @@ struct Inner {
     _state_rx: tokio::sync::watch::Receiver<sonix_core::ipc::PlayerState>,
     session: Mutex<Session>,
     subs: Mutex<Vec<Sender<Event>>>,
+    /// Persisted settings (`settings.json` in the config dir), the source of truth for `settings_get`.
+    settings: Mutex<secrets::Settings>,
+    /// `Settings.scrobbling_enabled`, shared with the scrobble tasks.
+    scrobbling: Arc<std::sync::atomic::AtomicBool>,
+    /// Session persistence + server play-queue push (gated by `Prefs::sync_play_queue`).
+    store: Arc<sonix_core::audio::SessionStore>,
 }
 
 #[derive(Clone)]
@@ -97,11 +104,17 @@ impl RealBackend {
         let _ = std::fs::create_dir_all(&dir);
         let db = Arc::new(Db::open(&data_dir()).expect("library db"));
         let client: Arc<std::sync::RwLock<Option<Client>>> = Arc::new(std::sync::RwLock::new(None));
-        let prefs = Arc::new(sonix_core::audio::Prefs::default());
+        let settings = secrets::load_settings(&dir);
+        let prefs = Arc::new(sonix_core::audio::Prefs::new(settings.autoplay_enabled, settings.sync_play_queue, settings.replay_gain_mode));
+        prefs.set_play_threshold_sec(settings.play_threshold_sec);
+        let scrobbling = Arc::new(std::sync::atomic::AtomicBool::new(settings.scrobbling_enabled));
+        let store = sonix_core::audio::SessionStore::spawn(dir.clone(), client.clone(), prefs.clone());
+        let autoplay: Arc<dyn sonix_core::audio::autoplay::AutoplaySource> = Arc::new(sonix_core::continuity::ServerAutoplay { client: client.clone(), db: db.clone() });
         let (ev_tx, ev_rx) = channel::<Event>();
         let source: Arc<dyn sonix_core::audio::TrackSource> = Arc::new(sonix_core::audio::SubsonicTrackSource::new(client.clone()));
-        let engine = sonix_core::audio::EngineHandle::with_events(Arc::new(player::Events(ev_tx)), source, db.clone(), false, 20)
-            .with_continuity(prefs.clone(), None, None);
+        let engine = sonix_core::audio::EngineHandle::with_events(Arc::new(player::Events(ev_tx)), source, db.clone(), settings.spread_artists_in_shuffle, settings.queue_window_size)
+            .with_continuity(prefs.clone(), Some(store.clone()), Some(autoplay))
+            .with_listen(sonix_core::listen::spawn_writer(db.clone()));
         // Safety default: shared mode until the user picks exclusive in Settings.
         engine.send(sonix_core::audio::EngineCommand::SetOutputMode(sonix_core::ipc::OutputMode::Shared));
         let rt = tokio::runtime::Builder::new_multi_thread().worker_threads(2).enable_all().build().expect("tokio");
@@ -121,7 +134,21 @@ impl RealBackend {
                 ..Default::default()
             }),
             subs: Mutex::new(Vec::new()),
+            settings: Mutex::new(settings),
+            scrobbling,
+            store,
         }));
+        sonix_core::scrobble::service::spawn(
+            sonix_core::scrobble::service::ScrobbleCtx {
+                client: me.0.client.clone(),
+                db: me.0.db.clone(),
+                prefs: me.0.prefs.clone(),
+                scrobbling: me.0.scrobbling.clone(),
+                data_dir: me.0.dir.clone(),
+            },
+            me.0.engine.subscribe_player_state(),
+        );
+        me.spawn_session_restore();
         {
             let b = me.clone();
             std::thread::spawn(move || {
@@ -296,6 +323,9 @@ impl AuthApi for RealBackend {
 }
 
 impl Backend for RealBackend {
+    fn shutdown(&self) {
+        self.persist_now();
+    }
     fn subscribe(&self) -> Receiver<Event> {
         let (tx, rx) = channel();
         self.0.subs.lock().unwrap().push(tx);

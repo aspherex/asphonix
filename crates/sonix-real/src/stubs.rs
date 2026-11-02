@@ -6,4 +6,4 @@ impl StarsApi for RealBackend {
     fn star_add(&self, req: StarRequest) -> ApiResult<()> { Err(ApiError::unimplemented("star_add")) }
     fn star_remove(&self, req: StarRequest) -> ApiResult<()> { Err(ApiError::unimplemented("star_remove")) }
 }
-impl SettingsApi for RealBackend {}
+

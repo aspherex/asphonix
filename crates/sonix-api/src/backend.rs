@@ -383,6 +383,8 @@ pub trait Backend:
     fn now_ms(&self) -> i64 {
         std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_millis() as i64).unwrap_or(0)
     }
+    /// Exit hook, called once from the UI right before the process quits (final session write; no-op by default).
+    fn shutdown(&self) {}
     fn mock_label(&self) -> Option<&'static str> {
         None
     }

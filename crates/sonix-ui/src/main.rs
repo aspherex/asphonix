@@ -133,6 +133,7 @@ fn main() {
         open_main(cx);
         cx.on_window_closed(|cx| {
             if cx.windows().is_empty() {
+                cx.global::<app::Services>().backend.shutdown();
                 cx.quit();
             }
         })

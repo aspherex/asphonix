@@ -8,3 +8,4 @@ pub mod overlay;
 pub mod listen;
 pub mod rt;
 pub mod scrobble;
+pub mod continuity;
