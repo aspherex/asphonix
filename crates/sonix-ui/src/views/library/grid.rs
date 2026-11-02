@@ -2,7 +2,6 @@
 //! list item of `cellHeight + gap` px. Columns = as many `minCellWidth` cells (+ gap) as fit the viewport width
 //! (`clientWidth`, i.e. without the scrollbar gutter); `cellHeight = round(cellWidth + textHeight)`.
 //! The scroll offset is remembered per key for the session (`savedScroll`).
-use super::parts::measure;
 use crate::metrics::library as m;
 use crate::pager::{PAGE, Pager};
 use crate::theme::Theme;

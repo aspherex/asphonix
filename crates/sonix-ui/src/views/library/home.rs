@@ -4,7 +4,7 @@ use super::cards::{CardItem, CardMenu, CardOpen, Tile, TileArt, TileOverlays, an
 use super::entity_link::{Kind, set_current};
 use super::fmtx;
 use super::grid::list_overflows;
-use super::parts::{PageScroll, auto_fill, measure};
+use super::parts::{PageScroll, auto_fill};
 use super::{Ctx, LibEvent, menus, navigate};
 use crate::views::lists::playlist_menu;
 use crate::anim;
