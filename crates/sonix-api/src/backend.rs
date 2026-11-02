@@ -388,6 +388,8 @@ pub trait Backend:
     }
     /// App exit (quit): final session write, listen `quit` row, service teardown. Bounded; default no-op.
     fn shutdown(&self) {}
+    /// The window is minimized (`true`) or restored: background work (cover prefetch) pauses while suspended. Default no-op.
+    fn set_suspended(&self, _suspended: bool) {}
     /// The main window's native handle (Win32 HWND). Called on the window's own thread (the backend registers OS media
     /// controls there, like the reference's `run_on_main_thread`), again if the window is recreated.
     fn attach_window(&self, _hwnd: isize) {}

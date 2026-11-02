@@ -10,9 +10,11 @@ use sonix_api::*;
 use sonix_core::library;
 use sonix_core::subsonic::Client;
 use std::collections::hash_map::DefaultHasher;
+use std::collections::{HashMap, HashSet};
 use std::hash::{Hash, Hasher};
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
+use std::sync::{Arc, Condvar, Mutex};
 
 /// Hard gutter color between tiles (`--color-surface-base` / `#0A0A0C`).
 const GUTTER: [u8; 3] = [0x0A, 0x0A, 0x0C];
@@ -190,6 +192,15 @@ fn read_cached(path: &Path) -> Option<DynamicImage> {
     }
 }
 
+/// Raw bytes of a cache file (recency bumped); no decode.
+fn read_bytes_touch(path: &Path) -> Option<Vec<u8>> {
+    let bytes = std::fs::read(path).ok().filter(|b| !b.is_empty())?;
+    if let Ok(f) = std::fs::OpenOptions::new().write(true).open(path) {
+        let _ = f.set_modified(std::time::SystemTime::now());
+    }
+    Some(bytes)
+}
+
 /// Encoded bytes of a cache hit (SMTC thumbnail), bumping its recency like [`read_cached`]; junk is deleted.
 pub(crate) fn read_cached_bytes(path: &Path) -> Option<Vec<u8>> {
     let bytes = std::fs::read(path).ok().filter(|b| !b.is_empty())?;
@@ -225,28 +236,328 @@ fn not_found(msg: String) -> ApiError {
     ApiError::new(ErrorCode::NotFound, msg)
 }
 
+/// The only size ever requested from the server (`art/sizes.rs` `MASTER_SIZE`): every smaller bucket is derived from
+/// these bytes locally, so one cover costs one network round trip no matter how many sizes the UI asks for.
+pub(crate) const MASTER_SIZE: u32 = 640;
+/// Concurrent foreground `getCoverArt` fetches (`art/mod.rs` `MAX_CONCURRENT_FETCHES`).
+const MAX_CONCURRENT_FETCHES: usize = 4;
+/// Background prefetch budget, separate so it never queues a foreground request (`prefetch.rs` `PREFETCH_CONCURRENCY`).
+const PREFETCH_CONCURRENCY: usize = 2;
+/// Decode + resize + encode at once (bounds the transient working set: a 640 master is 1.6 MB of RGBA).
+const MAX_CONCURRENT_DECODES: usize = 2;
+const PREFETCH_START_DELAY: std::time::Duration = std::time::Duration::from_secs(5);
+/// Poll interval while the prefetcher is paused (`prefetch.rs` `PAUSE_POLL_INTERVAL`).
+const PREFETCH_PAUSE_POLL: std::time::Duration = if cfg!(test) { std::time::Duration::from_millis(20) } else { std::time::Duration::from_millis(500) };
+/// This many network failures in a row end a prefetch pass (server unreachable): it is retried after the next sync
+/// instead of timing out once per remaining id.
+const PREFETCH_MAX_NET_ERRORS: usize = 5;
+/// JPEG quality of a derived bucket (`art/resize.rs` `DERIVED_JPEG_QUALITY`).
+const DERIVED_JPEG_QUALITY: u8 = 85;
+
+/// Counting semaphore for the blocking `art_get` callers.
+struct Gate {
+    free: Mutex<usize>,
+    cv: Condvar,
+    /// Highest number of permits held at once (tests assert the limits).
+    peak: AtomicUsize,
+    cap: usize,
+}
+
+struct Permit<'a>(&'a Gate);
+
+impl Gate {
+    fn new(n: usize) -> Self {
+        Self { free: Mutex::new(n), cv: Condvar::new(), peak: AtomicUsize::new(0), cap: n }
+    }
+    fn acquire(&self) -> Permit<'_> {
+        let mut free = self.free.lock().unwrap_or_else(|p| p.into_inner());
+        while *free == 0 {
+            free = self.cv.wait(free).unwrap_or_else(|p| p.into_inner());
+        }
+        *free -= 1;
+        self.peak.fetch_max(self.cap - *free, Ordering::Relaxed);
+        Permit(self)
+    }
+}
+
+impl Drop for Permit<'_> {
+    fn drop(&mut self) {
+        *self.0.free.lock().unwrap_or_else(|p| p.into_inner()) += 1;
+        self.0.cv.notify_one();
+    }
+}
+
+enum Flight<V> {
+    Running,
+    Done(V),
+    /// The leader panicked: waiters retry (one of them becomes the new leader).
+    Abandoned,
+}
+
+struct Slot<V> {
+    state: Mutex<Flight<V>>,
+    cv: Condvar,
+}
+
+/// Collapses concurrent identical work into one execution (`art/singleflight.rs`): the first caller (leader) runs the
+/// closure, everyone arriving while it runs waits for and clones its result. Keyed by cache file path.
+struct SingleFlight<V> {
+    inflight: Mutex<HashMap<PathBuf, Arc<Slot<V>>>>,
+}
+
+impl<V: Clone> SingleFlight<V> {
+    fn new() -> Self {
+        Self { inflight: Mutex::new(HashMap::new()) }
+    }
+
+    fn run(&self, key: &Path, work: impl FnOnce() -> V) -> V {
+        let mut work = Some(work);
+        loop {
+            let (slot, leader) = {
+                let mut map = self.inflight.lock().unwrap_or_else(|p| p.into_inner());
+                match map.get(key) {
+                    Some(s) => (s.clone(), false),
+                    None => {
+                        let s = Arc::new(Slot { state: Mutex::new(Flight::Running), cv: Condvar::new() });
+                        map.insert(key.to_path_buf(), s.clone());
+                        (s, true)
+                    }
+                }
+            };
+            if leader {
+                // On every exit (also a panic in `work`): drop the entry first, so retrying waiters find an empty map and
+                // one of them leads, then mark an unfinished slot abandoned and wake everyone.
+                struct Finish<'a, V> {
+                    flight: &'a SingleFlight<V>,
+                    key: &'a Path,
+                    slot: Arc<Slot<V>>,
+                }
+                impl<V> Drop for Finish<'_, V> {
+                    fn drop(&mut self) {
+                        let mut map = self.flight.inflight.lock().unwrap_or_else(|p| p.into_inner());
+                        if map.get(self.key).is_some_and(|s| Arc::ptr_eq(s, &self.slot)) {
+                            map.remove(self.key);
+                        }
+                        drop(map);
+                        let mut st = self.slot.state.lock().unwrap_or_else(|p| p.into_inner());
+                        if matches!(*st, Flight::Running) {
+                            *st = Flight::Abandoned;
+                        }
+                        drop(st);
+                        self.slot.cv.notify_all();
+                    }
+                }
+                let _finish = Finish { flight: self, key, slot: slot.clone() };
+                let v = (work.take().expect("leader runs once"))();
+                *slot.state.lock().unwrap_or_else(|p| p.into_inner()) = Flight::Done(v.clone());
+                return v;
+            }
+            let mut g = slot.state.lock().unwrap_or_else(|p| p.into_inner());
+            loop {
+                match &*g {
+                    Flight::Done(v) => return v.clone(),
+                    Flight::Abandoned => break,
+                    Flight::Running => g = slot.cv.wait(g).unwrap_or_else(|p| p.into_inner()),
+                }
+            }
+        }
+    }
+}
+
+type ImageFlight = SingleFlight<ApiResult<Arc<DynamicImage>>>;
+type BytesFlight = SingleFlight<ApiResult<Arc<Vec<u8>>>>;
+
+/// All cover-fetch state of one backend (per instance, so nothing leaks between backends or tests).
+pub(crate) struct ArtState {
+    /// Foreground `getCoverArt` fetches (the UI's `art_get`).
+    fetch_gate: Gate,
+    /// Prefetch fetches; separate so a prefetch never makes a foreground request wait.
+    bg_gate: Gate,
+    decode_gate: Gate,
+    image_flight: ImageFlight,
+    master_flight: BytesFlight,
+    /// `art_get` calls currently past the disk cache; the prefetcher pauses while nonzero.
+    foreground: AtomicUsize,
+    /// The window is minimized: the prefetcher pauses (no network, CPU or heap).
+    pub(crate) suspended: AtomicBool,
+    /// Epoch of the prefetch pass that is running (a pass of another epoch may start; the old one stops itself).
+    prefetch_run: Mutex<Option<u64>>,
+    /// Ids whose master the decoder cannot read (server-resized buckets are requested instead).
+    undecodable: Mutex<HashSet<String>>,
+    /// Ids the server has no cover for (not asked again by later prefetch passes this session).
+    absent: Mutex<HashSet<String>>,
+    /// Prefetch fetch attempts (tests).
+    bg_attempts: AtomicUsize,
+}
+
+impl Default for ArtState {
+    fn default() -> Self {
+        Self {
+            fetch_gate: Gate::new(MAX_CONCURRENT_FETCHES),
+            bg_gate: Gate::new(PREFETCH_CONCURRENCY),
+            decode_gate: Gate::new(MAX_CONCURRENT_DECODES),
+            image_flight: SingleFlight::new(),
+            master_flight: SingleFlight::new(),
+            foreground: AtomicUsize::new(0),
+            suspended: AtomicBool::new(false),
+            prefetch_run: Mutex::new(None),
+            undecodable: Mutex::new(HashSet::new()),
+            absent: Mutex::new(HashSet::new()),
+            bg_attempts: AtomicUsize::new(0),
+        }
+    }
+}
+
+/// Downscale `img` to fit `target x target` keeping the aspect ratio; never upscales (`art/resize.rs`).
+fn downscale(img: &DynamicImage, target: u32) -> DynamicImage {
+    let (w, h) = img.dimensions();
+    if w <= target && h <= target {
+        return img.clone();
+    }
+    let filter = if target <= 64 { imageops::FilterType::Triangle } else { imageops::FilterType::CatmullRom };
+    let scale = f64::from(target) / f64::from(w.max(h));
+    let nw = ((f64::from(w) * scale).round() as u32).max(1);
+    let nh = ((f64::from(h) * scale).round() as u32).max(1);
+    img.resize_exact(nw, nh, filter)
+}
+
+fn encode_jpeg(img: &DynamicImage) -> Option<Vec<u8>> {
+    let mut out = Vec::new();
+    let enc = image::codecs::jpeg::JpegEncoder::new_with_quality(&mut out, DERIVED_JPEG_QUALITY);
+    img.to_rgb8().write_with_encoder(enc).ok()?;
+    Some(out)
+}
+
+/// Content sniff (`art/mod.rs` `sniff_image_type`): jpeg, png, webp, gif, avif. Only real image payloads are cached.
+fn looks_like_image(b: &[u8]) -> bool {
+    b.starts_with(&[0xFF, 0xD8, 0xFF])
+        || b.starts_with(&[0x89, b'P', b'N', b'G'])
+        || b.starts_with(b"GIF8")
+        || (b.len() > 12 && &b[..4] == b"RIFF" && &b[8..12] == b"WEBP")
+        || (b.len() > 12 && &b[4..8] == b"ftyp" && (&b[8..12] == b"avif" || &b[8..12] == b"avis"))
+}
+
+/// Counts `art_get` calls that are past the disk cache (what the prefetcher yields to).
+struct ForegroundGuard<'a>(&'a AtomicUsize);
+
+impl<'a> ForegroundGuard<'a> {
+    fn new(c: &'a AtomicUsize) -> Self {
+        c.fetch_add(1, Ordering::AcqRel);
+        Self(c)
+    }
+}
+
+impl Drop for ForegroundGuard<'_> {
+    fn drop(&mut self) {
+        self.0.fetch_sub(1, Ordering::AcqRel);
+    }
+}
+
 impl RealBackend {
     fn current_client(&self) -> Option<Client> {
         self.0.client.read().unwrap_or_else(|p| p.into_inner()).clone()
     }
 
-    /// Cover at `size`: disk cache first, else `getCoverArt?size=` (the server resizes). Bytes are stored as received,
-    /// but only once they decode.
-    fn cover_image(&self, cover_art: &str, size: u32) -> ApiResult<DynamicImage> {
-        let path = cache_path(&self.art_dir(), cover_art, size);
-        if let Some(img) = read_cached(&path) {
-            return Ok(img);
-        }
-        let client = self.current_client().ok_or_else(|| ApiError::new(ErrorCode::NotConnected, "not connected"))?;
+    /// `getCoverArt?size=` of one id through `gate` (blocking); the body must look like an image.
+    fn fetch_from_server(&self, client: &Client, cover_art: &str, size: u32, gate: &Gate) -> ApiResult<Vec<u8>> {
+        let _permit = gate.acquire();
         let (b, _) = self.0.rt.block_on(client.get_cover_art(cover_art, Some(size))).map_err(err)?;
-        let img = decode_limited(&b).map_err(|e| ApiError::new(ErrorCode::Decode, format!("cover decode: {e}")))?;
-        store(&path, &b);
-        Ok(img)
+        if !looks_like_image(&b) {
+            return Err(not_found(format!("cover art {cover_art}: server returned a non-image payload")));
+        }
+        Ok(b)
+    }
+
+    /// Bytes of the cached master (`<id>_640.img`), fetching it once (single-flight, gated) on a miss.
+    fn master_bytes(&self, client: Option<&Client>, cover_art: &str, gate: &Gate) -> ApiResult<Arc<Vec<u8>>> {
+        let path = cache_path(&self.art_dir(), cover_art, MASTER_SIZE);
+        let cached = |path: &Path| match read_bytes_touch(path) {
+            Some(b) if looks_like_image(&b) => Some(Arc::new(b)),
+            Some(_) => {
+                let _ = std::fs::remove_file(path); // torn / junk file
+                None
+            }
+            None => None,
+        };
+        if let Some(b) = cached(&path) {
+            return Ok(b);
+        }
+        self.0.art.master_flight.run(&path, || {
+            // a flight that finished just before this one started has filled the disk cache
+            if let Some(b) = cached(&path) {
+                return Ok(b);
+            }
+            let client = client.ok_or_else(|| ApiError::new(ErrorCode::NotConnected, "not connected"))?;
+            let b = self.fetch_from_server(client, cover_art, MASTER_SIZE, gate)?;
+            store(&path, &b);
+            Ok(Arc::new(b))
+        })
+    }
+
+    /// Decodes `bytes` (under the decode gate) and fits it to `size`; `None` when the decoder cannot read it.
+    fn derive(&self, bytes: &[u8], size: u32, path: &Path) -> Option<Arc<DynamicImage>> {
+        let _d = self.0.art.decode_gate.acquire();
+        let master = decode_limited(bytes).ok()?;
+        let (w, h) = master.dimensions();
+        if w <= size && h <= size {
+            store(path, bytes);
+            return Some(Arc::new(master));
+        }
+        let small = downscale(&master, size);
+        if let Some(enc) = encode_jpeg(&small) {
+            store(path, &enc);
+        }
+        Some(Arc::new(small))
+    }
+
+    /// Cover at `size`: bucket file on disk, else derived from the (once fetched) 640 master, else - when the master
+    /// is not decodable (avif, junk) - fetched at exactly `size` like the reference's odd-format fallback. An id whose
+    /// master cannot be decoded is remembered, so it is not decoded (or re-requested) again.
+    fn cover_image(&self, cover_art: &str, size: u32) -> ApiResult<Arc<DynamicImage>> {
+        let path = cache_path(&self.art_dir(), cover_art, size);
+        let st = &self.0.art;
+        if size >= MASTER_SIZE && st.undecodable.lock().unwrap_or_else(|p| p.into_inner()).contains(cover_art) {
+            return Err(ApiError::new(ErrorCode::Decode, format!("cover {cover_art}: undecodable")));
+        }
+        if let Some(img) = read_cached(&path) {
+            return Ok(Arc::new(img));
+        }
+        let _fg = ForegroundGuard::new(&st.foreground);
+        let client = self.current_client();
+        let known_bad = || st.undecodable.lock().unwrap_or_else(|p| p.into_inner()).contains(cover_art);
+        if size >= MASTER_SIZE {
+            let bytes = self.master_bytes(client.as_ref(), cover_art, &st.fetch_gate)?;
+            return match self.derive(&bytes, size, &path) {
+                Some(img) => Ok(img),
+                None => {
+                    st.undecodable.lock().unwrap_or_else(|p| p.into_inner()).insert(cover_art.to_string());
+                    Err(ApiError::new(ErrorCode::Decode, format!("cover {cover_art}: undecodable")))
+                }
+            };
+        }
+        st.image_flight.run(&path, || {
+            if let Some(img) = read_cached(&path) {
+                return Ok(Arc::new(img));
+            }
+            if !known_bad() {
+                let bytes = self.master_bytes(client.as_ref(), cover_art, &st.fetch_gate)?;
+                if let Some(img) = self.derive(&bytes, size, &path) {
+                    return Ok(img);
+                }
+                st.undecodable.lock().unwrap_or_else(|p| p.into_inner()).insert(cover_art.to_string());
+            }
+            let client = client.as_ref().ok_or_else(|| ApiError::new(ErrorCode::NotConnected, "not connected"))?;
+            let b = self.fetch_from_server(client, cover_art, size, &st.fetch_gate)?;
+            let _d = st.decode_gate.acquire();
+            let img = decode_limited(&b).map_err(|e| ApiError::new(ErrorCode::Decode, format!("cover decode: {e}")))?;
+            store(&path, &b);
+            Ok(Arc::new(img))
+        })
     }
 
     /// Mosaic of a playlist's first distinct covers, cached (JPEG) under a key that includes a hash of the source
     /// cover ids (so it invalidates when the leading covers change). A partial mosaic (some cover failed) is served
-    /// but not cached.
+    /// but not cached. Tiles load one after another like the reference (`mosaic.rs`), which keeps the working set small.
     fn mosaic_image(&self, playlist_id: &str, size: u32) -> ApiResult<DynamicImage> {
         let covers = library::get_playlist_distinct_covers(&self.0.db, playlist_id, MOSAIC_TILES).map_err(err)?;
         if covers.is_empty() {
@@ -260,7 +571,7 @@ impl RealBackend {
         let mut tiles: Vec<DynamicImage> = Vec::with_capacity(covers.len());
         for cover in &covers {
             match self.cover_image(cover, size) {
-                Ok(img) => tiles.push(img),
+                Ok(img) => tiles.push(Arc::try_unwrap(img).unwrap_or_else(|a| (*a).clone())),
                 Err(e) => log::debug!("mosaic: cover {cover} unavailable: {}", e.message),
             }
         }
@@ -282,16 +593,111 @@ impl RealBackend {
     /// playlist mosaic, anything else a real cover.
     pub(crate) fn art_pixels(&self, cover_art: &str, size: u32) -> ApiResult<ArtPixels> {
         let size = bucket_for(size);
-        let img = if let Some(pid) = cover_art.strip_prefix(MOSAIC_PREFIX) {
-            self.mosaic_image(pid.split('?').next().unwrap_or(pid), size)?
+        let img: Arc<DynamicImage> = if let Some(pid) = cover_art.strip_prefix(MOSAIC_PREFIX) {
+            Arc::new(self.mosaic_image(pid.split('?').next().unwrap_or(pid), size)?)
         } else {
             self.cover_image(cover_art, size)?
         };
-        let img = if img.width() > size.max(img.height()) || img.height() > size { img.resize(size, size, imageops::FilterType::Triangle) } else { img };
-        let rgba = img.to_rgba8();
+        let rgba = if img.width() > size || img.height() > size { img.resize(size, size, imageops::FilterType::Triangle).to_rgba8() } else { img.to_rgba8() };
         Ok(ArtPixels { width: rgba.width(), height: rgba.height(), rgba: rgba.into_raw() })
     }
+
+    /// Reference `Prefetcher`: after a sync, fetch the missing 640 masters of every album then artist cover in the
+    /// background (2 at a time), so grids open from disk. Idempotent: ids that already hold a master are skipped.
+    pub(crate) fn schedule_art_prefetch(&self, epoch: u64) {
+        let me = self.clone();
+        std::thread::spawn(move || {
+            std::thread::sleep(PREFETCH_START_DELAY);
+            let Ok(ids) = me.0.db.list_art_ids() else { return };
+            me.art_prefetch_pass(&ids, epoch);
+        });
+    }
+
+    /// Reference `wait_until_clear`: blocks (polling) while a foreground request runs, a track is buffering, or the
+    /// window is minimized; `false` as soon as the session (epoch) has moved on.
+    fn prefetch_wait_until_clear(&self, epoch: u64) -> bool {
+        loop {
+            if self.0.epoch.load(Ordering::SeqCst) != epoch {
+                return false;
+            }
+            let st = &self.0.art;
+            let loading = self.0._state_rx.borrow().status == sonix_core::ipc::PlaybackStatus::Loading;
+            if st.foreground.load(Ordering::Acquire) == 0 && !st.suspended.load(Ordering::SeqCst) && !loading {
+                return true;
+            }
+            std::thread::sleep(PREFETCH_PAUSE_POLL);
+        }
+    }
+
+    /// One prefetch pass over `ids`; returns how many masters it fetched. The client is captured once (a pass never
+    /// follows a re-login), a pass of an old epoch stops at its next step and does not block the new one, and
+    /// [`PREFETCH_MAX_NET_ERRORS`] network failures in a row end the pass.
+    pub(crate) fn art_prefetch_pass(&self, ids: &[String], epoch: u64) -> usize {
+        let st = &self.0.art;
+        {
+            let mut run = st.prefetch_run.lock().unwrap_or_else(|p| p.into_inner());
+            if *run == Some(epoch) {
+                return 0;
+            }
+            *run = Some(epoch);
+        }
+        struct Release<'a>(&'a Mutex<Option<u64>>, u64);
+        impl Drop for Release<'_> {
+            fn drop(&mut self) {
+                let mut run = self.0.lock().unwrap_or_else(|p| p.into_inner());
+                if *run == Some(self.1) {
+                    *run = None;
+                }
+            }
+        }
+        let _release = Release(&st.prefetch_run, epoch);
+        let Some(client) = self.current_client() else { return 0 };
+        let dir = self.art_dir();
+        let missing: Vec<&String> = {
+            let absent = st.absent.lock().unwrap_or_else(|p| p.into_inner());
+            ids.iter().filter(|id| !absent.contains(*id) && !cache_path(&dir, id, MASTER_SIZE).exists()).collect()
+        };
+        let next = AtomicUsize::new(0);
+        let done = AtomicUsize::new(0);
+        let net_errors = AtomicUsize::new(0);
+        let stop = AtomicBool::new(false);
+        std::thread::scope(|s| {
+            for _ in 0..PREFETCH_CONCURRENCY {
+                s.spawn(|| {
+                    while !stop.load(Ordering::Relaxed) {
+                        let Some(id) = missing.get(next.fetch_add(1, Ordering::Relaxed)) else { break };
+                        if !self.prefetch_wait_until_clear(epoch) {
+                            break;
+                        }
+                        st.bg_attempts.fetch_add(1, Ordering::Relaxed);
+                        match self.master_bytes(Some(&client), id, &st.bg_gate) {
+                            Ok(_) => {
+                                done.fetch_add(1, Ordering::Relaxed);
+                                net_errors.store(0, Ordering::Relaxed);
+                            }
+                            Err(e) if e.code == ErrorCode::Network => {
+                                if net_errors.fetch_add(1, Ordering::Relaxed) + 1 >= PREFETCH_MAX_NET_ERRORS {
+                                    log::info!("art prefetch: server unreachable, pass ended");
+                                    stop.store(true, Ordering::Relaxed);
+                                }
+                            }
+                            Err(e) => {
+                                net_errors.store(0, Ordering::Relaxed);
+                                if e.code == ErrorCode::NotFound {
+                                    st.absent.lock().unwrap_or_else(|p| p.into_inner()).insert((*id).clone());
+                                }
+                            }
+                        }
+                    }
+                });
+            }
+        });
+        done.load(Ordering::Relaxed)
+    }
 }
+
+#[cfg(test)]
+mod perf_tests;
 
 #[cfg(test)]
 mod tests {

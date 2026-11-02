@@ -293,7 +293,7 @@ fn extras_against_a_local_mock_server() {
     near(&a.rgba, 160, 130, 130, [0, 0, 255]); // bottom right
     near(&a.rgba, 160, 96, 80, [0x0A, 0x0A, 0x0C]); // gutter seam (left pane 96 px, 2 px seam)
     assert_eq!(m.count("getCoverArt"), 3);
-    assert!(m.find("getCoverArt").contains("size=160"));
+    assert!(m.find("getCoverArt").contains("size=640"));
     // cached (lossy JPEG) re-reads, also through the web's cache-busting key
     for id in ["mosaic/p1", "mosaic/p1?v=4-2026-01-01T00:00:00Z"] {
         let again = b.art_get(id, 160).unwrap();
@@ -304,11 +304,11 @@ fn extras_against_a_local_mock_server() {
     assert_eq!(m.count("getCoverArt"), 3, "mosaic and tiles are served from the disk cache");
     b.art_get("p1", 160).unwrap();
     assert_eq!(m.count("getCoverArt"), 4, "a bare playlist id is an ordinary cover id (no mosaic)");
-    // a torn cache file is rejected and refetched
+    // a torn cache file is rejected and rebuilt
     let tile = cache_path(&b.art_dir(), "c2", 160);
     std::fs::write(&tile, b"not an image").unwrap();
     assert_eq!(b.art_get("c2", 160).unwrap().rgba[1], 255);
-    assert_eq!(m.count("getCoverArt"), 5);
+    assert_eq!(m.count("getCoverArt"), 4, "a torn bucket file is re-derived from the cached master, no refetch");
     assert_eq!(b.art_get("c1", 160).unwrap().rgba[0], 255, "a real cover still resolves (cached tile)");
     assert_eq!(b.art_get("mosaic/p0", 160).unwrap_err().code, ErrorCode::NotFound, "no covered tracks");
     assert_eq!(b.art_get("mosaic/missing", 64).unwrap_err().code, ErrorCode::NotFound);
