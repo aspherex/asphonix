@@ -58,6 +58,8 @@ pub struct TracksView {
     focus: FocusHandle,
     vis: Range<usize>,
     hover_row: Option<usize>,
+    /// `pager.loaded || pager.unavailable`: the first page answered (or failed); before that an empty list is "Loading…"
+    loaded: bool,
     playlists: Vec<Playlist>,
     flow_btn: std::rc::Rc<std::cell::Cell<gpui::Bounds<Pixels>>>,
     _subs: Vec<Subscription>,
@@ -96,9 +98,10 @@ impl TracksView {
             list: UniformListScrollHandle::new(),
             sb: scrollbar::new_handle(),
             sel: Selection::default(),
-            focus: cx.focus_handle(),
+            focus: cx.focus_handle().tab_stop(true),
             vis: 0..0,
             hover_row: None,
+            loaded: false,
             playlists: Vec::new(),
             flow_btn: std::rc::Rc::new(std::cell::Cell::new(gpui::Bounds::default())),
             _subs: subs,
@@ -157,6 +160,7 @@ impl TracksView {
     fn reload(&mut self, cx: &mut Context<Self>) {
         self.sel.clear();
         let epoch = self.pager.reset();
+        self.loaded = false;
         self.list.scroll_to_item(0, ScrollStrategy::Top);
         self.vis = 0..0;
         let b = self.backend.clone();
@@ -172,6 +176,7 @@ impl TracksView {
                     t.pager.total = p.total;
                     t.pager.insert(epoch, 0, p.items, 0);
                 }
+                t.loaded = true;
                 cx.notify();
             });
         })
@@ -711,10 +716,10 @@ impl Render for TracksView {
         .track_scroll(self.list.clone())
         .size_full();
 
-        let body: AnyElement = if total == 0 && self.pager.has_page(0) {
+        let body: AnyElement = if total == 0 {
             div()
                 .p(px(crate::metrics::space::MD))
-                .child(txt(&th, BODY_SM, if self.filter.trim().is_empty() { "No tracks in your library yet." } else { "No tracks match your filter." }).color(th.muted))
+                .child(txt(&th, BODY_SM, if !self.loaded { "Loading…" } else if self.filter.trim().is_empty() { "No tracks in your library yet." } else { "No tracks match your filter." }).color(th.muted))
                 .into_any_element()
         } else {
             div()

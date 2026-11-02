@@ -570,6 +570,7 @@ fn mock_caps() -> ServerCapabilities {
 
 impl AuthApi for MockBackend {
     fn auth_session_status(&self) -> ApiResult<SessionStatus> {
+        lag();
         let l = self.inner.lists.lock().unwrap();
         let Some((url, user)) = l.active.and_then(|i| l.profiles.get(i)) else {
             return Ok(SessionStatus { state: ConnectionState::Disconnected, server_url: None, username: None, server_version: None, api_version: None, ping_ms: None, last_sync_at: None, track_count: None });
@@ -587,9 +588,11 @@ impl AuthApi for MockBackend {
         })
     }
     fn auth_probe(&self) -> ApiResult<ServerCapabilities> {
+        lag();
         Ok(mock_caps())
     }
     fn auth_connect(&self, req: ConnectRequest) -> ApiResult<ServerCapabilities> {
+        lag();
         if req.url.is_empty() {
             return Err(ApiError::new(ErrorCode::AuthFailed, "Server URL required"));
         }
@@ -598,6 +601,7 @@ impl AuthApi for MockBackend {
         Ok(mock_caps())
     }
     fn auth_logout(&self) -> ApiResult<()> {
+        lag();
         let mut l = self.inner.lists.lock().unwrap();
         if let Some(i) = l.active {
             l.profiles.remove(i);
@@ -608,9 +612,11 @@ impl AuthApi for MockBackend {
         Ok(())
     }
     fn profiles_list(&self) -> ApiResult<Vec<Profile>> {
+        lag();
         Ok(self.inner.lists.lock().unwrap().profile_list())
     }
     fn profiles_switch(&self, id: &str) -> ApiResult<ServerCapabilities> {
+        lag();
         let mut l = self.inner.lists.lock().unwrap();
         let p = l.profiles.iter().find(|(u, n)| crate::lists::ListState::profile_id(u, n) == id).cloned();
         let Some((u, n)) = p else { return Err(ApiError::not_found("profile")) };
@@ -620,6 +626,7 @@ impl AuthApi for MockBackend {
         Ok(mock_caps())
     }
     fn profiles_remove(&self, id: &str) -> ApiResult<()> {
+        lag();
         let mut l = self.inner.lists.lock().unwrap();
         let Some(i) = l.profiles.iter().position(|(u, n)| crate::lists::ListState::profile_id(u, n) == id) else { return Err(ApiError::not_found("profile")) };
         if l.active == Some(i) {
@@ -637,20 +644,24 @@ impl AuthApi for MockBackend {
 
 impl LibraryApi for MockBackend {
     fn liked_count(&self) -> ApiResult<u32> {
+        lag();
         Ok(self.inner.starred.lock().unwrap().keys().filter(|k| k.starts_with("tr_")).count() as u32)
     }
     fn liked_get(&self, req: PageRequest) -> ApiResult<Paged<Track>> {
+        lag();
         let ids = self.liked_ids();
         let end = (req.offset + req.limit).min(ids.len());
         let items = ids[req.offset.min(end)..end].iter().map(|i| self.inner.track(*i)).collect();
         Ok(Paged { items, total: ids.len(), offset: req.offset })
     }
     fn liked_summary(&self) -> ApiResult<LikedSummary> {
+        lag();
         let ids = self.liked_ids();
         let duration = ids.iter().map(|i| self.inner.lib.sort_fields(*i as usize).duration as f64).sum();
         Ok(LikedSummary { count: ids.len(), duration })
     }
     fn history_get(&self, req: PageRequest) -> ApiResult<Paged<HistoryItem>> {
+        lag();
         let hist = self.inner.lists.lock().unwrap().history.clone(); // track() locks the list state too
         let flat = crate::lists::history_items(&hist, &|ix| self.inner.track(ix));
         let end = (req.offset + req.limit).min(flat.len());
@@ -658,10 +669,12 @@ impl LibraryApi for MockBackend {
         Ok(Paged { items: flat[req.offset.min(end)..end].to_vec(), total, offset: req.offset })
     }
     fn history_clear(&self) -> ApiResult<()> {
+        lag();
         self.inner.lists.lock().unwrap().history.clear();
         Ok(())
     }
     fn smart_list(&self) -> ApiResult<Vec<SmartSummary>> {
+        lag();
         let ids: Vec<String> = {
             let l = self.inner.lists.lock().unwrap();
             let mut v: Vec<(&str, &str)> = l.smart.iter().map(|p| (p.input.name.as_str(), p.id.as_str())).collect();
@@ -671,6 +684,7 @@ impl LibraryApi for MockBackend {
         ids.iter().map(|id| self.smart_get(id, 0)).collect()
     }
     fn smart_get(&self, id: &str, seed: u32) -> ApiResult<SmartSummary> {
+        lag();
         let starred = self.inner.starred.lock().unwrap().clone();
         let mut l = self.inner.lists.lock().unwrap();
         let p = l.smart.iter().find(|p| p.id == id).ok_or_else(|| ApiError::not_found("smart playlist"))?;
@@ -680,6 +694,7 @@ impl LibraryApi for MockBackend {
         Ok(SmartSummary { id, created_at: ca, updated_at: ua, input, track_count: idx.len(), duration })
     }
     fn smart_create(&self, input: SmartInput) -> ApiResult<SmartSummary> {
+        lag();
         crate::lists::validate(&input)?;
         let now = crate::library::iso_from_ms(crate::library::EPOCH_MS);
         let id = {
@@ -694,6 +709,7 @@ impl LibraryApi for MockBackend {
         self.smart_get(&id, 0)
     }
     fn smart_update(&self, id: &str, input: SmartInput) -> ApiResult<SmartSummary> {
+        lag();
         crate::lists::validate(&input)?;
         {
             let mut l = self.inner.lists.lock().unwrap();
@@ -704,10 +720,12 @@ impl LibraryApi for MockBackend {
         self.smart_get(id, 0)
     }
     fn smart_delete(&self, id: &str) -> ApiResult<()> {
+        lag();
         self.inner.lists.lock().unwrap().smart.retain(|p| p.id != id);
         Ok(())
     }
     fn smart_duplicate(&self, id: &str) -> ApiResult<SmartSummary> {
+        lag();
         let new_id = {
             let mut l = self.inner.lists.lock().unwrap();
             let old = l.smart.iter().find(|p| p.id == id).ok_or_else(|| ApiError::not_found("smart playlist"))?;
@@ -722,9 +740,11 @@ impl LibraryApi for MockBackend {
         self.smart_get(&new_id, 0)
     }
     fn smart_presets(&self) -> ApiResult<Vec<SmartPreset>> {
+        lag();
         Ok(crate::lists::presets())
     }
     fn smart_tracks(&self, id: &str, seed: u32, req: PageRequest) -> ApiResult<Paged<Track>> {
+        lag();
         let input = {
             let l = self.inner.lists.lock().unwrap();
             l.smart.iter().find(|p| p.id == id).ok_or_else(|| ApiError::not_found("smart playlist"))?.input.clone()
@@ -732,6 +752,7 @@ impl LibraryApi for MockBackend {
         self.smart_preview(input, seed, req)
     }
     fn smart_preview(&self, input: SmartInput, seed: u32, req: PageRequest) -> ApiResult<Paged<Track>> {
+        lag();
         crate::lists::validate(&input)?;
         let starred = self.inner.starred.lock().unwrap().clone();
         let idx = self.inner.lists.lock().unwrap().eval(&self.inner.lib, &starred, &input, seed);
@@ -742,6 +763,7 @@ impl LibraryApi for MockBackend {
 }
 impl SearchApi for MockBackend {
     fn search_run(&self, req: SearchRequest) -> ApiResult<SearchResults> {
+        lag();
         let needle = req.text.trim().to_lowercase();
         let limit = req.limit;
         let all = req.search_type == SearchType::All;
@@ -797,16 +819,20 @@ impl SearchApi for MockBackend {
 }
 impl SettingsApi for MockBackend {
     fn settings_get(&self) -> ApiResult<Settings> {
+        lag();
         Ok(self.inner.lists.lock().unwrap().settings.clone())
     }
     fn settings_set(&self, change: SettingChange) -> ApiResult<()> {
+        lag();
         self.inner.lists.lock().unwrap().apply(change);
         Ok(())
     }
     fn mcp_status(&self) -> ApiResult<McpStatus> {
+        lag();
         Ok(self.inner.lists.lock().unwrap().mcp_status())
     }
     fn art_cache_status(&self) -> ApiResult<ArtCacheStatus> {
+        lag();
         let n = crate::library::NUM_ALBUMS as u64;
         Ok(ArtCacheStatus { cached: n, total: n, bytes: n * 35_000 })
     }
@@ -814,6 +840,7 @@ impl SettingsApi for MockBackend {
 
 impl BrowseApi for MockBackend {
     fn browse_get_tracks(&self, req: GetTracksRequest) -> ApiResult<Paged<Track>> {
+        lag();
         let perm = self.inner.permutation(req.sort, req.dir, req.filter.as_deref());
         let total = perm.len();
         let end = (req.offset + req.limit.min(500)).min(total);
@@ -823,37 +850,46 @@ impl BrowseApi for MockBackend {
     }
 
     fn browse_get_artists(&self, req: GetArtistsRequest) -> ApiResult<Paged<Artist>> {
+        lag();
         Ok(crate::browse::artists_page(&self.inner.lib, &self.inner.starred.lock().unwrap(), &req))
     }
 
     fn browse_get_albums(&self, req: GetAlbumsRequest) -> ApiResult<Paged<Album>> {
+        lag();
         Ok(crate::browse::albums_page(&self.inner.lib, &self.inner.starred.lock().unwrap(), &req))
     }
 
     // --- library routes port (browse.rs holds the JS-mock logic)
     fn browse_get_album(&self, id: &str) -> ApiResult<AlbumDetail> {
+        lag();
         let mut d = crate::browse::album_detail(&self.inner.lib, &self.inner.starred.lock().unwrap(), id)?;
         self.rate_all(d.tracks.iter_mut());
         Ok(d)
     }
     fn browse_get_artist(&self, id: &str) -> ApiResult<ArtistDetail> {
+        lag();
         crate::browse::artist_detail(&self.inner.lib, &self.inner.starred.lock().unwrap(), id)
     }
     fn browse_get_artist_tracks(&self, id: &str) -> ApiResult<Vec<Track>> {
+        lag();
         let mut v = crate::browse::artist_tracks_for_id(&self.inner.lib, &self.inner.starred.lock().unwrap(), id)?;
         self.rate_all(v.iter_mut());
         Ok(v)
     }
     fn browse_get_home_sections(&self) -> ApiResult<HomeSections> {
+        lag();
         Ok(crate::browse::home_sections(&self.inner.lib, &self.inner.starred.lock().unwrap()))
     }
     fn browse_get_genres(&self, req: GetGenresRequest) -> ApiResult<Paged<Genre>> {
+        lag();
         Ok(crate::browse::genres_page(&self.inner.lib, &req))
     }
     fn browse_get_genre(&self, name: &str) -> ApiResult<Genre> {
+        lag();
         crate::browse::genre(&self.inner.lib, name)
     }
     fn browse_get_artist_top_tracks(&self, id: &str) -> ApiResult<ArtistTopTracks> {
+        lag();
         let stars = self.inner.starred.lock().unwrap().clone();
         let hist = self.inner.lists.lock().unwrap().history.clone();
         let mut t = crate::browse::top_tracks(&self.inner.lib, &stars, &hist, id)?;
@@ -861,16 +897,19 @@ impl BrowseApi for MockBackend {
         Ok(t)
     }
     fn browse_get_artist_info(&self, id: &str) -> ApiResult<ArtistInfo> {
+        lag();
         let stars = self.inner.starred.lock().unwrap().clone();
         crate::browse::artist_info(&self.inner.lib, &stars, id)
     }
     fn history_recent(&self, req: HistoryRecentRequest) -> ApiResult<Paged<HistoryEntry>> {
+        lag();
         let hist = self.inner.lists.lock().unwrap().history.clone();
         let mut p = crate::browse::history_recent(&self.inner.lib, &self.inner.starred.lock().unwrap(), &hist, &req);
         self.rate_all(p.items.iter_mut().map(|e| &mut e.track));
         Ok(p)
     }
     fn session_check_server_queue(&self) -> ApiResult<Option<ServerQueueOffer>> {
+        lag();
         let c = self.inner.core.lock().unwrap();
         let current = c.current.and_then(|i| c.entries.get(i)).map(|e| format!("tr_{}", e.ix));
         if c.status == PlaybackStatus::Playing || current.as_deref() == Some(crate::browse::SERVER_QUEUE_CURRENT) {
@@ -880,6 +919,7 @@ impl BrowseApi for MockBackend {
         Ok(Some(crate::browse::server_queue_offer(&self.inner.lib, &self.inner.starred.lock().unwrap())))
     }
     fn session_resume_from_server(&self) -> ApiResult<()> {
+        lag();
         self.player_play_queue(PlayQueueRequest { track_ids: crate::browse::server_queue_ids(), start_index: crate::browse::SERVER_QUEUE_CURRENT_INDEX })?;
         self.player_seek(SeekRequest { position_sec: crate::browse::SERVER_QUEUE_POSITION })
     }
@@ -887,6 +927,7 @@ impl BrowseApi for MockBackend {
 
 impl PlaylistsApi for MockBackend {
     fn playlists_create(&self, req: CreatePlaylistRequest) -> ApiResult<Playlist> {
+        lag();
         let id = format!("pl_{}", self.inner.pl_seq.fetch_add(1, Ordering::SeqCst));
         let ids: Vec<u32> = req.track_ids.iter().filter_map(|t| track_index(t)).map(|i| i as u32).collect();
         let mut p = Self::playlist_meta(&self.inner.lib, id, &req.name, &ids);
@@ -895,6 +936,7 @@ impl PlaylistsApi for MockBackend {
         Ok(p)
     }
     fn playlists_rename(&self, req: RenamePlaylistRequest) -> ApiResult<()> {
+        lag();
         self.playlist_check_writable(&req.id)?;
         if let Some((p, _)) = self.inner.playlists.lock().unwrap().iter_mut().find(|(p, _)| p.id == req.id) {
             p.name = req.name;
@@ -902,11 +944,13 @@ impl PlaylistsApi for MockBackend {
         Ok(())
     }
     fn playlists_delete(&self, req: DeletePlaylistRequest) -> ApiResult<()> {
+        lag();
         self.playlist_check_writable(&req.id)?;
         self.inner.playlists.lock().unwrap().retain(|(p, _)| p.id != req.id);
         Ok(())
     }
     fn playlists_add_tracks(&self, req: AddToPlaylistRequest) -> ApiResult<()> {
+        lag();
         self.playlist_check_writable(&req.id)?;
         let lib = &self.inner.lib;
         if let Some((p, ids)) = self.inner.playlists.lock().unwrap().iter_mut().find(|(p, _)| p.id == req.id) {
@@ -917,6 +961,7 @@ impl PlaylistsApi for MockBackend {
         Ok(())
     }
     fn playlists_remove_tracks(&self, req: RemovePlaylistTracksRequest) -> ApiResult<()> {
+        lag();
         self.playlist_check_writable(&req.id)?;
         let lib = &self.inner.lib;
         if let Some((p, ids)) = self.inner.playlists.lock().unwrap().iter_mut().find(|(p, _)| p.id == req.id) {
@@ -932,6 +977,7 @@ impl PlaylistsApi for MockBackend {
         Ok(())
     }
     fn playlists_reorder(&self, req: ReorderPlaylistRequest) -> ApiResult<()> {
+        lag();
         self.playlist_check_writable(&req.id)?;
         if let Some((_, ids)) = self.inner.playlists.lock().unwrap().iter_mut().find(|(p, _)| p.id == req.id) {
             *ids = req.track_ids.iter().filter_map(|t| track_index(t)).map(|i| i as u32).collect();
@@ -939,6 +985,7 @@ impl PlaylistsApi for MockBackend {
         Ok(())
     }
     fn playlists_duplicate(&self, id: &str) -> ApiResult<Playlist> {
+        lag();
         let (src, ids) = {
             let pls = self.inner.playlists.lock().unwrap();
             let (p, ids) = pls.iter().find(|(p, _)| p.id == id).ok_or_else(|| ApiError::not_found("playlist"))?;
@@ -951,9 +998,11 @@ impl PlaylistsApi for MockBackend {
         Ok(p)
     }
     fn playlists_list(&self) -> ApiResult<Vec<Playlist>> {
+        lag();
         Ok(self.inner.playlists.lock().unwrap().iter().map(|(p, _)| p.clone()).collect())
     }
     fn playlists_get(&self, id: &str) -> ApiResult<PlaylistDetail> {
+        lag();
         let pls = self.inner.playlists.lock().unwrap();
         let (p, ids) = pls.iter().find(|(p, _)| p.id == id).ok_or_else(|| ApiError::not_found("playlist"))?;
         Ok(PlaylistDetail { playlist: p.clone(), tracks: ids.iter().map(|i| self.inner.track(*i)).collect() })
@@ -973,6 +1022,7 @@ impl MockBackend {
     }
 
     fn liked_ids(&self) -> Vec<u32> {
+        lag();
         let st = self.inner.starred.lock().unwrap();
         let mut v: Vec<(&String, &String)> = st.iter().filter(|(k, _)| k.starts_with("tr_")).collect();
         v.sort_by(|a, b| b.1.cmp(a.1).then(a.0.cmp(b.0)));
@@ -980,6 +1030,7 @@ impl MockBackend {
     }
 
     fn playlist_check_writable(&self, id: &str) -> ApiResult<()> {
+        lag();
         let pls = self.inner.playlists.lock().unwrap();
         match pls.iter().find(|(p, _)| p.id == id) {
             Some((p, _)) if p.read_only => Err(ApiError::new(ErrorCode::ServerError, "this playlist is read-only (smart or owned by another user)")),
@@ -991,6 +1042,7 @@ impl MockBackend {
     /// The playlist / liked / smart commands (`mock.ts: player_play_playlist|liked|smart`): liked and smart skip 1★
     /// tracks unless explicitly started, playlists play every track.
     fn play_pool(&self, kind: SourceKind, label: String, pool: Vec<u32>, req: &PlaySourceRequest) -> ApiResult<()> {
+        lag();
         let start = req.start_track_id.as_deref().and_then(track_index).map(|i| i as u32);
         let pool: Vec<u32> = if kind == SourceKind::Playlist {
             pool
@@ -1006,6 +1058,7 @@ impl MockBackend {
     /// `setSource(kind, label, modeOf(req), ids, startTrackId, id, flow)` (Flow wins over shuffle, shuffle = `shuffleIds`
     /// with the start swapped to the front, in order = the pool from the start on).
     fn start_source(&self, kind: SourceKind, label: String, ids: Vec<u32>, shuffle: bool, flow: Option<FlowArc>, start: Option<u32>) -> ApiResult<()> {
+        lag();
         if ids.is_empty() {
             return Err(ApiError::not_found("tracks"));
         }
@@ -1045,6 +1098,7 @@ impl MockBackend {
 
 impl StarsApi for MockBackend {
     fn rating_set(&self, req: SetRatingRequest) -> ApiResult<()> {
+        lag();
         if let Some(ix) = track_index(&req.id) {
             let mut l = self.inner.lists.lock().unwrap();
             if req.rating > 0 {
@@ -1058,6 +1112,7 @@ impl StarsApi for MockBackend {
         Ok(())
     }
     fn star_add(&self, req: StarRequest) -> ApiResult<()> {
+        lag();
         self.inner.starred.lock().unwrap().insert(req.id, crate::library::iso_from_ms(crate::library::EPOCH_MS));
         let c = self.inner.core.lock().unwrap();
         self.inner.push_state(&c);
@@ -1066,6 +1121,7 @@ impl StarsApi for MockBackend {
         Ok(())
     }
     fn star_remove(&self, req: StarRequest) -> ApiResult<()> {
+        lag();
         self.inner.starred.lock().unwrap().remove(&req.id);
         let c = self.inner.core.lock().unwrap();
         self.inner.push_state(&c);
@@ -1077,6 +1133,7 @@ impl StarsApi for MockBackend {
 
 impl PlayerApi for MockBackend {
     fn player_play_queue(&self, req: PlayQueueRequest) -> ApiResult<()> {
+        lag();
         let mut c = self.inner.core.lock().unwrap();
         c.source = None;
         c.entries = req
@@ -1097,6 +1154,7 @@ impl PlayerApi for MockBackend {
     }
 
     fn player_play_all(&self, req: PlayAllRequest) -> ApiResult<()> {
+        lag();
         let (sort, dir, shuffle_all) = match req.order {
             TrackOrder::Shuffle => (TrackSortField::Title, SortDir::Asc, true),
             TrackOrder::Sort { field, dir } => (field, dir, false),
@@ -1128,6 +1186,7 @@ impl PlayerApi for MockBackend {
     }
 
     fn player_play_playlist(&self, req: PlaySourceRequest) -> ApiResult<()> {
+        lag();
         let (name, pool) = {
             let pls = self.inner.playlists.lock().unwrap();
             let (p, ids) = pls.iter().find(|(p, _)| p.id == req.id).ok_or_else(|| ApiError::not_found("playlist"))?;
@@ -1136,9 +1195,11 @@ impl PlayerApi for MockBackend {
         self.play_pool(SourceKind::Playlist, name, pool, &req)
     }
     fn player_play_liked(&self, req: PlaySourceRequest) -> ApiResult<()> {
+        lag();
         self.play_pool(SourceKind::Liked, "Liked Songs".into(), self.liked_ids(), &req)
     }
     fn player_play_smart(&self, req: PlaySourceRequest) -> ApiResult<()> {
+        lag();
         let (name, input) = {
             let l = self.inner.lists.lock().unwrap();
             let p = l.smart.iter().find(|p| p.id == req.id).ok_or_else(|| ApiError::not_found("smart playlist"))?;
@@ -1150,6 +1211,7 @@ impl PlayerApi for MockBackend {
     }
 
     fn player_play_pause(&self) -> ApiResult<()> {
+        lag();
         let mut c = self.inner.core.lock().unwrap();
         match c.status {
             PlaybackStatus::Playing => c.status = PlaybackStatus::Paused,
@@ -1170,6 +1232,7 @@ impl PlayerApi for MockBackend {
     }
 
     fn player_play(&self) -> ApiResult<()> {
+        lag();
         let mut c = self.inner.core.lock().unwrap();
         if c.current.is_some() && c.status != PlaybackStatus::Playing {
             c.status = PlaybackStatus::Playing;
@@ -1181,6 +1244,7 @@ impl PlayerApi for MockBackend {
     }
 
     fn player_pause(&self) -> ApiResult<()> {
+        lag();
         let mut c = self.inner.core.lock().unwrap();
         if c.status == PlaybackStatus::Playing {
             c.status = PlaybackStatus::Paused;
@@ -1190,6 +1254,7 @@ impl PlayerApi for MockBackend {
     }
 
     fn player_next(&self) -> ApiResult<()> {
+        lag();
         let mut c = self.inner.core.lock().unwrap();
         if Inner::advance(&mut c) {
             Inner::start_current(&mut c);
@@ -1205,6 +1270,7 @@ impl PlayerApi for MockBackend {
     }
 
     fn player_previous(&self) -> ApiResult<()> {
+        lag();
         let mut c = self.inner.core.lock().unwrap();
         if c.pos > 3.0 {
             c.pos = 0.0;
@@ -1221,6 +1287,7 @@ impl PlayerApi for MockBackend {
     }
 
     fn player_seek(&self, req: SeekRequest) -> ApiResult<()> {
+        lag();
         let mut c = self.inner.core.lock().unwrap();
         let dur = c.current.and_then(|i| c.entries.get(i)).map(|e| self.inner.lib.sort_fields(e.ix as usize).duration as f64).unwrap_or(0.0);
         c.pos = req.position_sec.clamp(0.0, dur);
@@ -1229,17 +1296,20 @@ impl PlayerApi for MockBackend {
     }
 
     fn player_get_state(&self) -> ApiResult<PlayerState> {
+        lag();
         let c = self.inner.core.lock().unwrap();
         Ok(self.inner.state(&c))
     }
 
     fn player_set_spectrum_active(&self, active: bool) -> ApiResult<()> {
+        lag();
         self.inner.spectrum_active.store(active, Ordering::SeqCst);
         self.inner.cv.notify_all();
         Ok(())
     }
 
     fn player_set_volume(&self, req: SetVolumeRequest) -> ApiResult<()> {
+        lag();
         let mut c = self.inner.core.lock().unwrap();
         c.volume = req.volume.clamp(0.0, 1.0);
         self.inner.push_state(&c);
@@ -1247,6 +1317,7 @@ impl PlayerApi for MockBackend {
     }
 
     fn player_set_shuffle(&self, enabled: bool) -> ApiResult<()> {
+        lag();
         let mut c = self.inner.core.lock().unwrap();
         c.shuffle = enabled;
         self.inner.push_state(&c);
@@ -1254,6 +1325,7 @@ impl PlayerApi for MockBackend {
     }
 
     fn player_set_repeat(&self, mode: RepeatMode) -> ApiResult<()> {
+        lag();
         let mut c = self.inner.core.lock().unwrap();
         c.repeat = mode;
         self.inner.push_state(&c);
@@ -1261,6 +1333,7 @@ impl PlayerApi for MockBackend {
     }
 
     fn player_get_queue(&self, req: PageRequest) -> ApiResult<QueueState> {
+        lag();
         let mut c = self.inner.core.lock().unwrap();
         let end = (req.offset + req.limit).min(c.entries.len());
         let start = req.offset.min(end);
@@ -1295,6 +1368,7 @@ impl PlayerApi for MockBackend {
     }
 
     fn player_jump_to(&self, index: usize) -> ApiResult<()> {
+        lag();
         let mut c = self.inner.core.lock().unwrap();
         if index < c.entries.len() {
             c.current = Some(index);
@@ -1309,6 +1383,7 @@ impl PlayerApi for MockBackend {
     }
 
     fn player_enqueue(&self, req: EnqueueRequest) -> ApiResult<()> {
+        lag();
         let mut c = self.inner.core.lock().unwrap();
         let ids: Vec<Entry> = req.track_ids.iter().filter_map(|i| track_index(i)).map(|i| Entry { ix: i as u32, origin: QueueItemOrigin::User }).collect();
         let at = match req.position {
@@ -1332,6 +1407,7 @@ impl PlayerApi for MockBackend {
     }
 
     fn player_remove_from_queue(&self, index: usize) -> ApiResult<()> {
+        lag();
         let mut c = self.inner.core.lock().unwrap();
         if index >= c.entries.len() {
             return Ok(());
@@ -1353,6 +1429,7 @@ impl PlayerApi for MockBackend {
     }
 
     fn player_reorder_queue(&self, from: usize, to: usize) -> ApiResult<()> {
+        lag();
         let mut c = self.inner.core.lock().unwrap();
         if from >= c.entries.len() {
             return Ok(());
@@ -1377,6 +1454,7 @@ impl PlayerApi for MockBackend {
     }
 
     fn updates_check(&self) -> ApiResult<UpdateInfo> {
+        lag();
         let cur = env!("CARGO_PKG_VERSION").to_string();
         let info = if self.inner.mock_update.load(Ordering::Relaxed) {
             UpdateInfo { available: true, current_version: cur, version: Some("9.9.9".into()), date: Some("2026-01-01".into()), notes: Some("Features
@@ -1394,6 +1472,7 @@ Fixes
     }
 
     fn updates_install(&self) -> ApiResult<()> {
+        lag();
         let total = 12_000_000u64;
         let mut downloaded = 0u64;
         if self.inner.core.lock().unwrap().det_half {
@@ -1410,11 +1489,13 @@ Fixes
     }
 
     fn lyrics_get(&self, track_id: &str) -> ApiResult<Option<Lyrics>> {
+        lag();
         let Some(idx) = track_index(track_id) else { return Ok(None) };
         Ok(mock_lyrics(&self.inner.lib.track(idx), idx))
     }
 
     fn flow_get_coverage(&self, req: FlowCoverageRequest) -> ApiResult<FlowCoverage> {
+        lag();
         let ids: Vec<u32> = match req.kind {
             FlowPoolKind::AllTracks => (*self.inner.permutation(TrackSortField::Title, SortDir::Asc, req.filter.as_deref())).clone(),
             FlowPoolKind::Playlist => self.inner.playlists.lock().unwrap().iter().find(|(p, _)| Some(&p.id) == req.id.as_ref()).map(|(_, ids)| ids.clone()).unwrap_or_default(),
@@ -1443,6 +1524,7 @@ Fixes
     }
 
     fn radio_start(&self, req: RadioStartRequest) -> ApiResult<()> {
+        lag();
         // `radioTracksFor*` skip anything 1-starred
         let one_star: std::collections::HashSet<u32> = self.inner.lists.lock().unwrap().ratings.iter().filter(|(_, r)| **r == 1).map(|(i, _)| *i).collect();
         // `radioTracksForArtist`: 50 random tracks of `artistTracksOrdered` (`sampleExcludingOneStar`)
@@ -1515,10 +1597,12 @@ Fixes
     }
 
     fn player_get_waveform(&self, track_id: &str) -> ApiResult<Waveform> {
+        lag();
         mock_waveform(self, track_id)
     }
 
     fn player_loop_cycle(&self) -> ApiResult<()> {
+        lag();
         let mut c = self.inner.core.lock().unwrap();
         let Some(id) = self.inner.current_id(&c) else { return Ok(()) };
         if c.loop_track.as_deref() != Some(id.as_str()) {
@@ -1554,6 +1638,7 @@ Fixes
 
     // --- library routes port: rolling-window sources of kind genre / artist (`mock.ts: player_play_genre/artist`)
     fn player_play_genre(&self, req: PlayGenreRequest) -> ApiResult<()> {
+        lag();
         let pool = crate::browse::genre_track_ixs(&self.inner.lib, &req.name);
         if pool.is_empty() {
             return Err(ApiError::not_found("genre"));
@@ -1562,6 +1647,7 @@ Fixes
         self.start_source(SourceKind::Genre, req.name, pool, req.shuffle, req.flow, start)
     }
     fn player_play_artist(&self, req: PlayArtistRequest) -> ApiResult<()> {
+        lag();
         let pool = crate::browse::artist_track_ixs(&self.inner.lib, &self.inner.starred.lock().unwrap(), &req.id)?;
         if pool.is_empty() {
             return Err(ApiError::not_found("artist"));
@@ -1590,6 +1676,7 @@ pub fn synth_waveform(ix: usize) -> Vec<u8> {
 
 impl OutputApi for MockBackend {
     fn output_get_status(&self) -> ApiResult<OutputStatus> {
+        lag();
         let c = self.inner.core.lock().unwrap();
         let st = self.inner.state(&c);
         Ok(OutputStatus {
@@ -1604,15 +1691,18 @@ impl OutputApi for MockBackend {
         })
     }
     fn output_list_devices(&self) -> ApiResult<Vec<OutputDevice>> {
+        lag();
         Ok(vec![
             OutputDevice { id: "dev_default".into(), name: "Topping E30 II (USB Audio)".into(), is_default: true },
             OutputDevice { id: "dev_speakers".into(), name: "Built-in Speakers".into(), is_default: false },
         ])
     }
     fn output_set_device(&self, _id: &str) -> ApiResult<()> {
+        lag();
         Ok(())
     }
     fn output_set_mode(&self, mode: OutputMode) -> ApiResult<()> {
+        lag();
         let mut c = self.inner.core.lock().unwrap();
         c.output_mode = mode;
         self.inner.push_state(&c);
@@ -1622,6 +1712,7 @@ impl OutputApi for MockBackend {
 
 impl ArtApi for MockBackend {
     fn art_get(&self, cover_art: &str, size: u32) -> ApiResult<ArtPixels> {
+        lag();
         let n: usize = cover_art.get(3..).and_then(|s| s.parse().ok()).ok_or_else(|| ApiError::not_found("cover"))?;
         Ok(art::procedural_cover(n, cover_art.starts_with("ar_"), size))
     }
@@ -2051,5 +2142,15 @@ mod flow_tests {
         let q = b.player_get_queue(PageRequest { offset: 0, limit: 100 }).unwrap();
         assert_eq!(q.source.unwrap().kind, SourceKind::Radio);
         assert!(!q.items.is_empty() && q.items.iter().all(|i| i.track.artist_id.as_deref() == Some("ar_1")));
+    }
+}
+
+/// Opt-in simulated server latency: `SONIX_MOCK_LATENCY_MS=<ms>` sleeps at the start of every `Backend` call
+/// and every `art_get` (default 0 = no sleep, so parity runs are unchanged). Read once.
+fn lag() {
+    static MS: std::sync::OnceLock<u64> = std::sync::OnceLock::new();
+    let ms = *MS.get_or_init(|| std::env::var("SONIX_MOCK_LATENCY_MS").ok().and_then(|v| v.parse().ok()).unwrap_or(0));
+    if ms > 0 {
+        std::thread::sleep(Duration::from_millis(ms));
     }
 }

@@ -26,7 +26,7 @@ pub fn play_btn(id: impl Into<ElementId>, th: &Theme, label: &str, disabled: boo
         .shadow(hard_shadow(&th, ctl::BTN_SHADOW))
         .child(icon("play", lm::ICON_PLAY, th.accent_text))
         .child(txt(&th, HEADLINE_SM, label.to_string()).color(th.accent_text));
-    b = if disabled { b.opacity(0.5).cursor(CursorStyle::OperationNotAllowed) } else { b.cursor(CursorStyle::PointingHand).hover(move |s| s.bg(th.accent_hover)) };
+    b = if disabled { b.opacity(0.5).cursor(CursorStyle::OperationNotAllowed) } else { b.tab_index(0).cursor(CursorStyle::PointingHand).hover(move |s| s.bg(th.accent_hover)) };
     b
 }
 
@@ -48,7 +48,7 @@ pub fn sec_btn(id: impl Into<ElementId>, th: &Theme, icon_name: &str, label: &st
         .text_color(th.text)
         .child(icon(icon_name, lm::ICON_SEC, th.text))
         .child(txt(&th, BODY_MD, label.to_string()).color(th.text));
-    b = if disabled { b.opacity(0.5).cursor(CursorStyle::OperationNotAllowed) } else { b.cursor(CursorStyle::PointingHand).hover(move |s| s.border_color(th.focus)) };
+    b = if disabled { b.opacity(0.5).cursor(CursorStyle::OperationNotAllowed) } else { b.tab_index(0).cursor(CursorStyle::PointingHand).hover(move |s| s.border_color(th.focus)) };
     b
 }
 
@@ -67,7 +67,7 @@ pub fn icon_btn40(id: impl Into<ElementId>, th: &Theme, icon_name: &str, disable
         .border_color(th.border)
         .text_color(th.text)
         .child(icon(icon_name, lm::ICON_SEC, th.text));
-    b = if disabled { b.opacity(0.5).cursor(CursorStyle::OperationNotAllowed) } else { b.cursor(CursorStyle::PointingHand).hover(move |s| s.border_color(th.focus)) };
+    b = if disabled { b.opacity(0.5).cursor(CursorStyle::OperationNotAllowed) } else { b.tab_index(0).cursor(CursorStyle::PointingHand).hover(move |s| s.border_color(th.focus)) };
     b
 }
 

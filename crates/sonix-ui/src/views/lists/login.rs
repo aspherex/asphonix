@@ -130,6 +130,8 @@ impl Render for LoginView {
             let pw_field = div().flex_1().min_w_0().flex().flex_col().child(field(&th, &self.pass, None, "••••••••••", window, cx).h(px(crate::metrics::controls::FIELD_H)));
             let eye = div()
                 .id("login-eye")
+                .tab_index(0)
+                .focus(move |s| if crate::widgets::key_nav() { s.border_color(th.focus).text_color(th.accent_fg) } else { s })
                 .group("hv")
                 .w(px(36.))
                 .flex_none()
@@ -215,13 +217,15 @@ impl Render for LoginView {
                 .shadow(hard_shadow(&th, 2.0))
                 .child(icon("sync", 16., th.accent_text))
                 .child(txt(&th, HEADLINE_SM, label).color(th.accent_text))
-                .map(|d| if disabled { d.opacity(0.5).cursor(CursorStyle::OperationNotAllowed) } else { d.cursor(CursorStyle::PointingHand).hover(move |s| s.bg(th.accent_hover)).on_click(cx.listener(|t, _, _, cx| t.connect(cx))) });
+                .map(|d| if disabled { d.opacity(0.5).cursor(CursorStyle::OperationNotAllowed) } else { d.tab_index(0).focus(move |s| if crate::widgets::key_nav() { s.bg(th.accent_hover) } else { s }).cursor(CursorStyle::PointingHand).hover(move |s| s.bg(th.accent_hover)).on_click(cx.listener(|t, _, _, cx| t.connect(cx))) });
             form = form.child(pid("login.btn", btn));
             if self.signed_in && self.phase != Phase::Connected {
                 form = form.child(
                     div().flex().flex_row().justify_center().child(
                         div()
                             .id("login-cancel")
+                            .tab_index(0)
+                            .focus(move |s| if crate::widgets::key_nav() { s.text_color(th.accent_fg) } else { s })
                             .px(px(space::SM))
                             .py(px(space::XS))
                             .text_color(th.muted)

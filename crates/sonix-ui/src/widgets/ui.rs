@@ -35,6 +35,7 @@ pub fn segmented(id: &'static str, th: &Theme, options: &[(&str, &str)], value: 
         // `.segment` is a <button>: letter-spacing is reset by the UA stylesheet
         let seg = div()
             .id((id, i))
+            .tab_index(0)
             .flex()
             .flex_row()
             .items_center()

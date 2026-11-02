@@ -130,7 +130,7 @@ impl Table {
             sel: Selection::default(),
             list: UniformListScrollHandle::new(),
             sb: scrollbar::new_handle(),
-            focus: cx.focus_handle(),
+            focus: cx.focus_handle().tab_stop(true),
             vis: 0..0,
             hover_row: None,
             body_bounds: Rc::new(Cell::new(Bounds::default())),

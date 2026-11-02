@@ -85,7 +85,7 @@ impl ArtistDetailView {
             top_w: Rc::new(Cell::new(1000.0)),
             bio_w: Rc::new(Cell::new(0.0)),
             row_anchor: anchor_cell(),
-            focus: cx.focus_handle(),
+            focus: cx.focus_handle().tab_stop(true),
             current,
             playing,
             _subs: subs,

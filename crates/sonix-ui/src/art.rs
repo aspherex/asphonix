@@ -103,11 +103,6 @@ impl ArtCache {
     }
 }
 
-pub fn placeholder(id: &str) -> Hsla {
-    let h = id.bytes().fold(7u32, |a, b| a.wrapping_mul(31).wrapping_add(b as u32));
-    hsla((h % 360) as f32 / 360.0, 0.3, 0.16, 1.0)
-}
-
 /// A square cover of `logical` px: the cached image when present, otherwise a flat
 /// placeholder while a worker loads it (the requesting view is re-rendered on arrival).
 pub fn cover<V: 'static>(
@@ -147,16 +142,19 @@ pub fn cover_bucket<V: 'static>(
         cx.spawn_in(window, async move |this, cx| {
             let key = sid2.to_string();
             let img = cx.background_executor().spawn(async move { backend.art_get(&key, bucket).ok().and_then(render_image) }).await;
-            let _ = this.update_in(cx, |_, window, cx| {
+            // The cache entry must land even when the requesting view was dropped meanwhile (navigated away): otherwise the
+            // key would stay `pending` forever and the next view mounted for it would show the placeholder for good.
+            let _ = cx.update(|window, cx| {
                 for e in art2.borrow_mut().insert(sid2, bucket, img) {
                     let _ = window.drop_image(e);
                 }
-                cx.notify();
+                let _ = this.update(cx, |_, cx| cx.notify());
             });
         })
         .detach();
     }
-    let base = base.bg(placeholder(id));
+    // `.art { background: var(--color-surface-high) }` until the image arrives (no per-id tint)
+    let base = base.bg(crate::app::theme(cx).high);
     match hit {
         Some(i) => base.child(img(ImageSource::Render(i)).size_full().object_fit(ObjectFit::Cover)).into_any_element(),
         None => base.into_any_element(),
