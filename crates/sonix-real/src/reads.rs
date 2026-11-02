@@ -22,6 +22,12 @@ macro_rules! r {
 }
 
 impl BrowseApi for RealBackend {
+    fn session_check_server_queue(&self) -> ApiResult<Option<ServerQueueOffer>> {
+        self.session_check_impl()
+    }
+    fn session_resume_from_server(&self) -> ApiResult<()> {
+        self.session_resume_impl()
+    }
     fn browse_get_tracks(&self, req: GetTracksRequest) -> ApiResult<Paged<Track>> {
         let q: sonix_core::ipc::GetTracksRequest = conv(req)?;
         r!(library::get_tracks(&self.0.db, q.offset, q.limit, q.sort, q.dir, q.filter.as_deref()))

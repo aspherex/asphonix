@@ -22,10 +22,11 @@ pub struct Prefs {
 }
 
 impl Default for Prefs {
-    /// Same defaults as `secrets::Settings`: autoplay on, server queue sync on,
+    /// Same defaults as the native `secrets::Settings`: autoplay OFF, server queue sync OFF (network-visible features
+    /// are opt-in; a careless `Prefs::default()` must never opt in),
     /// ReplayGain off.
     fn default() -> Self {
-        Self::new(true, true, ReplayGainMode::Off)
+        Self::new(false, false, ReplayGainMode::Off)
     }
 }
 

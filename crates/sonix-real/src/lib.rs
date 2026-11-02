@@ -5,7 +5,7 @@ mod art;
 mod extras;
 mod player;
 mod reads;
-mod stubs;
+mod settings;
 mod services;
 mod writes;
 
@@ -60,6 +60,12 @@ struct Inner {
     svc: services::Services,
     /// Local smart-playlist definitions (`smart_playlists.json` in the config dir).
     smart: sonix_core::smartlists::SmartStore,
+    /// Persisted settings (`settings.json` in the config dir), the source of truth for `settings_get`.
+    settings: Mutex<secrets::Settings>,
+    /// `Settings.scrobbling_enabled`, shared with the scrobble tasks.
+    scrobbling: Arc<std::sync::atomic::AtomicBool>,
+    /// Session persistence + server play-queue push (gated by `Prefs::sync_play_queue`).
+    store: Arc<sonix_core::audio::SessionStore>,
 }
 
 #[derive(Clone)]
@@ -111,12 +117,17 @@ impl RealBackend {
         let _ = std::fs::create_dir_all(&data);
         let db = Arc::new(Db::open(&data).expect("library db"));
         let client: Arc<std::sync::RwLock<Option<Client>>> = Arc::new(std::sync::RwLock::new(None));
-        let prefs = Arc::new(sonix_core::audio::Prefs::default());
+        let settings = secrets::load_settings(&dir);
+        let prefs = Arc::new(sonix_core::audio::Prefs::new(settings.autoplay_enabled, settings.sync_play_queue, settings.replay_gain_mode));
+        prefs.set_play_threshold_sec(settings.play_threshold_sec);
+        let scrobbling = Arc::new(std::sync::atomic::AtomicBool::new(settings.scrobbling_enabled));
+        let store = sonix_core::audio::SessionStore::spawn(dir.clone(), client.clone(), prefs.clone());
+        let autoplay: Arc<dyn sonix_core::audio::autoplay::AutoplaySource> = Arc::new(sonix_core::continuity::ServerAutoplay { client: client.clone(), db: db.clone() });
         let (ev_tx, ev_rx) = channel::<Event>();
         let source: Arc<dyn sonix_core::audio::TrackSource> = Arc::new(sonix_core::audio::SubsonicTrackSource::new(client.clone()));
         let waveform_source = source.clone();
-        let engine = sonix_core::audio::EngineHandle::with_events(Arc::new(player::Events(ev_tx)), source, db.clone(), false, 20)
-            .with_continuity(prefs.clone(), None, None)
+        let engine = sonix_core::audio::EngineHandle::with_events(Arc::new(player::Events(ev_tx)), source, db.clone(), settings.spread_artists_in_shuffle, settings.queue_window_size)
+            .with_continuity(prefs.clone(), Some(store.clone()), Some(autoplay))
             .with_listen(sonix_core::listen::spawn_writer(db.clone()));
         // Safety default: shared mode until the user picks exclusive in Settings.
         engine.send(sonix_core::audio::EngineCommand::SetOutputMode(sonix_core::ipc::OutputMode::Shared));
@@ -140,12 +151,28 @@ impl RealBackend {
             }),
             subs: Mutex::new(Vec::new()),
             svc: Default::default(),
+            settings: Mutex::new(settings),
+            scrobbling,
+            store,
         }));
+        sonix_core::scrobble::service::spawn(
+            sonix_core::scrobble::service::ScrobbleCtx {
+                client: me.0.client.clone(),
+                db: me.0.db.clone(),
+                prefs: me.0.prefs.clone(),
+                scrobbling: me.0.scrobbling.clone(),
+                data_dir: me.0.dir.clone(),
+            },
+            me.0.engine.subscribe_player_state(),
+        );
+        me.spawn_session_restore();
         {
-            let b = me.clone();
+            // Weak: the pump must not keep the backend (engine, DB) alive once every handle is dropped.
+            let weak = Arc::downgrade(&me.0);
             std::thread::spawn(move || {
                 while let Ok(ev) = ev_rx.recv() {
-                    b.emit(ev);
+                    let Some(inner) = weak.upgrade() else { break };
+                    RealBackend(inner).emit(ev);
                 }
             });
         }
