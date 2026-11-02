@@ -388,7 +388,8 @@ fn wave_canvas(th: Theme, d: WaveDraw) -> impl IntoElement {
         |_, _, _| (),
         move |b, _, window, cx| {
             let s = window.scale_factor();
-            let (ox, oy) = (f32::from(b.origin.x) * s, f32::from(b.origin.y) * s);
+            // Chromium snaps the canvas to whole device pixels (277 css px * 1.5 = 415.5 -> 416); fractional quads blur
+            let (ox, oy) = ((f32::from(b.origin.x) * s).round(), (f32::from(b.origin.y) * s).round());
             let (w, h) = ((f32::from(b.size.width) * s).round(), (f32::from(b.size.height) * s).round());
             let dev = |x: f32, y: f32, ww: f32, hh: f32| Bounds::new(point(px((ox + x) / s), px((oy + y) / s)), size(px(ww / s), px(hh / s)));
             let n = if d.buckets.is_empty() { 240 } else { d.buckets.len() };
@@ -1023,7 +1024,8 @@ impl Render for NowPlayingView {
                 .border_color(th.border)
                 .child(wave_inner)
                 .children(hover_label.map(|l| {
-                    div().absolute().bottom(gpui::relative(1.0)).mb(px(2.)).left(gpui::relative(hover_x)).ml(px(-20.)).bg(th.high).border_1().border_color(th.border).px(px(4.)).child(txt(&th, MONO_CODE, l).color(th.text))
+                    // `.tip { left: x%; transform: translateX(-50%) }`: a zero-width centring box (flex centre overflows both ways)
+                    div().absolute().bottom(gpui::relative(1.0)).mb(px(2.)).left(gpui::relative(hover_x)).w(px(0.)).flex().flex_row().justify_center().child(div().flex_none().bg(th.high).border_1().border_color(th.border).px(px(4.)).child(txt(&th, MONO_CODE, l).color(th.text)))
                 })),
         ));
         let shown_pos = ps.position_sec; // NowPlaying: POS never follows the drag preview

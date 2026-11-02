@@ -33,13 +33,16 @@ pub struct DockView {
     seek_preview: Option<f32>,
     vol: SliderHandle,
     last_audible: f64,
+    /// `.np-link:has(.art-slot:hover) .title, .title:hover { color: accent-fg }` (PlayerDock.svelte)
+    art_hover: bool,
+    title_hover: bool,
     _sub: Subscription,
 }
 
 impl DockView {
     pub fn new(backend: Arc<dyn Backend>, art: ArtHandle, player: &Entity<PlayerModel>, cx: &mut Context<Self>) -> Self {
         let sub = cx.observe(player, |_, _, cx| cx.notify());
-        Self { backend, art, player: player.clone(), seek: slider::new_handle(), seek_preview: None, vol: slider::new_handle(), last_audible: 0.5, _sub: sub }
+        Self { backend, art, player: player.clone(), seek: slider::new_handle(), seek_preview: None, vol: slider::new_handle(), last_audible: 0.5, art_hover: false, title_hover: false, _sub: sub }
     }
 }
 
@@ -91,7 +94,7 @@ impl Render for DockView {
                     .flex_shrink()
                     .child(pid(
                         "dock.art",
-                        div()
+                        tip(div()
                             .id("dock-art")
                             .size(px(dk::ART))
                             .flex_none()
@@ -101,7 +104,11 @@ impl Render for DockView {
                             .overflow_hidden()
                             .cursor(CursorStyle::PointingHand)
                             .when(!has, |d| d.flex().items_center().justify_center().text_color(th.muted).child(icon("equalizer", 18., th.muted)))
-                            .when(has, |d| d.child(cover))
+                            .on_hover(cx.listener(|this, h: &bool, _, cx| {
+                                this.art_hover = *h;
+                                cx.notify();
+                            }))
+                            .when(has, |d| d.child(cover)), "Now Playing (N)", th)
                             .on_click(cx.listener(|_, _, _, cx| cx.emit(DockEvent::OpenNowPlaying))),
                     ))
                     .child(
@@ -109,7 +116,25 @@ impl Render for DockView {
                             .flex()
                             .flex_col()
                             .min_w_0()
-                            .child(pid("dock.title", div().flex().min_w_0().child(txt(&th, BODY_LG, title).color(th.text).ellipsis())))
+                            .child(pid(
+                                "dock.title",
+                                // `<button class="title" onclick={toggleNowPlaying} title="Now Playing (N)">`: stretched across .meta
+                                tip(
+                                    div()
+                                        .id("dock-title")
+                                        .flex()
+                                        .min_w_0()
+                                        .cursor(CursorStyle::PointingHand)
+                                        .on_hover(cx.listener(|this, h: &bool, _, cx| {
+                                            this.title_hover = *h;
+                                            cx.notify();
+                                        }))
+                                        .child(txt(&th, BODY_LG, title).color(if self.title_hover || self.art_hover { th.accent_fg } else { th.text }).ellipsis()),
+                                    "Now Playing (N)",
+                                    th,
+                                )
+                                .on_click(cx.listener(|_, _, _, cx| cx.emit(DockEvent::OpenNowPlaying))),
+                            ))
                             .child(pid("dock.subtitle", div().flex().flex_row().min_w_0().child(match &track {
                                 // `<EntityLink artist/> · <EntityLink album/>`
                                 Some(t) => {
