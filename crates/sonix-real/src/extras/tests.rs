@@ -67,7 +67,9 @@ struct TmpDir(std::path::PathBuf);
 
 impl TmpDir {
     fn new() -> Self {
-        let p = std::path::PathBuf::from("<build-dir>/tmp").join(format!("sonix-extras-{}", std::process::id()));
+        static SEQ: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+        let seq = SEQ.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        let p = std::path::PathBuf::from("<build-dir>/tmp").join(format!("sonix-extras-{}-{seq}", std::process::id()));
         let _ = std::fs::remove_dir_all(&p);
         std::fs::create_dir_all(&p).unwrap();
         TmpDir(p)
@@ -159,13 +161,11 @@ fn near(p: &[u8], w: u32, x: u32, y: u32, rgb: [u8; 3]) {
     }
 }
 
-/// One sequential test: `RealBackend::open` reads process-global env (`APPDATA`/`LOCALAPPDATA`) and the client is shared.
+/// One sequential test over its own temp dirs (`open_in`); the mock server is swapped per section.
 #[test]
 fn extras_against_a_local_mock_server() {
     let tmp = TmpDir::new();
-    unsafe { std::env::set_var("APPDATA", tmp.0.join("roaming")) };
-    unsafe { std::env::set_var("LOCALAPPDATA", tmp.0.join("local")) };
-    let b = RealBackend::open();
+    let b = RealBackend::open_in(tmp.0.join("roaming"), tmp.0.join("local"));
     seed(&b);
 
     // --- lyrics: OpenSubsonic first (songLyrics advertised), cached, "none" cached, no classic fallback when advertised
@@ -301,7 +301,7 @@ fn extras_against_a_local_mock_server() {
     b.art_get("p1", 160).unwrap();
     assert_eq!(m.count("getCoverArt"), 4, "a bare playlist id is an ordinary cover id (no mosaic)");
     // a torn cache file is rejected and refetched
-    let tile = cache_path("c2", 160);
+    let tile = cache_path(&b.art_dir(), "c2", 160);
     std::fs::write(&tile, b"not an image").unwrap();
     assert_eq!(b.art_get("c2", 160).unwrap().rgba[1], 255);
     assert_eq!(m.count("getCoverArt"), 5);

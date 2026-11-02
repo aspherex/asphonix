@@ -10,10 +10,13 @@ use std::sync::{Arc, Mutex, MutexGuard};
 use std::time::Instant;
 
 static ENV: Mutex<()> = Mutex::new(());
+static SEQ: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
 
-/// Serializes tests (process-wide env vars) and points `APPDATA`/`LOCALAPPDATA` at a fresh dir under
-/// `<build-dir>/tmp` (override: `SONIX_TEST_TMP`). Declare it FIRST in a test so backends drop before it; the
-/// directory is removed on drop (also when the test panics), retrying while background threads release SQLite.
+/// A fresh config (`roaming`) + data (`local`) dir pair under `<build-dir>/tmp` (override: `SONIX_TEST_TMP`);
+/// backends are opened with [`RealBackend::open_in`] on it, never on the process env (`APPDATA`/`LOCALAPPDATA` are
+/// not touched). Tests still run one at a time (shared engine timing). Declare it FIRST in a test so backends drop
+/// before it; the directory is removed on drop (also when the test panics), retrying while background threads
+/// release SQLite.
 struct Env {
     _g: MutexGuard<'static, ()>,
     root: std::path::PathBuf,
@@ -22,15 +25,23 @@ impl Env {
     fn new(tag: &str) -> Self {
         let g = ENV.lock().unwrap_or_else(|p| p.into_inner());
         let base = std::path::PathBuf::from(std::env::var("SONIX_TEST_TMP").unwrap_or_else(|_| "<build-dir>/tmp".into()));
-        let root = base.join(format!("sonix-real-{tag}-{}", std::process::id()));
+        let seq = SEQ.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        let root = base.join(format!("sonix-real-{tag}-{}-{seq}", std::process::id()));
         let _ = std::fs::remove_dir_all(&root);
         std::fs::create_dir_all(root.join("roaming")).unwrap();
         std::fs::create_dir_all(root.join("local")).unwrap();
-        unsafe {
-            std::env::set_var("APPDATA", root.join("roaming"));
-            std::env::set_var("LOCALAPPDATA", root.join("local"));
-        }
         Env { _g: g, root }
+    }
+    /// Config dir of this test's backends (`connection.json`, `settings.json`, session, scrobble queue).
+    fn cfg(&self) -> std::path::PathBuf {
+        self.root.join("roaming").join(crate::IDENTIFIER)
+    }
+    /// Data dir (library DB, art cache).
+    fn data(&self) -> std::path::PathBuf {
+        self.root.join("local").join(crate::IDENTIFIER)
+    }
+    fn open(&self) -> RealBackend {
+        RealBackend::open_in(self.cfg(), self.data())
     }
     /// Removes the dir, waiting up to 5 s for the closed backends' threads to release their files.
     fn cleanup(&self) -> bool {
@@ -152,8 +163,8 @@ fn core_of(ids: &[&str], current: usize) -> QueueCore {
 
 #[test]
 fn defaults_are_off_and_every_field_roundtrips_and_persists() {
-    let _e = Env::new("settings");
-    let b = RealBackend::open();
+    let e = Env::new("settings");
+    let b = e.open();
     let d = b.settings_get().unwrap();
     assert!(!d.scrobbling_enabled && !d.autoplay_enabled && !d.sync_play_queue && !d.auto_check_updates && !d.mcp_enabled && !d.mcp_allow_control);
     assert_eq!((d.queue_window_size, d.play_threshold_sec, d.replay_gain_mode), (20, 30, ReplayGainMode::Off));
@@ -205,8 +216,8 @@ fn defaults_are_off_and_every_field_roundtrips_and_persists() {
     b.settings_set(SettingChange::QueueWindowSize(55)).unwrap();
     b.settings_set(SettingChange::PlayThreshold(120)).unwrap();
     // persisted: a second backend over the same dirs reads the file and applies it at startup
-    assert!(crate::config_dir().join("settings.json").exists());
-    let b2 = RealBackend::open();
+    assert!(e.cfg().join("settings.json").exists());
+    let b2 = e.open();
     assert_eq!(b2.settings_get().unwrap(), want);
     assert!(b2.0.prefs.autoplay() && b2.0.prefs.sync_play_queue() && b2.0.scrobbling.load(Ordering::Relaxed));
     assert!(!b2.mcp_status().unwrap().listening);
@@ -215,8 +226,8 @@ fn defaults_are_off_and_every_field_roundtrips_and_persists() {
 
 #[test]
 fn server_queue_check_is_gated_by_sync_and_read_only() {
-    let _e = Env::new("srvq");
-    let b = RealBackend::open();
+    let e = Env::new("srvq");
+    let b = e.open();
     seed(&b);
     let mock = Mock::start(play_queue_server);
     *b.0.client.write().unwrap() = Some(mock.client());
@@ -235,8 +246,8 @@ fn server_queue_check_is_gated_by_sync_and_read_only() {
 
 #[test]
 fn resume_from_server_reads_the_queue_and_errors_without_one() {
-    let _e = Env::new("resume");
-    let b = RealBackend::open();
+    let e = Env::new("resume");
+    let b = e.open();
     assert_eq!(b.session_resume_from_server().unwrap_err().code, ErrorCode::NotConnected);
     let none = Mock::start(empty_server);
     *b.0.client.write().unwrap() = Some(none.client());
@@ -264,8 +275,8 @@ fn queue_ids(b: &RealBackend) -> Vec<String> {
 
 #[test]
 fn exit_path_writes_the_session_and_pushes_the_play_queue_only_with_sync_on() {
-    let _e = Env::new("push");
-    let b = RealBackend::open();
+    let e = Env::new("push");
+    let b = e.open();
     seed(&b);
     let mock = Mock::start(empty_server);
     *b.0.client.write().unwrap() = Some(mock.client());
@@ -293,7 +304,7 @@ fn exit_path_writes_the_session_and_pushes_the_play_queue_only_with_sync_on() {
 #[test]
 fn queue_and_position_survive_a_restart_through_the_exit_path() {
     let e = Env::new("restart");
-    let b = RealBackend::open();
+    let b = e.open();
     seed(&b);
     restore_via_engine(&b, &["t1", "t2", "t3"], 1, 42_000);
     b.player_reorder_queue(0, 2).unwrap();
@@ -301,7 +312,7 @@ fn queue_and_position_survive_a_restart_through_the_exit_path() {
     b.persist_now();
     assert!(t.elapsed() < Duration::from_secs(4));
     drop(b);
-    let b2 = RealBackend::open();
+    let b2 = e.open();
     wait_until("restored queue", || queue_ids(&b2).len() == 3);
     assert_eq!(queue_ids(&b2), ["t2", "t3", "t1"]);
     let st = b2.player_get_state().unwrap();
@@ -315,8 +326,8 @@ fn queue_and_position_survive_a_restart_through_the_exit_path() {
 
 #[test]
 fn legacy_partial_or_broken_settings_files_leave_every_network_flag_off() {
-    let _e = Env::new("legacy");
-    let cfg = crate::config_dir();
+    let e = Env::new("legacy");
+    let cfg = e.cfg();
     std::fs::create_dir_all(&cfg).unwrap();
     let files = [
         "{}",
@@ -328,7 +339,7 @@ fn legacy_partial_or_broken_settings_files_leave_every_network_flag_off() {
     ];
     for f in files {
         std::fs::write(cfg.join("settings.json"), f).unwrap();
-        let b = RealBackend::open();
+        let b = e.open();
         let s = b.settings_get().unwrap();
         assert!(
             !s.scrobbling_enabled && !s.autoplay_enabled && !s.sync_play_queue && !s.auto_check_updates && !s.mcp_enabled && !s.mcp_allow_control,
@@ -339,7 +350,7 @@ fn legacy_partial_or_broken_settings_files_leave_every_network_flag_off() {
     }
     // a legacy file naming only some fields keeps those and defaults the rest to off
     std::fs::write(cfg.join("settings.json"), r#"{"scrobbling_enabled":true}"#).unwrap();
-    let s = RealBackend::open().settings_get().unwrap();
+    let s = e.open().settings_get().unwrap();
     assert!(s.scrobbling_enabled && !s.autoplay_enabled && !s.sync_play_queue && !s.auto_check_updates);
     // and the Prefs default itself is opt-out
     let p = sonix_core::audio::Prefs::default();
@@ -348,8 +359,8 @@ fn legacy_partial_or_broken_settings_files_leave_every_network_flag_off() {
 
 #[test]
 fn art_cache_status_counts_distinct_covers_not_size_buckets() {
-    let _e = Env::new("art");
-    let b = RealBackend::open();
+    let e = Env::new("art");
+    let b = e.open();
     b.0.db
         .with_tx(|tx| {
             tx.execute("INSERT INTO albums (id, name, artist, song_count, duration, cover_art) VALUES ('al1','A','X',1,1,'al-1'),('al2','B','X',1,1,'al-2')", [])?;
@@ -357,7 +368,7 @@ fn art_cache_status_counts_distinct_covers_not_size_buckets() {
             Ok(())
         })
         .unwrap();
-    let dir = crate::data_dir().join("art");
+    let dir = e.data().join("art");
     std::fs::create_dir_all(&dir).unwrap();
     for (name, n) in [("al-1_64.img", 10), ("al-1_160.img", 20), ("al-1_320.img", 30), ("ar-1_64.img", 5), ("playlist_x_64.img", 7)] {
         std::fs::write(dir.join(name), vec![0u8; n]).unwrap();
@@ -369,11 +380,11 @@ fn art_cache_status_counts_distinct_covers_not_size_buckets() {
 
 #[test]
 fn queued_scrobbles_replay_only_to_their_own_account() {
-    let _e = Env::new("acct");
+    let e = Env::new("acct");
     let mock = Mock::start(empty_server);
     let client = mock.client();
     let mine = sonix_core::scrobble::service::account_of(&client);
-    let q = sonix_core::scrobble::queue::ScrobbleQueue::open(&crate::config_dir()).unwrap();
+    let q = sonix_core::scrobble::queue::ScrobbleQueue::open(&e.cfg()).unwrap();
     q.enqueue_for(&mine, "mine-1", 1_000).unwrap();
     q.enqueue_for("bob@http://other.example", "theirs-1", 2_000).unwrap();
     q.enqueue_for("", "legacy-1", 3_000).unwrap();
@@ -406,8 +417,8 @@ fn history_rows(b: &RealBackend) -> (i64, i64) {
 
 #[test]
 fn plays_are_recorded_locally_but_scrobbled_only_when_enabled() {
-    let _e = Env::new("scrobble");
-    let b = RealBackend::open();
+    let e = Env::new("scrobble");
+    let b = e.open();
     seed(&b);
     let mock = Mock::start(scrobble_server);
     *b.0.client.write().unwrap() = Some(mock.client());

@@ -115,13 +115,10 @@ static CACHE_BYTES: AtomicU64 = AtomicU64::new(u64::MAX);
 static EVICTING: AtomicBool = AtomicBool::new(false);
 static TMP_SEQ: AtomicU64 = AtomicU64::new(0);
 
-fn cache_dir() -> PathBuf {
-    crate::data_dir().join("art")
-}
-
-pub(crate) fn cache_path(id: &str, size: u32) -> PathBuf {
+/// `<dir>/<key>_<size>.img`; `dir` = [`RealBackend::art_dir`].
+pub(crate) fn cache_path(dir: &Path, id: &str, size: u32) -> PathBuf {
     let key: String = id.chars().map(|c| if c.is_ascii_alphanumeric() || c == '-' { c } else { '_' }).collect();
-    cache_dir().join(format!("{key}_{size}.img"))
+    dir.join(format!("{key}_{size}.img"))
 }
 
 fn list_files(dir: &Path) -> Vec<(PathBuf, std::time::SystemTime, u64)> {
@@ -213,7 +210,7 @@ impl RealBackend {
     /// Cover at `size`: disk cache first, else `getCoverArt?size=` (the server resizes). Bytes are stored as received,
     /// but only once they decode.
     fn cover_image(&self, cover_art: &str, size: u32) -> ApiResult<DynamicImage> {
-        let path = cache_path(cover_art, size);
+        let path = cache_path(&self.art_dir(), cover_art, size);
         if let Some(img) = read_cached(&path) {
             return Ok(img);
         }
@@ -233,7 +230,7 @@ impl RealBackend {
             return Err(not_found(format!("playlist {playlist_id} has no covered tracks to build a mosaic from")));
         }
         let cache_id = format!("mosaic-{playlist_id}-{:016x}", hash_covers(&covers));
-        let path = cache_path(&cache_id, size);
+        let path = cache_path(&self.art_dir(), &cache_id, size);
         if let Some(img) = read_cached(&path) {
             return Ok(img);
         }

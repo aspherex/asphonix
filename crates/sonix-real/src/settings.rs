@@ -98,7 +98,7 @@ impl SettingsApi for RealBackend {
     fn art_cache_status(&self) -> ApiResult<ArtCacheStatus> {
         let mut keys = std::collections::HashSet::new();
         let mut bytes = 0u64;
-        if let Ok(rd) = std::fs::read_dir(crate::data_dir().join("art")) {
+        if let Ok(rd) = std::fs::read_dir(self.art_dir()) {
             for e in rd.flatten() {
                 if let Ok(m) = e.metadata()
                     && m.is_file()

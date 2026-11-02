@@ -1,6 +1,5 @@
 //! `RealBackend`: the `Backend` trait over the vendored SONIX core (`sonix-core`).
-//! Phase 2 step 1: login, profiles, keychain, session status. Everything else
-//! returns `unimplemented` (see `stubs.rs`) until the later steps land.
+//! Every `Backend` method is wired; the remaining gaps are listed in `docs/HANDOFF.md`.
 mod art;
 mod extras;
 mod player;
@@ -45,7 +44,10 @@ struct Session {
 
 struct Inner {
     rt: tokio::runtime::Runtime,
+    /// Config dir (`connection.json`, settings, session, smart playlists, MCP discovery, scrobble queue).
     dir: PathBuf,
+    /// Data dir (library DB, art cache).
+    data: PathBuf,
     db: Arc<Db>,
     epoch: AtomicU64,
     client: Arc<std::sync::RwLock<Option<Client>>>,
@@ -143,6 +145,7 @@ impl RealBackend {
             prefs,
             epoch: AtomicU64::new(0),
             dir,
+            data,
             client,
             session: Mutex::new(Session {
                 state: Some(if cfg.is_some() { ConnectionState::Connecting } else { ConnectionState::Disconnected }),
@@ -188,6 +191,11 @@ impl RealBackend {
             });
         }
         me
+    }
+
+    /// Cover / mosaic disk cache (`<data dir>\art`).
+    pub(crate) fn art_dir(&self) -> PathBuf {
+        self.0.data.join("art")
     }
 
     /// Background sync (full catalog when the DB is empty or `full`, else incremental).

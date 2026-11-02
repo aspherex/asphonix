@@ -127,11 +127,10 @@ impl MediaHost for RealMedia {
     }
     fn cover(&self, cover_art_id: String, size: u32) -> BoxFut<Option<Vec<u8>>> {
         let client = self.0 .0.client.read().unwrap().clone();
-        let dir = crate::data_dir().join("art");
+        let dir = self.0.art_dir();
         Box::pin(async move {
             // Same cache layout as `art_get`: `<id>_<bucket>.img`, bytes as received from the server.
-            let key: String = cover_art_id.chars().map(|c| if c.is_ascii_alphanumeric() || c == '-' { c } else { '_' }).collect();
-            let path = dir.join(format!("{key}_{size}.img"));
+            let path = crate::art::cache_path(&dir, &cover_art_id, size);
             if let Ok(b) = tokio::fs::read(&path).await
                 && !b.is_empty()
             {
