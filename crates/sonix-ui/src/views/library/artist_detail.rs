@@ -218,6 +218,9 @@ impl ArtistDetailView {
         let has_albums = !d.albums.is_empty();
         let (id, id2, id3) = (artist.id.clone(), artist.id.clone(), artist.id.clone());
         let starred = artist.starred.is_some();
+        // native-only: the loaded artist source's button shows the active state
+        let pst = self.ctx.player.read(cx).play_state(&crate::app::PlayTarget::Artist(artist.id.clone()));
+        let fg = if pst.active() { th.accent_fg } else { th.accent_text };
         let play = div()
             .id("artist-play")
             .relative()
@@ -228,16 +231,19 @@ impl ArtistDetailView {
             .h(px(m::BTN_H))
             .px(px(crate::metrics::space::LG))
             .flex_none()
-            .bg(th.accent)
-            .text_color(th.accent_text)
+            .bg(if pst.active() { th.mid } else { th.accent })
+            .when(pst.active(), |d| d.border_1().border_color(th.accent))
+            .text_color(fg)
             .shadow(hard_shadow(&th, 2.0))
             .cursor(CursorStyle::PointingHand)
-            .hover(move |s| s.bg(th.accent_hover))
+            .hover(move |s| s.bg(if pst.active() { th.high } else { th.accent_hover }))
             .active(|s| s.top(px(2.)).left(px(2.)).shadow(vec![]))
-            .child(icon("play", 16.0, th.accent_text))
-            .child(txt(&th, HEADLINE_SM, "PLAY DISCOGRAPHY").color(th.accent_text))
+            .child(icon(pst.icon(), 16.0, fg))
+            .child(txt(&th, HEADLINE_SM, "PLAY DISCOGRAPHY").color(fg))
             .on_click(move |_, _, cx| {
-                if has_albums {
+                if pst.active() {
+                    crate::playback::toggle(cx);
+                } else if has_albums {
                     menus::play_artist(cx, id.clone(), false);
                 }
             });

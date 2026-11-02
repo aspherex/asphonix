@@ -3,7 +3,7 @@
 use crate::art::ArtHandle;
 use crate::theme::Theme;
 use gpui::{App, Context, EventEmitter, Global};
-use sonix_api::{Backend, PlaybackStatus, PlayerState, SpectrumFrame};
+use sonix_api::{Backend, PlaybackStatus, PlayerState, QueueSourceInfo, SourceKind, SpectrumFrame};
 use std::sync::Arc;
 
 pub struct Services {
@@ -44,13 +44,47 @@ pub struct PlayerModel {
     pub spectrum: Option<SpectrumFrame>,
     /// Counts frames: consumers that keep their own smoothing detect "a new frame arrived" by comparing it.
     pub spectrum_seq: u64,
+    /// The queue's source identity (kind/id/label; `None` = a static queue), refreshed whenever the track, the status or
+    /// the queue changes. Drives the "this source is playing" state of every play button (`PlayTarget`).
+    pub source: Option<QueueSourceInfo>,
+}
+
+/// A thing with a "play it" button: the active state of that button asks the player whether it is the one loaded.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum PlayTarget {
+    /// Albums play as a static queue (`playQueue`, no source identity): the loaded track belongs to the album.
+    Album(String),
+    Playlist(String),
+    Smart(String),
+    Artist(String),
+    /// Genre sources carry the genre name as their label (no id).
+    Genre(String),
+    Liked,
+    AllTracks,
+}
+
+/// How a play button looks and acts for its target: `Idle` = accent fill, play icon, click starts it;
+/// `Active { playing }` = outline, pause icon while playing (play icon while paused), click pauses / resumes.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum PlayState {
+    Idle,
+    Active { playing: bool },
+}
+
+impl PlayState {
+    pub fn active(self) -> bool {
+        matches!(self, PlayState::Active { .. })
+    }
+    pub fn icon(self) -> &'static str {
+        if self == (PlayState::Active { playing: true }) { "pause" } else { "play" }
+    }
 }
 
 impl EventEmitter<PlayerEvent> for PlayerModel {}
 
 impl Default for PlayerModel {
     fn default() -> Self {
-        Self { state: PlayerState::idle(), spectrum: None, spectrum_seq: 0 }
+        Self { state: PlayerState::idle(), spectrum: None, spectrum_seq: 0, source: None }
     }
 }
 
@@ -60,6 +94,42 @@ impl PlayerModel {
     }
     pub fn playing(&self) -> bool {
         self.state.status == PlaybackStatus::Playing
+    }
+    /// Is `t` the source the player has loaded (and not stopped)? Loading counts as playing (the track is on its way).
+    pub fn play_state(&self, t: &PlayTarget) -> PlayState {
+        let loaded = match self.state.status {
+            PlaybackStatus::Stopped => return PlayState::Idle,
+            PlaybackStatus::Playing | PlaybackStatus::Loading => true,
+            PlaybackStatus::Paused => false,
+        };
+        let src = self.source.as_ref();
+        let hit = match t {
+            PlayTarget::Album(id) => match src {
+                None => self.state.track.as_ref().and_then(|tr| tr.album_id.as_deref()) == Some(id.as_str()),
+                Some(s) => s.kind == SourceKind::Album && s.id.as_deref() == Some(id.as_str()),
+            },
+            PlayTarget::Playlist(id) => src.is_some_and(|s| s.kind == SourceKind::Playlist && s.id.as_deref() == Some(id.as_str())),
+            PlayTarget::Smart(id) => src.is_some_and(|s| s.kind == SourceKind::Smart && s.id.as_deref() == Some(id.as_str())),
+            PlayTarget::Artist(id) => src.is_some_and(|s| s.kind == SourceKind::Artist && s.id.as_deref() == Some(id.as_str())),
+            PlayTarget::Genre(name) => src.is_some_and(|s| s.kind == SourceKind::Genre && s.label == *name),
+            PlayTarget::Liked => src.is_some_and(|s| s.kind == SourceKind::Liked),
+            PlayTarget::AllTracks => src.is_some_and(|s| s.kind == SourceKind::AllTracks),
+        };
+        if hit { PlayState::Active { playing: loaded } } else { PlayState::Idle }
+    }
+    /// Store the freshly fetched queue source; emits `TrackOrStatus` when it changed so play buttons repaint.
+    pub fn set_source(&mut self, s: Option<QueueSourceInfo>, notify: bool, cx: &mut Context<Self>) {
+        // `remaining` moves with every refill; only the identity matters for the buttons
+        let same = match (&self.source, &s) {
+            (Some(a), Some(b)) => a.kind == b.kind && a.id == b.id && a.label == b.label,
+            (None, None) => true,
+            _ => false,
+        };
+        self.source = s;
+        if notify && !same {
+            cx.emit(PlayerEvent::TrackOrStatus);
+            cx.notify();
+        }
     }
     /// Apply a state event. `notify` is false while the window is minimized: the state is
     /// still kept current, but nothing is re-rendered.
@@ -79,5 +149,42 @@ impl PlayerModel {
     pub fn apply_spectrum(&mut self, f: SpectrumFrame) {
         self.spectrum = Some(f);
         self.spectrum_seq += 1;
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use sonix_api::SourceMode;
+
+    fn src(kind: SourceKind, id: Option<&str>, label: &str) -> Option<QueueSourceInfo> {
+        Some(QueueSourceInfo { kind, label: label.into(), id: id.map(str::to_string), mode: SourceMode::InOrder, remaining: 0, arc: None, flow_coverage: None })
+    }
+
+    #[test]
+    fn play_buttons_are_active_only_for_the_loaded_source() {
+        let mut m = PlayerModel::default();
+        m.source = src(SourceKind::Playlist, Some("pl1"), "Mix");
+        // stopped: nothing is active, whatever the source says
+        assert_eq!(m.play_state(&PlayTarget::Playlist("pl1".into())), PlayState::Idle);
+        m.state.status = PlaybackStatus::Playing;
+        assert_eq!(m.play_state(&PlayTarget::Playlist("pl1".into())), PlayState::Active { playing: true });
+        assert_eq!(m.play_state(&PlayTarget::Playlist("pl2".into())), PlayState::Idle);
+        assert_eq!(m.play_state(&PlayTarget::Smart("pl1".into())), PlayState::Idle);
+        assert_eq!(m.play_state(&PlayTarget::Liked), PlayState::Idle);
+        // paused: still the active source (outline, play icon), click resumes
+        m.state.status = PlaybackStatus::Paused;
+        let st = m.play_state(&PlayTarget::Playlist("pl1".into()));
+        assert_eq!((st, st.icon()), (PlayState::Active { playing: false }, "play"));
+        m.state.status = PlaybackStatus::Playing;
+        assert_eq!(m.play_state(&PlayTarget::Playlist("pl1".into())).icon(), "pause");
+        // genre sources are matched by name, liked / all tracks by kind
+        m.source = src(SourceKind::Genre, None, "Rock");
+        assert!(m.play_state(&PlayTarget::Genre("Rock".into())).active() && !m.play_state(&PlayTarget::Genre("Jazz".into())).active());
+        m.source = src(SourceKind::Liked, None, "Liked Songs");
+        assert!(m.play_state(&PlayTarget::Liked).active());
+        // a static queue has no source: no source target is active
+        m.source = None;
+        assert!(!m.play_state(&PlayTarget::Liked).active() && !m.play_state(&PlayTarget::Artist("a".into())).active());
     }
 }

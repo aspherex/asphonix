@@ -316,7 +316,25 @@ impl Shell {
         cx.spawn(async move |this, cx| {
             let st = cx.background_executor().spawn(async move { b.player_get_state() }).await;
             if let Ok(st) = st {
-                let _ = this.update(cx, |sh, cx| sh.player.update(cx, |p, cx| p.apply_state(st, true, cx)));
+                let _ = this.update(cx, |sh, cx| {
+                    sh.player.update(cx, |p, cx| p.apply_state(st, true, cx));
+                    sh.refresh_source(cx);
+                });
+            }
+        })
+        .detach();
+    }
+
+    /// The queue's source identity into the player model (`PlayerModel::source`: which play button is "playing").
+    fn refresh_source(&mut self, cx: &mut Context<Self>) {
+        let b = self.backend.clone();
+        cx.spawn(async move |this, cx| {
+            let q = cx.background_executor().spawn(async move { b.player_get_queue(sonix_api::PageRequest { offset: 0, limit: 1 }) }).await;
+            if let Ok(q) = q {
+                let _ = this.update(cx, |sh, cx| {
+                    let live = !sh.suspended;
+                    sh.player.update(cx, |p, cx| p.set_source(q.source, live, cx));
+                });
             }
         })
         .detach();
@@ -326,7 +344,11 @@ impl Shell {
         match ev {
             Event::PlayerState(s) => {
                 let live = !self.suspended;
+                let changed = self.player.read(cx).current_id() != s.track.as_ref().map(|t| t.id.as_str()) || self.player.read(cx).state.status != s.status;
                 self.player.update(cx, |p, cx| p.apply_state(*s, live, cx));
+                if changed {
+                    self.refresh_source(cx);
+                }
             }
             Event::Spectrum(f) => {
                 if !self.suspended {
@@ -337,6 +359,7 @@ impl Shell {
                 }
             }
             Event::QueueChanged => {
+                self.refresh_source(cx);
                 if !self.suspended {
                     self.queue.update(cx, |q, cx| q.refresh(cx));
                 }
@@ -553,6 +576,7 @@ impl Shell {
         if let Ok(st) = st {
             self.player.update(cx, |p, cx| p.apply_state(st, true, cx));
         }
+        self.refresh_source(cx);
         self.np.update(cx, |n, cx| n.set_suspended(false, cx));
         self.tracks.update(cx, |t, cx| t.restore(cx));
         self.lists_restore(cx);

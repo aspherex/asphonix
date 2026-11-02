@@ -60,6 +60,8 @@ impl HomeView {
                 this.load(cx);
             }
         });
+        // native-only play-button state: repaint when the loaded track / status / source changes
+        cx.subscribe(&ctx.player.clone(), |_, _, _: &crate::app::PlayerEvent, cx| cx.notify()).detach();
         let mut this = Self {
             ctx,
             status: None,

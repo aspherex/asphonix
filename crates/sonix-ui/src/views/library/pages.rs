@@ -64,6 +64,8 @@ impl AlbumsView {
                 }
             }
         });
+        // native-only play-button state: repaint when the loaded track / status / source changes
+        cx.subscribe(&ctx.player.clone(), |_, _, _: &crate::app::PlayerEvent, cx| cx.notify()).detach();
         let mut this = Self { ctx, grid: GridState::new(String::new()), sort: AlbumSort::Alphabetical, starred_only: false, _sub: sub };
         this.reload(cx);
         this
@@ -169,6 +171,8 @@ impl ArtistsView {
                 }
             }
         });
+        // native-only play-button state: repaint when the loaded track / status / source changes
+        cx.subscribe(&ctx.player.clone(), |_, _, _: &crate::app::PlayerEvent, cx| cx.notify()).detach();
         let mut this = Self { ctx, grid: GridState::new(String::new()), sort: ArtistSort::Alphabetical, _sub: sub };
         this.reload(cx);
         this
@@ -259,6 +263,8 @@ impl GenreDetailView {
                 }
             }
         });
+        // native-only play-button state: repaint when the loaded track / status / source changes
+        cx.subscribe(&ctx.player.clone(), |_, _, _: &crate::app::PlayerEvent, cx| cx.notify()).detach();
         let mut this = Self { ctx, grid: GridState::new(format!("genre:{name}")), name, info: None, missing: false, flow_btn: std::rc::Rc::new(std::cell::Cell::new(gpui::Bounds::default())), _sub: sub };
         this.grid.pager.want(0);
         this.fetch(0, cx);
@@ -323,6 +329,8 @@ impl Render for GenreDetailView {
         let th = app::theme(cx);
         let ready = self.info.is_some();
         let (n1, n2) = (self.name.clone(), self.name.clone());
+        // native-only: the loaded genre source's Play button shows the active state
+        let pst = self.ctx.player.read(cx).play_state(&crate::app::PlayTarget::Genre(self.name.clone()));
         let title = div()
             .flex()
             .flex_col()
@@ -346,7 +354,13 @@ impl Render for GenreDetailView {
             .flex()
             .flex_row()
             .gap(px(crate::metrics::space::SM))
-            .child(pid("genre.btn.0", button("genre-play", th, Variant::Secondary, "Play", Some("play"), !ready, window).on_click(move |_, _, cx| menus::play_genre(cx, n1.clone(), false))))
+            .child(pid("genre.btn.0", button("genre-play", th, Variant::Secondary, "Play", Some(pst.icon()), !ready, window).when(pst.active(), |b| b.border_color(th.accent)).on_click(move |_, _, cx| {
+                if pst.active() {
+                    crate::playback::toggle(cx);
+                } else {
+                    menus::play_genre(cx, n1.clone(), false)
+                }
+            })))
             .child(pid("genre.btn.1", button("genre-shuffle", th, Variant::Primary, "Shuffle", Some("shuffle"), !ready, window).on_click(move |_, _, cx| menus::play_genre(cx, n2.clone(), true))))
             .child(pid("genre.btn.2", {
                 let (cell, menu, n3) = (self.flow_btn.clone(), self.ctx.menu.clone(), self.name.clone());

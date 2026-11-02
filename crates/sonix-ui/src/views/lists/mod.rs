@@ -192,7 +192,7 @@ impl Shell {
             _ => {
                 if self.lists.playlists.is_none() {
                     let art = Self::lists_art(cx);
-                    let v = cx.new(|cx| playlists::PlaylistsView::new(backend, art, &menu, cx));
+                    let v = cx.new(|cx| playlists::PlaylistsView::new(backend, art, &menu, &player, cx));
                     self.lists.subs.push(cx.subscribe(&v, |sh: &mut Shell, _, ev: &ListsEvent, cx| sh.lists_event(ev, cx)));
                     self.lists.playlists = Some(v);
                 }

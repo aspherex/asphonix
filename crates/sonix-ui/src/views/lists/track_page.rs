@@ -53,6 +53,7 @@ pub struct TrackPage {
     flow_btn: Rc<std::cell::Cell<gpui::Bounds<gpui::Pixels>>>,
     more_bounds: std::rc::Rc<std::cell::Cell<gpui::Bounds<gpui::Pixels>>>,
     rev: u64,
+    player: Entity<PlayerModel>,
     _subs: Vec<Subscription>,
 }
 
@@ -109,7 +110,8 @@ fn initial_seed() -> u32 {
 impl TrackPage {
     pub fn new(kind: PageKind, backend: Arc<dyn Backend>, art: ArtHandle, player: &Entity<PlayerModel>, menu: &Entity<ContextMenu>, cx: &mut Context<Self>) -> Self {
         let table = cx.new(|cx| Table::new(backend.clone(), player, table_cfg(&kind, false), cx));
-        let subs = vec![cx.subscribe(&table, Self::on_table)];
+        // native-only play-button state: repaint when the loaded track / status / source changes
+        let subs = vec![cx.subscribe(&table, Self::on_table), cx.subscribe(player, |_, _, _: &crate::app::PlayerEvent, cx| cx.notify())];
         let mut this = Self {
             kind,
             backend,
@@ -124,6 +126,7 @@ impl TrackPage {
             flow_btn: Rc::new(std::cell::Cell::new(gpui::Bounds::default())),
             more_bounds: Default::default(),
             rev: 0,
+            player: player.clone(),
             _subs: subs,
         };
         this.reload(cx);
@@ -670,9 +673,14 @@ impl Render for TrackPage {
 
         // ---- actions
         let ro = self.read_only();
+        let pst = self.player.read(cx).play_state(&match &self.kind {
+            PageKind::Playlist(id) => crate::app::PlayTarget::Playlist(id.clone()),
+            PageKind::Liked => crate::app::PlayTarget::Liked,
+            PageKind::Smart(id) => crate::app::PlayTarget::Smart(id.clone()),
+        });
         let mut actions = div().flex().flex_row().items_center().gap(px(lm::ACTIONS_GAP)).mt(px(lm::ACTIONS_MT));
         actions = actions
-            .child(pid("pl.btn.play", play_btn("pg-play", &th, "PLAY", empty).when(!empty, |b| b.on_click(cx.listener(|this, _, _, cx| this.play_source(None, false, cx))))))
+            .child(pid("pl.btn.play", play_btn("pg-play", &th, "PLAY", empty, pst).when(!empty, |b| b.on_click(cx.listener(move |this, _, _, cx| if pst.active() { crate::playback::toggle(cx) } else { this.play_source(None, false, cx) })))))
             .child(pid("pl.btn.shuffle", sec_btn("pg-shuffle", &th, "shuffle", "SHUFFLE", empty).when(!empty, |b| b.on_click(cx.listener(|this, _, _, cx| this.play_source(None, true, cx))))))
             .child(pid(
                 "pl.btn.flow",
