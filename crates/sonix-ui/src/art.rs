@@ -103,6 +103,12 @@ impl ArtCache {
     }
 }
 
+/// Cache key of a playlist mosaic (`mosaicUrl` in `types.ts`): always a mosaic when the playlist has tracks (the real
+/// `coverArt` is ignored); `v` only busts the cache when the playlist changes, the backend strips it.
+pub fn mosaic_key(p: &sonix_api::Playlist) -> String {
+    format!("mosaic/{}?v={}-{}", p.id, p.song_count, p.updated_at.as_deref().unwrap_or(""))
+}
+
 pub fn placeholder(id: &str) -> Hsla {
     let h = id.bytes().fold(7u32, |a, b| a.wrapping_mul(31).wrapping_add(b as u32));
     hsla((h % 360) as f32 / 360.0, 0.3, 0.16, 1.0)

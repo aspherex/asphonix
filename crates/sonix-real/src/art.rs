@@ -11,7 +11,8 @@ use sonix_core::library;
 use sonix_core::subsonic::Client;
 use std::collections::hash_map::DefaultHasher;
 use std::hash::{Hash, Hasher};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 
 /// Hard gutter color between tiles (`--color-surface-base` / `#0A0A0C`).
 const GUTTER: [u8; 3] = [0x0A, 0x0A, 0x0C];
@@ -104,22 +105,99 @@ fn compose(tiles: &[DynamicImage], size: u32) -> DynamicImage {
     DynamicImage::ImageRgb8(canvas)
 }
 
-fn cache_path(id: &str, size: u32) -> PathBuf {
+/// Disk cap for cached artwork (`art/mod.rs` `MAX_CACHE_BYTES` / `EVICT_TARGET_BYTES`): past it the least recently
+/// read files go first (mtime is bumped on every cache hit), which also removes orphaned mosaics of old cover sets.
+const MAX_CACHE_BYTES: u64 = 512 * 1024 * 1024;
+const EVICT_TARGET_BYTES: u64 = MAX_CACHE_BYTES * 8 / 10;
+
+/// Approximate bytes in the cache dir; `u64::MAX` = not scanned yet (one scan before the first write).
+static CACHE_BYTES: AtomicU64 = AtomicU64::new(u64::MAX);
+static EVICTING: AtomicBool = AtomicBool::new(false);
+static TMP_SEQ: AtomicU64 = AtomicU64::new(0);
+
+fn cache_dir() -> PathBuf {
+    crate::data_dir().join("art")
+}
+
+pub(crate) fn cache_path(id: &str, size: u32) -> PathBuf {
     let key: String = id.chars().map(|c| if c.is_ascii_alphanumeric() || c == '-' { c } else { '_' }).collect();
-    crate::data_dir().join("art").join(format!("{key}_{size}.img"))
+    cache_dir().join(format!("{key}_{size}.img"))
 }
 
-fn read_cached(path: &std::path::Path) -> Option<Vec<u8>> {
-    std::fs::read(path).ok().filter(|b| !b.is_empty())
+fn list_files(dir: &Path) -> Vec<(PathBuf, std::time::SystemTime, u64)> {
+    let Ok(rd) = std::fs::read_dir(dir) else { return Vec::new() };
+    rd.filter_map(|e| e.ok())
+        .filter_map(|e| {
+            let md = e.metadata().ok()?;
+            if !md.is_file() || e.file_name().to_string_lossy().contains(".tmp") {
+                return None;
+            }
+            Some((e.path(), md.modified().unwrap_or(std::time::UNIX_EPOCH), md.len()))
+        })
+        .collect()
 }
 
-fn store(path: &std::path::Path, bytes: &[u8]) {
-    if let Some(dir) = path.parent() {
-        let _ = std::fs::create_dir_all(dir);
+/// Deletes least-recently-accessed first until at most `target` bytes remain; returns the remaining total.
+fn evict_oldest(dir: &Path, target: u64) -> u64 {
+    let mut files = list_files(dir);
+    let mut total: u64 = files.iter().map(|f| f.2).sum();
+    files.sort_by_key(|f| f.1);
+    for (path, _, len) in files {
+        if total <= target {
+            break;
+        }
+        if std::fs::remove_file(&path).is_ok() {
+            total = total.saturating_sub(len);
+        }
     }
-    let tmp = path.with_extension("tmp");
-    if std::fs::write(&tmp, bytes).is_ok() {
-        let _ = std::fs::rename(&tmp, path);
+    total
+}
+
+fn account_write(dir: &Path, len: u64) {
+    account_write_with(dir, len, MAX_CACHE_BYTES, EVICT_TARGET_BYTES, &CACHE_BYTES);
+}
+
+fn account_write_with(dir: &Path, len: u64, max: u64, target: u64, counter: &AtomicU64) {
+    if counter.load(Ordering::Relaxed) == u64::MAX {
+        let total: u64 = list_files(dir).iter().map(|f| f.2).sum();
+        let _ = counter.compare_exchange(u64::MAX, total, Ordering::Relaxed, Ordering::Relaxed);
+        return; // the scan already includes the file just written
+    }
+    let total = counter.fetch_add(len, Ordering::Relaxed) + len;
+    if total > max && !EVICTING.swap(true, Ordering::AcqRel) {
+        counter.store(evict_oldest(dir, target), Ordering::Relaxed);
+        EVICTING.store(false, Ordering::Release);
+    }
+}
+
+/// Decoded cache hit; a file that does not decode (torn write, junk) is deleted so it cannot stick.
+fn read_cached(path: &Path) -> Option<DynamicImage> {
+    let bytes = std::fs::read(path).ok().filter(|b| !b.is_empty())?;
+    match decode_limited(&bytes) {
+        Ok(img) => {
+            // access recency for eviction
+            if let Ok(f) = std::fs::OpenOptions::new().write(true).open(path) {
+                let _ = f.set_modified(std::time::SystemTime::now());
+            }
+            Some(img)
+        }
+        Err(_) => {
+            let _ = std::fs::remove_file(path);
+            None
+        }
+    }
+}
+
+/// Atomic write through a unique temp name (concurrent writers of one key never share a temp file).
+fn store(path: &Path, bytes: &[u8]) {
+    let Some(dir) = path.parent() else { return };
+    let _ = std::fs::create_dir_all(dir);
+    let name = path.file_name().and_then(|n| n.to_str()).unwrap_or("x");
+    let tmp = dir.join(format!("{name}.{}.{}.tmp", std::process::id(), TMP_SEQ.fetch_add(1, Ordering::Relaxed)));
+    if std::fs::write(&tmp, bytes).is_ok() && std::fs::rename(&tmp, path).is_ok() {
+        account_write(dir, bytes.len() as u64);
+    } else {
+        let _ = std::fs::remove_file(&tmp);
     }
 }
 
@@ -132,63 +210,63 @@ impl RealBackend {
         self.0.client.read().unwrap_or_else(|p| p.into_inner()).clone()
     }
 
-    /// Cover bytes at `size`: disk cache first, else `getCoverArt?size=` (the server resizes), stored as received.
-    fn cover_bytes(&self, cover_art: &str, size: u32) -> ApiResult<Vec<u8>> {
+    /// Cover at `size`: disk cache first, else `getCoverArt?size=` (the server resizes). Bytes are stored as received,
+    /// but only once they decode.
+    fn cover_image(&self, cover_art: &str, size: u32) -> ApiResult<DynamicImage> {
         let path = cache_path(cover_art, size);
-        if let Some(b) = read_cached(&path) {
-            return Ok(b);
+        if let Some(img) = read_cached(&path) {
+            return Ok(img);
         }
         let client = self.current_client().ok_or_else(|| ApiError::new(ErrorCode::NotConnected, "not connected"))?;
         let (b, _) = self.0.rt.block_on(client.get_cover_art(cover_art, Some(size))).map_err(err)?;
+        let img = decode_limited(&b).map_err(|e| ApiError::new(ErrorCode::Decode, format!("cover decode: {e}")))?;
         store(&path, &b);
-        Ok(b)
+        Ok(img)
     }
 
-    /// Mosaic of a playlist's first distinct covers as JPEG bytes, cached under a key that includes a hash of the
-    /// source cover ids (so it invalidates when the leading covers change). A partial mosaic (some cover failed) is
-    /// served but not cached.
-    fn mosaic_bytes(&self, playlist_id: &str, size: u32) -> ApiResult<Vec<u8>> {
+    /// Mosaic of a playlist's first distinct covers, cached (JPEG) under a key that includes a hash of the source
+    /// cover ids (so it invalidates when the leading covers change). A partial mosaic (some cover failed) is served
+    /// but not cached.
+    fn mosaic_image(&self, playlist_id: &str, size: u32) -> ApiResult<DynamicImage> {
         let covers = library::get_playlist_distinct_covers(&self.0.db, playlist_id, MOSAIC_TILES).map_err(err)?;
         if covers.is_empty() {
             return Err(not_found(format!("playlist {playlist_id} has no covered tracks to build a mosaic from")));
         }
         let cache_id = format!("mosaic-{playlist_id}-{:016x}", hash_covers(&covers));
         let path = cache_path(&cache_id, size);
-        if let Some(b) = read_cached(&path) {
-            return Ok(b);
+        if let Some(img) = read_cached(&path) {
+            return Ok(img);
         }
         let mut tiles: Vec<DynamicImage> = Vec::with_capacity(covers.len());
         for cover in &covers {
-            match self.cover_bytes(cover, size).and_then(|b| decode_limited(&b).map_err(|e| ApiError::new(ErrorCode::Decode, e.to_string()))) {
+            match self.cover_image(cover, size) {
                 Ok(img) => tiles.push(img),
-                Err(e) => eprintln!("mosaic: cover {cover} unavailable: {}", e.message),
+                Err(e) => log::debug!("mosaic: cover {cover} unavailable: {}", e.message),
             }
         }
         if tiles.is_empty() {
             return Err(not_found(format!("playlist {playlist_id}: none of its covers could be loaded")));
         }
-        let mut bytes = Vec::new();
-        compose(&tiles, size)
-            .write_to(&mut std::io::Cursor::new(&mut bytes), image::ImageFormat::Jpeg)
-            .map_err(|e| ApiError::new(ErrorCode::Unknown, format!("mosaic: encode failed: {e}")))?;
+        let composed = compose(&tiles, size);
         if tiles.len() == covers.len() {
+            let mut bytes = Vec::new();
+            composed
+                .write_to(&mut std::io::Cursor::new(&mut bytes), image::ImageFormat::Jpeg)
+                .map_err(|e| ApiError::new(ErrorCode::Unknown, format!("mosaic: encode failed: {e}")))?;
             store(&path, &bytes);
         }
-        Ok(bytes)
+        Ok(composed)
     }
 
-    /// `ArtApi::art_get`: `mosaic/{playlistId}` (and a bare id of a mirrored playlist with no cached real cover)
-    /// gives the playlist mosaic, anything else a real cover.
+    /// `ArtApi::art_get`: `mosaic/{playlistId}[?v=..]` (the web's mosaic route; `?v=` is only a cache-buster) gives the
+    /// playlist mosaic, anything else a real cover.
     pub(crate) fn art_pixels(&self, cover_art: &str, size: u32) -> ApiResult<ArtPixels> {
         let size = bucket_for(size);
-        let bytes = if let Some(pid) = cover_art.strip_prefix(MOSAIC_PREFIX) {
-            self.mosaic_bytes(pid, size)?
-        } else if !cache_path(cover_art, size).exists() && library::playlist_access(&self.0.db, cover_art).ok().flatten().is_some() {
-            self.mosaic_bytes(cover_art, size)?
+        let img = if let Some(pid) = cover_art.strip_prefix(MOSAIC_PREFIX) {
+            self.mosaic_image(pid.split('?').next().unwrap_or(pid), size)?
         } else {
-            self.cover_bytes(cover_art, size)?
+            self.cover_image(cover_art, size)?
         };
-        let img = decode_limited(&bytes).map_err(|e| ApiError::new(ErrorCode::Decode, format!("cover decode: {e}")))?;
         let img = if img.width() > size.max(img.height()) || img.height() > size { img.resize(size, size, imageops::FilterType::Triangle) } else { img };
         let rgba = img.to_rgba8();
         Ok(ArtPixels { width: rgba.width(), height: rgba.height(), rgba: rgba.into_raw() })
@@ -234,5 +312,34 @@ mod tests {
         assert_eq!(gutter_px(64), 1);
         assert_eq!(gutter_px(160), 2);
         assert_eq!(gutter_px(640), 2);
+    }
+}
+
+#[cfg(test)]
+mod cache_tests {
+    use super::*;
+
+    #[test]
+    fn eviction_drops_least_recently_used_first_and_ignores_temp_files() {
+        let dir = PathBuf::from("<build-dir>/tmp").join(format!("art-evict-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let now = std::time::SystemTime::now();
+        for (name, age) in [("old.img", 300u64), ("mid.img", 200), ("new.img", 100)] {
+            let p = dir.join(name);
+            std::fs::write(&p, [0u8; 100]).unwrap();
+            std::fs::OpenOptions::new().write(true).open(&p).unwrap().set_modified(now - std::time::Duration::from_secs(age)).unwrap();
+        }
+        std::fs::write(dir.join("x.img.1.tmp"), [0u8; 500]).unwrap();
+        assert_eq!(evict_oldest(&dir, 200), 200);
+        assert!(!dir.join("old.img").exists() && dir.join("mid.img").exists() && dir.join("new.img").exists());
+        assert!(dir.join("x.img.1.tmp").exists());
+        // accounting: first write scans, later writes add up and trigger eviction past the cap
+        let counter = AtomicU64::new(u64::MAX);
+        account_write_with(&dir, 100, 250, 100, &counter);
+        assert_eq!(counter.load(Ordering::Relaxed), 200);
+        account_write_with(&dir, 100, 250, 100, &counter);
+        assert_eq!(counter.load(Ordering::Relaxed), 100, "over the cap: evicted down to the target");
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }

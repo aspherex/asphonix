@@ -11,6 +11,4 @@ tokio = { version = "1", features = ["rt-multi-thread", "time", "sync"] }
 serde.workspace = true
 serde_json.workspace = true
 image = { version = "0.25", default-features = false, features = ["jpeg", "png"] }
-
-[dev-dependencies]
 log = "0.4"

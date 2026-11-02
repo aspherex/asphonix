@@ -1,5 +1,6 @@
 //! Tests of the read-only extras against a local mock HTTP server (127.0.0.1, random port) serving canned Subsonic JSON.
 use super::*;
+use crate::art::cache_path;
 use sonix_core::subsonic::Client;
 use std::io::{Read, Write};
 use std::net::TcpListener;
@@ -19,9 +20,12 @@ impl Mock {
         let url = format!("http://127.0.0.1:{}", l.local_addr().unwrap().port());
         let log = Arc::new(Mutex::new(Vec::new()));
         let lg = log.clone();
+        let handler = Arc::new(handler);
         std::thread::spawn(move || {
             for s in l.incoming() {
                 let Ok(mut s) = s else { continue };
+                let (lg, handler) = (lg.clone(), handler.clone());
+                std::thread::spawn(move || {
                 let mut buf = [0u8; 8192];
                 let n = s.read(&mut buf).unwrap_or(0);
                 let head = String::from_utf8_lossy(&buf[..n]).to_string();
@@ -32,6 +36,7 @@ impl Mock {
                 let (code, ct, body) = handler(&ep, query);
                 let _ = write!(s, "HTTP/1.1 {code} X\r\nContent-Type: {ct}\r\nContent-Length: {}\r\nConnection: close\r\n\r\n", body.len());
                 let _ = s.write_all(&body);
+                });
             }
         });
         Mock { url, log }
@@ -56,6 +61,55 @@ impl Mock {
     }
 }
 
+
+/// Temp dir on D: (C: is nearly full), removed on drop even when an assertion fails.
+struct TmpDir(std::path::PathBuf);
+
+impl TmpDir {
+    fn new() -> Self {
+        let p = std::path::PathBuf::from("<build-dir>/tmp").join(format!("sonix-extras-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&p);
+        std::fs::create_dir_all(&p).unwrap();
+        TmpDir(p)
+    }
+}
+
+impl Drop for TmpDir {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_dir_all(&self.0);
+    }
+}
+
+/// `secs` of 16-bit mono 8 kHz silence as a WAV file.
+fn silent_wav(secs: u32) -> Vec<u8> {
+    let data = 8000 * 2 * secs;
+    let mut v = Vec::with_capacity(44 + data as usize);
+    v.extend_from_slice(b"RIFF");
+    v.extend_from_slice(&(36 + data).to_le_bytes());
+    v.extend_from_slice(b"WAVEfmt ");
+    v.extend_from_slice(&16u32.to_le_bytes());
+    v.extend_from_slice(&1u16.to_le_bytes()); // PCM
+    v.extend_from_slice(&1u16.to_le_bytes()); // mono
+    v.extend_from_slice(&8000u32.to_le_bytes());
+    v.extend_from_slice(&16000u32.to_le_bytes());
+    v.extend_from_slice(&2u16.to_le_bytes());
+    v.extend_from_slice(&16u16.to_le_bytes());
+    v.extend_from_slice(b"data");
+    v.extend_from_slice(&data.to_le_bytes());
+    v.resize(44 + data as usize, 0);
+    v
+}
+
+fn wait_for<T>(secs: u64, mut f: impl FnMut() -> Option<T>) -> Option<T> {
+    let end = std::time::Instant::now() + std::time::Duration::from_secs(secs);
+    while std::time::Instant::now() < end {
+        if let Some(v) = f() {
+            return Some(v);
+        }
+        std::thread::sleep(std::time::Duration::from_millis(25));
+    }
+    None
+}
 fn json(body: &str) -> Resp {
     (200, "application/json", format!(r#"{{"subsonic-response":{{"status":"ok","version":"1.16.1",{body}}}}}"#).into_bytes())
 }
@@ -108,11 +162,9 @@ fn near(p: &[u8], w: u32, x: u32, y: u32, rgb: [u8; 3]) {
 /// One sequential test: `RealBackend::open` reads process-global env (`APPDATA`/`LOCALAPPDATA`) and the client is shared.
 #[test]
 fn extras_against_a_local_mock_server() {
-    let tmp = std::env::temp_dir().join(format!("sonix-extras-{}", std::process::id()));
-    let _ = std::fs::remove_dir_all(&tmp);
-    std::fs::create_dir_all(&tmp).unwrap();
-    unsafe { std::env::set_var("APPDATA", tmp.join("roaming")) };
-    unsafe { std::env::set_var("LOCALAPPDATA", tmp.join("local")) };
+    let tmp = TmpDir::new();
+    unsafe { std::env::set_var("APPDATA", tmp.0.join("roaming")) };
+    unsafe { std::env::set_var("LOCALAPPDATA", tmp.0.join("local")) };
     let b = RealBackend::open();
     seed(&b);
 
@@ -188,6 +240,10 @@ fn extras_against_a_local_mock_server() {
     let m = Mock::start(|ep, _| match ep {
         "getSimilarSongs" => json(&format!(r#""similarSongs":{{"song":[{},{},{},{}]}}"#, song("t2"), song("t3"), song("ghost"), song("t1"))),
         "getSimilarSongs2" => json(r#""similarSongs2":{}"#),
+        "stream" => {
+            std::thread::sleep(std::time::Duration::from_millis(1500));
+            not_found()
+        }
         _ => not_found(),
     });
     use_server(&b, &m.url);
@@ -202,9 +258,12 @@ fn extras_against_a_local_mock_server() {
     assert!(m.count("getSimilarSongs2") == 1 && !ids.is_empty(), "artist seeds use getSimilarSongs2 plus the local fallback");
     let e = b.radio_start(RadioStartRequest { seed: RadioSeed { kind: RadioSeedKind::Artist, id: "none".into() } }).unwrap_err();
     assert_eq!(e.code, ErrorCode::NotFound);
-    // the engine path: silent (volume 0), the mock has no stream so nothing plays; stop right away
+    // the engine path: silent (volume 0); the mock's stream hangs and then 404s, so the queue is observed before anything fails
     b.player_set_volume(SetVolumeRequest { volume: 0.0 }).unwrap();
     b.radio_start(RadioStartRequest { seed: RadioSeed { kind: RadioSeedKind::Track, id: "t1".into() } }).unwrap();
+    let q = wait_for(3, || b.player_get_queue(PageRequest { offset: 0, limit: 50 }).ok().filter(|q| q.source.is_some())).expect("radio queue");
+    let src = q.source.unwrap();
+    assert_eq!((src.kind, src.mode, src.label.as_str()), (SourceKind::Radio, SourceMode::InOrder, "Radio"));
     b.0.engine.send(EngineCommand::Stop);
     m.assert_read_only();
 
@@ -231,34 +290,73 @@ fn extras_against_a_local_mock_server() {
     near(&a.rgba, 160, 96, 80, [0x0A, 0x0A, 0x0C]); // gutter seam (left pane 96 px, 2 px seam)
     assert_eq!(m.count("getCoverArt"), 3);
     assert!(m.find("getCoverArt").contains("size=160"));
-    assert_eq!(b.art_get("mosaic/p1", 160).unwrap(), a);
-    assert_eq!(b.art_get("p1", 160).unwrap(), a, "a bare id of a mirrored playlist gives the same mosaic");
+    // cached (lossy JPEG) re-reads, also through the web's cache-busting key
+    for id in ["mosaic/p1", "mosaic/p1?v=4-2026-01-01T00:00:00Z"] {
+        let again = b.art_get(id, 160).unwrap();
+        near(&again.rgba, 160, 40, 80, [255, 0, 0]);
+        near(&again.rgba, 160, 130, 30, [0, 255, 0]);
+        near(&again.rgba, 160, 130, 130, [0, 0, 255]);
+    }
     assert_eq!(m.count("getCoverArt"), 3, "mosaic and tiles are served from the disk cache");
+    b.art_get("p1", 160).unwrap();
+    assert_eq!(m.count("getCoverArt"), 4, "a bare playlist id is an ordinary cover id (no mosaic)");
+    // a torn cache file is rejected and refetched
+    let tile = cache_path("c2", 160);
+    std::fs::write(&tile, b"not an image").unwrap();
+    assert_eq!(b.art_get("c2", 160).unwrap().rgba[1], 255);
+    assert_eq!(m.count("getCoverArt"), 5);
     assert_eq!(b.art_get("c1", 160).unwrap().rgba[0], 255, "a real cover still resolves (cached tile)");
     assert_eq!(b.art_get("mosaic/p0", 160).unwrap_err().code, ErrorCode::NotFound, "no covered tracks");
     assert_eq!(b.art_get("mosaic/missing", 64).unwrap_err().code, ErrorCode::NotFound);
     m.assert_read_only();
 
-    // --- waveform: a track that playback does not hold is never downloaded for a scan
+    // --- waveform: a track that playback does not hold (radio started other tracks) is never downloaded for a scan
     let n = m.total();
-    let w = b.player_get_waveform("t1").unwrap();
-    assert_eq!((w.track_id.as_str(), w.buckets.len(), w.filled, w.done), ("t1", WAVEFORM_BUCKETS, 0, true));
+    let w = b.player_get_waveform("lonely").unwrap();
+    assert_eq!((w.track_id.as_str(), w.buckets.len(), w.filled, w.done), ("lonely", WAVEFORM_BUCKETS, 0, true));
     assert_eq!(m.count("stream"), 0);
     assert_eq!(m.total(), n);
 
-    // --- A-B loop: command accepted; loop markers reach PlayerState events
-    b.player_loop_cycle().unwrap();
-    assert_eq!(b.player_get_state().unwrap().loop_a, None, "nothing audible: no marker");
-    let (tx, rx) = std::sync::mpsc::channel();
-    let mut st = b.0._state_rx.borrow().clone();
-    st.loop_a = Some(12.5);
-    st.loop_b = Some(30.0);
-    sonix_core::audio::EngineEvents::player_state(&crate::player::Events(tx), &st);
-    match rx.recv().unwrap() {
-        Event::PlayerState(s) => assert_eq!((s.loop_a, s.loop_b), (Some(12.5), Some(30.0))),
-        _ => panic!("expected a PlayerState event"),
+    // --- A-B loop through the real engine: silent (volume 0) playback of a generated WAV from the mock
+    let m = Mock::start(|ep, _| match ep {
+        "stream" => (200, "audio/wav", silent_wav(20)),
+        _ => not_found(),
+    });
+    use_server(&b, &m.url);
+    let events = b.subscribe();
+    b.player_set_volume(SetVolumeRequest { volume: 0.0 }).unwrap();
+    b.player_play_queue(PlayQueueRequest { track_ids: vec!["t1".into()], start_index: 0 }).unwrap();
+    let playing = wait_for(6, || (b.player_get_state().ok()?.status == PlaybackStatus::Playing).then_some(()));
+    if playing.is_none() {
+        // No usable audio output device on this machine: the engine cannot hold a track, nothing to test further.
+        eprintln!("SKIP A-B loop / live waveform: playback did not start ({:?})", b.player_get_state().map(|s| (s.status, s.error)));
+    } else {
+        // the waveform of the playing (live) track is scanned from playback's own download
+        let w = wait_for(6, || b.player_get_waveform("t1").ok().filter(|w| w.done)).expect("waveform done");
+        assert_eq!((w.buckets.len(), w.filled), (WAVEFORM_BUCKETS, WAVEFORM_BUCKETS));
+        assert_eq!(m.count("stream"), 1, "the scan reuses playback's download");
+        // press 1: A at the current position; press 2: B (after A); press 3: clear
+        std::thread::sleep(std::time::Duration::from_millis(900));
+        b.player_loop_cycle().unwrap();
+        let a = wait_for(3, || b.player_get_state().ok().and_then(|s| s.loop_a)).expect("loop A set by the engine");
+        assert!(b.player_get_state().unwrap().loop_b.is_none());
+        std::thread::sleep(std::time::Duration::from_millis(900));
+        b.player_loop_cycle().unwrap();
+        let (la, lb) = wait_for(3, || b.player_get_state().ok().and_then(|s| Some((s.loop_a?, s.loop_b?)))).expect("loop B set by the engine");
+        assert!(la == a && lb > la, "A={la} B={lb}");
+        // the markers arrive as PlayerState events
+        let mut seen = false;
+        while let Ok(ev) = events.try_recv() {
+            if let Event::PlayerState(s) = ev {
+                seen |= s.loop_a == Some(la) && s.loop_b == Some(lb);
+            }
+        }
+        assert!(seen, "a PlayerState event carried loopA/loopB");
+        b.player_loop_cycle().unwrap();
+        wait_for(3, || b.player_get_state().ok().filter(|s| s.loop_a.is_none() && s.loop_b.is_none())).expect("cleared");
     }
+    b.0.engine.send(EngineCommand::Stop);
+    m.assert_read_only();
 
     drop(b);
-    let _ = std::fs::remove_dir_all(&tmp);
 }

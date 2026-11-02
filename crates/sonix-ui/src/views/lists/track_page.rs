@@ -1,5 +1,6 @@
 //! `PlaylistDetail.svelte`, `Liked.svelte` and `SmartPlaylistDetail.svelte`: three pages with the same
 //! skeleton (120 px art + title block + actions, then the track table), one entity.
+use sonix_api::bucket_for;
 use super::menus::{self, TrackMenu};
 use super::table::{Arrows, Fetch, RowItem, Table, TableCfg, TableEvent};
 use super::ui::{icon_btn40, play_btn, sec_btn, status_line};
@@ -550,9 +551,9 @@ impl TrackPage {
             PageKind::Playlist(_) => {
                 let d = self.detail.as_ref();
                 let count = d.map(|d| d.playlist.song_count).unwrap_or(0);
-                let cover = d.and_then(|d| d.playlist.cover_art.clone());
+                let key = d.map(|d| art::mosaic_key(&d.playlist));
                 let inner: AnyElement = if count > 0 {
-                    art::cover(&self.art, &self.backend, cover.as_deref(), lm::ART - 2.0, window, cx)
+                    art::cover_bucket(&self.art, &self.backend, key.as_deref(), lm::ART - 2.0, bucket_for((320.0 * window.scale_factor()).ceil() as u32), window, cx)
                 } else {
                     icon("queue", lm::ICON_ART_EMPTY, th.muted).into_any_element()
                 };
