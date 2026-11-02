@@ -174,7 +174,21 @@ pub fn art_slot<V: 'static>(
 pub struct PageScroll {
     pub handle: gpui::ScrollHandle,
     used: Rc<Cell<bool>>,
+    /// When this page was created, and whether the same page (scroll id) overflowed last time.
+    born: std::time::Instant,
+    seed: Cell<Option<bool>>,
 }
+
+thread_local! {
+    /// Last gutter state per page scroll id. A page created on navigation starts with it: the browser decides the
+    /// gutter in the same layout pass that adds the content, while here the decision comes from the previous frame,
+    /// so a page whose content arrives after its first frame would draw once without the 10 px gutter and then
+    /// re-flow (grid columns tip over, right-aligned header controls shift).
+    static GUTTERS: std::cell::RefCell<std::collections::HashMap<&'static str, bool>> = std::cell::RefCell::new(std::collections::HashMap::new());
+}
+
+/// How long a remembered gutter is kept while the page's content may still be loading.
+const GUTTER_SEED_GRACE: std::time::Duration = std::time::Duration::from_millis(600);
 
 impl Default for PageScroll {
     fn default() -> Self {
@@ -184,11 +198,26 @@ impl Default for PageScroll {
 
 impl PageScroll {
     pub fn new() -> Self {
-        Self { handle: gpui::ScrollHandle::new(), used: Rc::new(Cell::new(false)) }
+        Self { handle: gpui::ScrollHandle::new(), used: Rc::new(Cell::new(false)), born: std::time::Instant::now(), seed: Cell::new(None) }
     }
 
     pub fn wrap(&self, window: &mut Window, th: &Theme, id: &'static str, content: impl IntoElement) -> AnyElement {
-        let (bar, overflow) = crate::widgets::scrollbar::passive(*th, &self.handle);
+        let (bar, measured) = crate::widgets::scrollbar::passive(*th, &self.handle);
+        let seed = match self.seed.get() {
+            Some(s) => s,
+            None => {
+                let s = GUTTERS.with(|g| g.borrow().get(id).copied().unwrap_or(false));
+                self.seed.set(Some(s));
+                s
+            }
+        };
+        let settled = self.born.elapsed() >= GUTTER_SEED_GRACE;
+        // during the grace period a remembered gutter is only ever added to, never dropped (content may still be
+        // loading); the watch below keeps frames coming while seed and measurement disagree, so it settles after it
+        let overflow = if settled { measured } else { measured || seed };
+        if measured || settled {
+            GUTTERS.with(|g| g.borrow_mut().insert(id, measured));
+        }
         self.used.set(overflow);
         let (handle, used) = (self.handle.clone(), self.used.clone());
         let watch = canvas(
