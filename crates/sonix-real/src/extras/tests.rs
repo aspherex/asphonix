@@ -78,7 +78,11 @@ impl TmpDir {
 
 impl Drop for TmpDir {
     fn drop(&mut self) {
-        let _ = std::fs::remove_dir_all(&self.0);
+        // The closed backend's threads may hold the SQLite files for a moment: retry for up to 5 s.
+        let t = std::time::Instant::now();
+        while std::fs::remove_dir_all(&self.0).is_err() && self.0.exists() && t.elapsed() < std::time::Duration::from_secs(5) {
+            std::thread::sleep(std::time::Duration::from_millis(50));
+        }
     }
 }
 

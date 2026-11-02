@@ -21,7 +21,7 @@ pub struct Config {
 }
 
 impl Config {
-    /// `SONIX_MCP_CONFIG_DIR` overrides the default per-OS app config dir
+    /// `SONIX_NATIVE_MCP_CONFIG_DIR` overrides the default per-OS app config dir
     /// (used by tests and by builds with a different app identifier).
     pub fn from_env() -> Self {
         Self { config_dir: wire::config_dir(), call_timeout: Duration::from_secs(60) }

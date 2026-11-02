@@ -1,27 +1,42 @@
 //! OS integration / background services of the real backend. Offline: no server, no network, no audio.
-//! One shared sandbox dir for APPDATA/LOCALAPPDATA (the backend reads them on every call), set once.
+//! Each test opens its backend on its own temp dirs (`open_in`); the process environment is never touched.
 use sonix_api::*;
 use sonix_real::RealBackend;
-use std::sync::{Mutex, OnceLock};
 use std::time::{Duration, Instant};
 
-fn sandbox() -> &'static Mutex<()> {
-    static S: OnceLock<Mutex<()>> = OnceLock::new();
-    S.get_or_init(|| {
-        let dir = std::path::Path::new(env!("CARGO_TARGET_TMPDIR")).join(format!("services-{}", std::process::id()));
-        let _ = std::fs::create_dir_all(&dir);
-        unsafe {
-            std::env::set_var("APPDATA", &dir);
-            std::env::set_var("LOCALAPPDATA", &dir);
+/// Own config/data dirs under `<build-dir>/tmp` (opened with `open_in`, no env vars), removed on drop.
+struct Sandbox(std::path::PathBuf);
+impl Sandbox {
+    fn new(tag: &str) -> Self {
+        static SEQ: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+        let seq = SEQ.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        let base = if std::path::Path::new("<build-dir>").exists() { std::path::PathBuf::from("<build-dir>/tmp") } else { std::env::temp_dir() };
+        let dir = base.join(format!("sonix-services-{tag}-{}-{seq}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        Sandbox(dir)
+    }
+    fn config(&self) -> std::path::PathBuf {
+        self.0.join("config")
+    }
+    fn open(&self) -> RealBackend {
+        RealBackend::open_in(self.config(), self.0.join("data"))
+    }
+}
+impl Drop for Sandbox {
+    fn drop(&mut self) {
+        // background threads may still release the DB for a moment
+        let t = Instant::now();
+        while std::fs::remove_dir_all(&self.0).is_err() && self.0.exists() && t.elapsed() < Duration::from_secs(5) {
+            std::thread::sleep(Duration::from_millis(50));
         }
-        Mutex::new(())
-    })
+    }
 }
 
 #[test]
 fn updates_are_disabled_by_default_and_never_install() {
-    let _g = sandbox().lock().unwrap_or_else(|p| p.into_inner());
-    let b = RealBackend::open();
+    let sb = Sandbox::new("updates");
+    let b = sb.open();
     let rx = b.subscribe();
     let info = b.updates_check().unwrap();
     assert!(!info.available);
@@ -35,8 +50,8 @@ fn updates_are_disabled_by_default_and_never_install() {
 
 #[test]
 fn logout_and_exit_flush_the_listen_writer_promptly() {
-    let _g = sandbox().lock().unwrap_or_else(|p| p.into_inner());
-    let b = RealBackend::open();
+    let sb = Sandbox::new("logout");
+    let b = sb.open();
     let t = Instant::now();
     b.auth_logout().unwrap(); // Stop + FlushListen before the wipe
     b.shutdown(); // persist_now (also writes the `quit` listen row when a session is open)
@@ -46,9 +61,9 @@ fn logout_and_exit_flush_the_listen_writer_promptly() {
 
 #[test]
 fn mcp_is_off_by_default_and_enable_disable_manage_the_discovery_file() {
-    let _g = sandbox().lock().unwrap_or_else(|p| p.into_inner());
-    let b = RealBackend::open();
-    let discovery = sonix_real::config_dir().join("mcp.json");
+    let sb = Sandbox::new("mcp");
+    let b = sb.open();
+    let discovery = sb.config().join("mcp.json");
     let _ = std::fs::remove_file(&discovery);
     let st = b.mcp_status().unwrap();
     assert!(!st.enabled && !st.allow_control && !st.listening, "off by default: {st:?}");
@@ -80,11 +95,11 @@ fn mcp_is_off_by_default_and_enable_disable_manage_the_discovery_file() {
 
 #[test]
 fn mcp_end_to_end_over_the_real_pipe_with_both_gates() {
-    let _g = sandbox().lock().unwrap_or_else(|p| p.into_inner());
-    let b = RealBackend::open();
-    let cfg = sonix_mcp::Config { config_dir: Some(sonix_real::config_dir()), call_timeout: Duration::from_secs(10) };
+    let sb = Sandbox::new("e2e");
+    let b = sb.open();
+    let cfg = sonix_mcp::Config { config_dir: Some(sb.config()), call_timeout: Duration::from_secs(10) };
     // Not enabled: no discovery file, the bridge client says so and nothing listens.
-    let _ = std::fs::remove_file(sonix_real::config_dir().join("mcp.json"));
+    let _ = std::fs::remove_file(sb.config().join("mcp.json"));
     assert!(matches!(sonix_mcp::client::call_app(&cfg, "library_stats", &serde_json::json!({})), Err(sonix_mcp::client::CallError::NotEnabled)));
 
     b.set_mcp_enabled(true).unwrap();

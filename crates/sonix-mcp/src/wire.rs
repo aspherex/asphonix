@@ -35,10 +35,10 @@ pub const MAX_REQUEST_LINE: usize = 1 << 20;
 /// Largest answer line the bridge accepts from the app.
 pub const MAX_RESPONSE_LINE: usize = 8 << 20;
 
-/// Where the app keeps `mcp.json`: `SONIX_MCP_CONFIG_DIR`, else the
+/// Where the app keeps `mcp.json`: `SONIX_NATIVE_MCP_CONFIG_DIR`, else the
 /// per-OS equivalent of `%APPDATA%` for [`APP_IDENTIFIER`].
 pub fn config_dir() -> Option<PathBuf> {
-    if let Some(d) = std::env::var_os("SONIX_MCP_CONFIG_DIR").filter(|d| !d.is_empty()) {
+    if let Some(d) = std::env::var_os("SONIX_NATIVE_MCP_CONFIG_DIR").filter(|d| !d.is_empty()) {
         return Some(PathBuf::from(d));
     }
     #[cfg(windows)]

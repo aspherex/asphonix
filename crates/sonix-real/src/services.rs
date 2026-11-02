@@ -22,7 +22,9 @@ pub(crate) struct Services {
     /// `Settings.autoCheckUpdates` (OFF by default; set from the persisted settings at startup and on change).
     pub auto_check_updates: Arc<AtomicBool>,
     checker_started: AtomicBool,
-    media_attached: AtomicBool,
+    /// HWND currently registered with SMTC (0 = none) and its registration generation.
+    media_hwnd: std::sync::atomic::AtomicIsize,
+    media_generation: Arc<std::sync::atomic::AtomicU64>,
     mcp: sonix_core::mcp_bridge::McpBridge,
     /// `Settings.mcpEnabled` / `mcpAllowControl`: both OFF by default.
     mcp_enabled: AtomicBool,
@@ -31,7 +33,7 @@ pub(crate) struct Services {
 
 impl Default for Services {
     fn default() -> Self {
-        Self { updater: Arc::new(Updater::built_in()), auto_check_updates: Arc::new(AtomicBool::new(false)), checker_started: AtomicBool::new(false), media_attached: AtomicBool::new(false), mcp: Default::default(), mcp_enabled: AtomicBool::new(false), mcp_allow_control: AtomicBool::new(false) }
+        Self { updater: Arc::new(Updater::built_in()), auto_check_updates: Arc::new(AtomicBool::new(false)), checker_started: AtomicBool::new(false), media_hwnd: Default::default(), media_generation: Default::default(), mcp: Default::default(), mcp_enabled: AtomicBool::new(false), mcp_allow_control: AtomicBool::new(false) }
     }
 }
 
@@ -51,12 +53,15 @@ impl RealBackend {
 
     // --- Windows media controls (SMTC / media keys) ---------------------------------------------
 
-    /// Registers the main window (Win32 HWND) with the OS media controls. Once per backend; a no-op off Windows.
+    /// Registers the main window (Win32 HWND) with the OS media controls. Call it on the window's thread, delayed past
+    /// the first show (reference `run_on_main_thread` after 1.5 s). The same window again is a no-op; a new window
+    /// re-registers and retires the previous update loop. A no-op off Windows.
     pub fn attach_media_window(&self, hwnd: isize) {
-        if self.0.svc.media_attached.swap(true, Ordering::SeqCst) {
+        if self.0.svc.media_hwnd.swap(hwnd, Ordering::SeqCst) == hwnd {
             return;
         }
-        sonix_core::media::spawn(Arc::new(RealMedia(self.clone())), hwnd);
+        let generation = self.0.svc.media_generation.fetch_add(1, Ordering::SeqCst) + 1;
+        sonix_core::media::attach(Arc::new(RealMedia(Arc::downgrade(&self.0))), hwnd, self.0.svc.media_generation.clone(), generation);
     }
 
     // --- updater ----------------------------------------------------------------------------------
@@ -100,10 +105,13 @@ impl RealBackend {
         if !on || !self.0.svc.updater.is_enabled() || self.0.svc.checker_started.swap(true, Ordering::SeqCst) {
             return;
         }
-        let me = self.clone();
+        // Weak: the checker must not keep the backend alive.
+        let weak = Arc::downgrade(&self.0);
         self.0.rt.spawn(async move {
             tokio::time::sleep(sonix_core::updates::FIRST_CHECK_DELAY).await;
             loop {
+                let Some(inner) = weak.upgrade() else { break };
+                let me = RealBackend(inner);
                 if me.0.svc.auto_check_updates.load(Ordering::Relaxed)
                     && let Ok(info) = me.0.svc.updater.check().await
                     && info.available
@@ -111,6 +119,7 @@ impl RealBackend {
                 {
                     me.emit(Event::UpdateAvailable(i));
                 }
+                drop(me);
                 tokio::time::sleep(sonix_core::updates::CHECK_INTERVAL).await;
             }
         });
@@ -118,33 +127,40 @@ impl RealBackend {
 }
 
 /// What SMTC needs from the app: engine commands, the player-state watch and encoded cover bytes.
-struct RealMedia(RealBackend);
+/// Weak: the OS integration never keeps the backend alive.
+struct RealMedia(std::sync::Weak<crate::Inner>);
+
+impl RealMedia {
+    fn backend(&self) -> Option<RealBackend> {
+        self.0.upgrade().map(RealBackend)
+    }
+}
 
 impl MediaHost for RealMedia {
     fn send(&self, cmd: sonix_core::audio::EngineCommand) {
-        self.0 .0.engine.send(cmd);
+        if let Some(b) = self.backend() {
+            b.0.engine.send(cmd);
+        }
     }
-    fn subscribe(&self) -> tokio::sync::watch::Receiver<sonix_core::ipc::PlayerState> {
-        self.0 .0.engine.subscribe_player_state()
+    fn subscribe(&self) -> Option<tokio::sync::watch::Receiver<sonix_core::ipc::PlayerState>> {
+        self.backend().map(|b| b.0.engine.subscribe_player_state())
     }
     fn cover(&self, cover_art_id: String, size: u32) -> BoxFut<Option<Vec<u8>>> {
-        let client = self.0 .0.client.read().unwrap().clone();
-        let dir = self.0.art_dir();
+        let Some(b) = self.backend() else { return Box::pin(async { None }) };
+        let client = b.0.client.read().unwrap_or_else(|p| p.into_inner()).clone();
+        let path = crate::art::cache_path(&b.art_dir(), &cover_art_id, size);
+        drop(b);
         Box::pin(async move {
-            // Same cache layout as `art_get`: `<id>_<bucket>.img`, bytes as received from the server.
-            let path = crate::art::cache_path(&dir, &cover_art_id, size);
-            if let Ok(b) = tokio::fs::read(&path).await
-                && !b.is_empty()
-            {
-                return Some(b);
+            // The `art_get` cache (same file per id/bucket, same cap accounting): bytes as received, stored only once
+            // they decode.
+            if let Some(bytes) = crate::art::read_cached_bytes(&path) {
+                return Some(bytes);
             }
-            let (b, _) = client?.get_cover_art(&cover_art_id, Some(size)).await.ok()?;
-            let _ = tokio::fs::create_dir_all(&dir).await;
-            let tmp = path.with_extension("tmp");
-            if tokio::fs::write(&tmp, &b).await.is_ok() {
-                let _ = tokio::fs::rename(&tmp, &path).await;
+            let (bytes, _) = client?.get_cover_art(&cover_art_id, Some(size)).await.ok()?;
+            if crate::art::decodes(&bytes) {
+                crate::art::store(&path, &bytes);
             }
-            Some(b)
+            Some(bytes)
         })
     }
 }
@@ -154,12 +170,13 @@ impl MediaHost for RealMedia {
 // `set_mcp_enabled(true)`; `settings_set` and `apply_service_settings` (startup) drive these methods.
 
 /// Tool calls run against the backend's own library DB / engine; both gates are re-read on every call.
-struct RealDispatch(RealBackend);
+/// Weak: a running bridge never keeps the backend alive.
+struct RealDispatch(std::sync::Weak<crate::Inner>);
 
 impl sonix_core::mcp_bridge::Dispatch for RealDispatch {
     fn call(&self, tool: &str, args: &serde_json::Value) -> Result<serde_json::Value, String> {
         use sonix_core::mcp_bridge::tools;
-        let b = &self.0 .0;
+        let Some(b) = self.0.upgrade() else { return Err("SONIX is shutting down.".into()) };
         // Re-checked per call: a client connected a moment before "off" is refused.
         if !b.svc.mcp_enabled.load(Ordering::Relaxed) {
             return Err("Claude (MCP) is turned off in SONIX settings.".into());
@@ -199,7 +216,7 @@ impl RealBackend {
     pub fn set_mcp_enabled(&self, enabled: bool) -> ApiResult<McpStatus> {
         let s = &self.0.svc;
         if enabled {
-            let dispatch: Arc<dyn sonix_core::mcp_bridge::Dispatch> = Arc::new(RealDispatch(self.clone()));
+            let dispatch: Arc<dyn sonix_core::mcp_bridge::Dispatch> = Arc::new(RealDispatch(Arc::downgrade(&self.0)));
             self.0.rt.block_on(s.mcp.start(dispatch, &self.0.dir)).map_err(|m| ApiError::new(ErrorCode::Unknown, m))?;
             s.mcp_enabled.store(true, Ordering::Relaxed);
         } else {
@@ -238,5 +255,31 @@ impl RealBackend {
     pub fn set_mcp_allow_control(&self, allow: bool) -> ApiResult<McpStatus> {
         self.0.svc.mcp_allow_control.store(allow, Ordering::Relaxed);
         self.mcp_status_impl()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::RealBackend;
+
+    /// The shipped update channel is empty: turning the auto-check on (as the persisted setting does at startup)
+    /// starts no checker task, so no request can ever go out.
+    #[test]
+    fn auto_check_on_with_the_empty_channel_starts_nothing() {
+        static SEQ: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+        let seq = SEQ.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        let dir = std::path::PathBuf::from("<build-dir>/tmp").join(format!("sonix-svc-auto-{}-{seq}", std::process::id()));
+        {
+            let b = RealBackend::open_in(dir.join("config"), dir.join("data"));
+            assert!(sonix_core::updates::UPDATE_ENDPOINT.is_empty() && !b.0.svc.updater.is_enabled());
+            b.set_auto_check_updates(true);
+            assert!(b.0.svc.auto_check_updates.load(std::sync::atomic::Ordering::Relaxed), "the flag is kept");
+            assert!(!b.0.svc.checker_started.load(std::sync::atomic::Ordering::SeqCst), "no checker task, no network");
+        }
+        let t = std::time::Instant::now();
+        while std::fs::remove_dir_all(&dir).is_err() && dir.exists() && t.elapsed() < std::time::Duration::from_secs(5) {
+            std::thread::sleep(std::time::Duration::from_millis(50));
+        }
+        assert!(!dir.exists(), "temp dir removed");
     }
 }

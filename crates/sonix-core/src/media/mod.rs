@@ -8,10 +8,10 @@
 //! `PlayerState` the UI gets, never a second source of truth. Button/media-key
 //! presses are translated straight back into `EngineCommand`s.
 //!
-//! Registration and every WinRT call happen in `windows_backend` on a
-//! background task, started from `spawn()` (called once from `lib.rs`'s
-//! `setup()`, after both `AppState` and `EngineHandle` are managed) — never
-//! on the window-show critical path. [`classify`] below is the cheap,
+//! Registration (`GetForWindow` + event handlers) happens in `windows_backend`
+//! on the window's own thread via [`attach`] (the UI calls it there, delayed past
+//! the first show); later updates run on a background thread — never on the
+//! window-show critical path. [`classify`] below is the cheap,
 //! cross-platform, unit-tested decision for *when* to push an update to the
 //! OS, kept separate from the `windows`-only plumbing so it needs no COM/WinRT
 //! to test.
@@ -25,8 +25,8 @@ use crate::ipc::{PlaybackStatus, PlayerState};
 pub trait MediaHost: Send + Sync + 'static {
     /// Transport commands from the OS (play/pause/next/previous/seek) go to the engine.
     fn send(&self, cmd: crate::audio::EngineCommand);
-    /// The same `PlayerState` watch the UI is fed from (never a second source of truth).
-    fn subscribe(&self) -> tokio::sync::watch::Receiver<PlayerState>;
+    /// The same `PlayerState` watch the UI is fed from (never a second source of truth); `None` once the app is gone.
+    fn subscribe(&self) -> Option<tokio::sync::watch::Receiver<PlayerState>>;
     /// Encoded (jpeg/png) cover bytes for the thumbnail at about `size` px (cache first, then server).
     fn cover(&self, cover_art_id: String, size: u32) -> BoxFut<Option<Vec<u8>>>;
 }
@@ -34,15 +34,19 @@ pub trait MediaHost: Send + Sync + 'static {
 pub type BoxFut<T> = std::pin::Pin<Box<dyn std::future::Future<Output = T> + Send>>;
 
 /// Registers SONIX's window (`hwnd`, a Win32 HWND) as a System Media Transport Controls source and keeps it
-/// in sync with the player state. Registration runs on a background thread after a short delay, never on
-/// the window-show path. Non-Windows: no-op (macOS `MPNowPlayingInfoCenter` is post-MVP).
+/// in sync with the player state.
+///
+/// MUST be called on the thread that owns the window (reference: `run_on_main_thread`), and not on the
+/// window-show path: the caller delays it (reference `REGISTER_DELAY`, 1.5 s). `GetForWindow` and the event
+/// registration run right here; the update loop then runs on its own thread and ends when `generation` no
+/// longer equals `gen` (the window was re-attached) or the engine is gone. Non-Windows: no-op (macOS
+/// `MPNowPlayingInfoCenter` is post-MVP).
 #[cfg(windows)]
-pub fn spawn(host: std::sync::Arc<dyn MediaHost>, hwnd: isize) {
-    windows_backend::spawn(host, hwnd);
+pub fn attach(host: std::sync::Arc<dyn MediaHost>, hwnd: isize, generation: std::sync::Arc<std::sync::atomic::AtomicU64>, gen: u64) {
+    windows_backend::attach(host, hwnd, generation, gen);
 }
-
 #[cfg(not(windows))]
-pub fn spawn(_host: std::sync::Arc<dyn MediaHost>, _hwnd: isize) {}
+pub fn attach(_host: std::sync::Arc<dyn MediaHost>, _hwnd: isize, _generation: std::sync::Arc<std::sync::atomic::AtomicU64>, _gen: u64) {}
 
 /// Largest position delta between two consecutive samples of the *same*
 /// track at the *same* status that still counts as ordinary playback rather

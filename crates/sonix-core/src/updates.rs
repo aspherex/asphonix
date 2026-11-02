@@ -608,27 +608,33 @@ Connection: close
         let (u, rec) = updater(m.port, &k, "0.1.0");
         u.check().await.unwrap();
         assert!(u.install(|_, _| {}, || {}).await.is_err());
+        assert!(rec.installed.lock().unwrap().is_empty(), "wrong key: nothing ran");
         // Validly signed old installer (version 0.0.5) announced as 0.2.0 (rollback attempt).
         let m = mock_with("0.2.0", EXE, |k| sign(k, EXE, "0.0.5"), &k);
-        let (u, _) = updater(m.port, &k, "0.1.0");
+        let (u, rec) = updater(m.port, &k, "0.1.0");
         u.check().await.unwrap();
         assert!(u.install(|_, _| {}, || {}).await.is_err());
+        assert!(rec.installed.lock().unwrap().is_empty(), "signed version mismatch: nothing ran");
         // Signature without a version in the trusted comment.
         let nover = |k: &Keys| {
             let sb = minisign::sign(Some(&k.pk), &k.sk, std::io::Cursor::new(EXE), Some("timestamp:1"), None).unwrap();
             base64::engine::general_purpose::STANDARD.encode(sb.to_string())
         };
         let m = mock_with("0.2.0", EXE, nover, &k);
-        let (u, _) = updater(m.port, &k, "0.1.0");
+        let (u, rec) = updater(m.port, &k, "0.1.0");
         u.check().await.unwrap();
         assert!(u.install(|_, _| {}, || {}).await.is_err());
-        assert!(rec.installed.lock().unwrap().is_empty());
+        assert!(rec.installed.lock().unwrap().is_empty(), "unversioned signature: nothing ran");
     }
 
     #[tokio::test]
     async fn plain_http_to_a_non_loopback_host_is_refused() {
-        let u = Updater::new(UpdateConfig::new("http://example.invalid/latest.json", "AAAA", "0.1.0"), Arc::new(Recorder::default()));
+        // A real local listener, but `loopback_http` stays off: plain http is refused before any connection.
+        let k = keys();
+        let m = mock_with("0.2.0", EXE, |k| sign(k, EXE, "0.2.0"), &k);
+        let u = Updater::new(UpdateConfig::new(&format!("http://127.0.0.1:{}/latest.json", m.port), &k.pubkey_b64, "0.1.0"), Arc::new(Recorder::default()));
         let e = u.check().await.unwrap_err();
         assert_eq!(e.message, "Could not check for updates");
+        assert_eq!(m.hits.load(Ordering::SeqCst), 0, "no request went out");
     }
 }

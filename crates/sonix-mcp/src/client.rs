@@ -146,7 +146,7 @@ pub fn call_app(cfg: &Config, tool: &str, args: &Value) -> Result<Value, CallErr
     let dir = cfg
         .config_dir
         .clone()
-        .ok_or_else(|| CallError::Other("cannot locate SONIX's config folder (set SONIX_MCP_CONFIG_DIR)".into()))?;
+        .ok_or_else(|| CallError::Other("cannot locate SONIX's config folder (set SONIX_NATIVE_MCP_CONFIG_DIR)".into()))?;
     let text = std::fs::read_to_string(Discovery::path(&dir)).map_err(|_| CallError::NotEnabled)?;
     let d = Discovery::parse(&text).ok_or(CallError::NotEnabled)?;
     let (tx, rx) = mpsc::channel();

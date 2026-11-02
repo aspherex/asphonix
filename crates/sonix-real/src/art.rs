@@ -190,8 +190,26 @@ fn read_cached(path: &Path) -> Option<DynamicImage> {
     }
 }
 
+/// Encoded bytes of a cache hit (SMTC thumbnail), bumping its recency like [`read_cached`]; junk is deleted.
+pub(crate) fn read_cached_bytes(path: &Path) -> Option<Vec<u8>> {
+    let bytes = std::fs::read(path).ok().filter(|b| !b.is_empty())?;
+    if !decodes(&bytes) {
+        let _ = std::fs::remove_file(path);
+        return None;
+    }
+    if let Ok(f) = std::fs::OpenOptions::new().write(true).open(path) {
+        let _ = f.set_modified(std::time::SystemTime::now());
+    }
+    Some(bytes)
+}
+
+/// True when `bytes` is an image the cache accepts.
+pub(crate) fn decodes(bytes: &[u8]) -> bool {
+    decode_limited(bytes).is_ok()
+}
+
 /// Atomic write through a unique temp name (concurrent writers of one key never share a temp file).
-fn store(path: &Path, bytes: &[u8]) {
+pub(crate) fn store(path: &Path, bytes: &[u8]) {
     let Some(dir) = path.parent() else { return };
     let _ = std::fs::create_dir_all(dir);
     let name = path.file_name().and_then(|n| n.to_str()).unwrap_or("x");

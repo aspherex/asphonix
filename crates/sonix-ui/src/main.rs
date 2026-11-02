@@ -202,9 +202,16 @@ fn open_main(cx: &mut App) {
         },
         |window, cx| {
             log("window_created");
+            // OS media controls (SMTC): registered on this (the window's) thread like the reference's
+            // `run_on_main_thread`, 1.5 s after creation so it never competes with the first show.
             #[cfg(windows)]
             if let Some(hwnd) = winffi::hwnd_of(window) {
-                cx.global::<app::Services>().backend.attach_window(hwnd); // OS media controls (SMTC)
+                let backend = cx.global::<app::Services>().backend.clone();
+                cx.spawn(async move |cx| {
+                    cx.background_executor().timer(std::time::Duration::from_millis(1500)).await;
+                    let _ = cx.update(|_| backend.attach_window(hwnd));
+                })
+                .detach();
             }
             cx.new(|cx| Shell::new(window, cx))
         },

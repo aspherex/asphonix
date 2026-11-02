@@ -4,11 +4,12 @@
 //!
 //! Vendored from the reference `media/windows_backend.rs` (SoniX @ 642db10). Changes: no Tauri (`AppHandle`,
 //! `run_on_main_thread`, `AppState`/`ArtCache`) - the window handle is passed in as a raw HWND and the
-//! engine / cover bytes come through [`MediaHost`]; registration runs on its own thread (it initialises
-//! WinRT itself) instead of the Tauri main thread. The `SystemMediaTransportControls` object is WinRT-agile
+//! engine / cover bytes come through [`MediaHost`]. Like the reference, `GetForWindow` and the event
+//! registration run on the thread that owns the window: [`attach`] is called there by the UI (which also
+//! applies the reference's 1.5 s delay). The `SystemMediaTransportControls` object is WinRT-agile
 //! (`Send + Sync` in the `windows` crate), so later updates and the OS callbacks need no thread hops.
 
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::Arc;
 use std::time::Instant;
 
@@ -20,7 +21,7 @@ use windows::Media::{
 };
 use windows::Storage::Streams::{DataWriter, InMemoryRandomAccessStream, RandomAccessStreamReference};
 use windows::Win32::Foundation::HWND;
-use windows::Win32::System::WinRT::{ISystemMediaTransportControlsInterop, RoInitialize, RO_INIT_MULTITHREADED};
+use windows::Win32::System::WinRT::{ISystemMediaTransportControlsInterop, RoInitialize, RO_INIT_SINGLETHREADED};
 
 use crate::audio::EngineCommand;
 use crate::ipc::{PlaybackStatus, PlayerState};
@@ -42,26 +43,22 @@ struct Smtc {
 unsafe impl Send for Smtc {}
 unsafe impl Sync for Smtc {}
 
-/// Registration waits this long after startup so it never competes with the window's first show; the update
-/// loop reads the engine's *current* state on subscribing, so a restored session still appears.
-const REGISTER_DELAY: std::time::Duration = std::time::Duration::from_millis(1500);
-
-pub fn spawn(host: Arc<dyn MediaHost>, hwnd: isize) {
+/// Runs on the window's thread (see [`super::attach`]); the update loop reads the engine's *current* state on
+/// subscribing, so a restored session still appears.
+pub fn attach(host: Arc<dyn MediaHost>, hwnd: isize, generation: Arc<AtomicU64>, gen: u64) {
+    // The UI thread normally has its apartment already (S_FALSE / RPC_E_CHANGED_MODE are fine): make sure WinRT
+    // activation works here without changing an existing apartment.
+    let _ = unsafe { RoInitialize(RO_INIT_SINGLETHREADED) };
+    let smtc = match register(&host, hwnd) {
+        Ok(s) => s,
+        Err(e) => {
+            log::warn!("SMTC registration failed: {e}");
+            return;
+        }
+    };
     std::thread::Builder::new()
         .name("sonix-smtc".into())
-        .spawn(move || {
-            std::thread::sleep(REGISTER_DELAY);
-            // WinRT activation needs an initialised apartment on this thread; MTA keeps the agile objects usable everywhere.
-            let _ = unsafe { RoInitialize(RO_INIT_MULTITHREADED) };
-            let smtc = match register(&host, hwnd) {
-                Ok(s) => s,
-                Err(e) => {
-                    log::warn!("SMTC registration failed: {e}");
-                    return;
-                }
-            };
-            crate::rt::block_on(run_update_loop(host, smtc));
-        })
+        .spawn(move || crate::rt::block_on(run_update_loop(host, smtc, generation, gen)))
         .ok();
 }
 
@@ -125,9 +122,9 @@ fn register(host: &Arc<dyn MediaHost>, hwnd: isize) -> Result<Smtc, String> {
 }
 
 /// One `PlayerState` watch subscription, pushing updates to SMTC only when [`classify`] says something changed.
-async fn run_update_loop(host: Arc<dyn MediaHost>, smtc: Smtc) {
+async fn run_update_loop(host: Arc<dyn MediaHost>, smtc: Smtc, generation: Arc<AtomicU64>, gen: u64) {
     let smtc = Arc::new(smtc);
-    let mut rx = host.subscribe();
+    let Some(mut rx) = host.subscribe() else { return };
 
     let mut prev_track_id: Option<String> = None;
     let mut prev_status = PlaybackStatus::Stopped;
@@ -157,6 +154,9 @@ async fn run_update_loop(host: Arc<dyn MediaHost>, smtc: Smtc) {
 
         if rx.changed().await.is_err() {
             break; // engine handle dropped: app shutting down.
+        }
+        if generation.load(Ordering::SeqCst) != gen {
+            break; // a newer window registered; this one is gone.
         }
     }
 }
