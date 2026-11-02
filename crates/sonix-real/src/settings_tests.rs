@@ -1,7 +1,7 @@
 //! Tests for settings / continuity / scrobbling. Every server is a local 127.0.0.1 mock that records requests.
 use super::*;
 use sonix_core::audio::queue::{EntrySnapshot, QueueCore};
-use sonix_core::audio::session::{PushKind, SaveRequest};
+use sonix_core::audio::session::SessionState;
 use sonix_core::ipc::{QueueItemOrigin, RepeatMode};
 use sonix_core::subsonic::Client;
 use std::io::{Read, Write};
@@ -11,7 +11,9 @@ use std::time::Instant;
 
 static ENV: Mutex<()> = Mutex::new(());
 
-/// Serializes tests (process-wide env vars) and points `APPDATA`/`LOCALAPPDATA` at a fresh temp dir.
+/// Serializes tests (process-wide env vars) and points `APPDATA`/`LOCALAPPDATA` at a fresh dir under
+/// `<build-dir>/tmp` (override: `SONIX_TEST_TMP`). Declare it FIRST in a test so backends drop before it; the
+/// directory is removed on drop (also when the test panics), retrying while background threads release SQLite.
 struct Env {
     _g: MutexGuard<'static, ()>,
     root: std::path::PathBuf,
@@ -19,7 +21,7 @@ struct Env {
 impl Env {
     fn new(tag: &str) -> Self {
         let g = ENV.lock().unwrap_or_else(|p| p.into_inner());
-        let base = std::env::var("SONIX_TEST_TMP").map(std::path::PathBuf::from).unwrap_or_else(|_| std::env::temp_dir());
+        let base = std::path::PathBuf::from(std::env::var("SONIX_TEST_TMP").unwrap_or_else(|_| "<build-dir>/tmp".into()));
         let root = base.join(format!("sonix-real-{tag}-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&root);
         std::fs::create_dir_all(root.join("roaming")).unwrap();
@@ -30,10 +32,23 @@ impl Env {
         }
         Env { _g: g, root }
     }
+    /// Removes the dir, waiting up to 5 s for the closed backends' threads to release their files.
+    fn cleanup(&self) -> bool {
+        let t = Instant::now();
+        loop {
+            if std::fs::remove_dir_all(&self.root).is_ok() || !self.root.exists() {
+                return true;
+            }
+            if t.elapsed() > Duration::from_secs(5) {
+                return false;
+            }
+            std::thread::sleep(Duration::from_millis(50));
+        }
+    }
 }
 impl Drop for Env {
     fn drop(&mut self) {
-        let _ = std::fs::remove_dir_all(&self.root);
+        self.cleanup();
     }
 }
 
@@ -234,45 +249,139 @@ fn resume_from_server_reads_the_queue_and_errors_without_one() {
     assert_eq!(mock.count("getPlayQueue"), 1);
 }
 
-#[test]
-fn save_play_queue_push_only_with_sync_on() {
-    let _e = Env::new("push");
-    let b = RealBackend::open();
-    let mock = Mock::start(empty_server);
-    *b.0.client.write().unwrap() = Some(mock.client());
-    let req = || SaveRequest { queue: Some(core_of(&["t1", "t2", "t3"], 1)), pools: None, position_ms: 42_000, volume: 0.5, push: PushKind::Final };
-    // default OFF: the exit write is local only
-    assert!(b.0.store.save_final(req(), Duration::from_secs(3)));
-    assert!(mock.requests().is_empty(), "{:?}", mock.requests());
-    b.settings_set(SettingChange::SyncPlayQueue(true)).unwrap();
-    assert!(b.0.store.save_final(req(), Duration::from_secs(3)));
-    let r = mock.requests();
-    assert_eq!(r.len(), 1, "{r:?}");
-    assert!(r[0].starts_with("/rest/savePlayQueue?"), "{}", r[0]);
-    assert!(r[0].contains("id=t1&id=t2&id=t3") && r[0].contains("current=t2") && r[0].contains("position=42000"), "{}", r[0]);
+/// Engine activity without audio: hands the engine a saved session (paused at `position_ms`, volume 0), waits until
+/// its queue is in, then edits the queue the way the UI does (a mutating command, so the exit write has work to do).
+fn restore_via_engine(b: &RealBackend, ids: &[&str], current: usize, position_ms: u64) {
+    let state = SessionState { version: sonix_core::audio::session::SESSION_VERSION, saved_at_ms: 1, position_ms, volume: Some(0.0), queue: core_of(ids, current) };
+    b.0.engine.send(EngineCommand::RestoreSession { state: Box::new(state), pools: None, force: false });
+    let page = PageRequest { offset: 0, limit: 10 };
+    wait_until("restored queue", || b.player_get_queue(page).map(|q| q.total == ids.len()).unwrap_or(false));
+}
+
+fn queue_ids(b: &RealBackend) -> Vec<String> {
+    b.player_get_queue(PageRequest { offset: 0, limit: 10 }).unwrap().items.iter().map(|i| i.track.id.clone()).collect()
 }
 
 #[test]
-fn queue_and_position_survive_a_restart_and_persist_now_returns() {
-    let _e = Env::new("restart");
+fn exit_path_writes_the_session_and_pushes_the_play_queue_only_with_sync_on() {
+    let _e = Env::new("push");
     let b = RealBackend::open();
     seed(&b);
-    let save = SaveRequest { queue: Some(core_of(&["t1", "t2", "t3"], 1)), pools: None, position_ms: 42_000, volume: 0.5, push: PushKind::None };
-    assert!(b.0.store.save_final(save, Duration::from_secs(3)));
+    let mock = Mock::start(empty_server);
+    *b.0.client.write().unwrap() = Some(mock.client());
+    restore_via_engine(&b, &["t1", "t2", "t3"], 1, 42_000);
+    // default OFF: engine edit -> persist_now writes the local session, nothing goes to the server
+    b.player_reorder_queue(0, 2).unwrap();
+    assert_eq!(queue_ids(&b), ["t2", "t3", "t1"]);
+    b.persist_now();
+    let (saved, _) = sonix_core::audio::session::load(&b.0.dir).expect("session.json written by the exit path");
+    let ids: Vec<_> = saved.queue.entries.iter().map(|e| e.id.as_str()).collect();
+    assert_eq!(ids, ["t2", "t3", "t1"]);
+    assert_eq!(saved.volume, Some(0.0));
+    assert!(mock.requests().is_empty(), "sync OFF must not write to the server: {:?}", mock.requests());
+    // ON: the same exit path pushes savePlayQueue
+    b.settings_set(SettingChange::SyncPlayQueue(true)).unwrap();
+    b.player_reorder_queue(0, 2).unwrap();
+    assert_eq!(queue_ids(&b), ["t3", "t1", "t2"]);
+    b.persist_now();
+    let r = mock.requests();
+    assert!(!r.is_empty() && r.iter().all(|q| q.starts_with("/rest/savePlayQueue?")), "{r:?}");
+    let last = r.last().unwrap();
+    assert!(last.contains("id=t3&id=t1&id=t2") && last.contains("current=t2"), "{last}");
+}
+
+#[test]
+fn queue_and_position_survive_a_restart_through_the_exit_path() {
+    let e = Env::new("restart");
+    let b = RealBackend::open();
+    seed(&b);
+    restore_via_engine(&b, &["t1", "t2", "t3"], 1, 42_000);
+    b.player_reorder_queue(0, 2).unwrap();
     let t = Instant::now();
     b.persist_now();
     assert!(t.elapsed() < Duration::from_secs(4));
+    drop(b);
     let b2 = RealBackend::open();
-    let page = PageRequest { offset: 0, limit: 10 };
-    wait_until("restored queue", || b2.player_get_queue(page).map(|q| q.total == 3).unwrap_or(false));
-    let q = b2.player_get_queue(page).unwrap();
-    assert_eq!(q.current_index, 1);
-    let ids: Vec<_> = q.items.iter().map(|i| i.track.id.clone()).collect();
-    assert_eq!(ids, ["t1", "t2", "t3"]);
+    wait_until("restored queue", || queue_ids(&b2).len() == 3);
+    assert_eq!(queue_ids(&b2), ["t2", "t3", "t1"]);
     let st = b2.player_get_state().unwrap();
     assert_eq!(st.track.map(|t| t.id), Some("t2".to_string()));
     assert_ne!(st.status, PlaybackStatus::Playing, "restore never starts playback");
     assert!((st.position_sec - 42.0).abs() < 1.0, "{}", st.position_sec);
+    assert_eq!(st.volume, 0.0);
+    drop(b2);
+    assert!(e.cleanup(), "closed backends must release the temp dir");
+}
+
+#[test]
+fn legacy_partial_or_broken_settings_files_leave_every_network_flag_off() {
+    let _e = Env::new("legacy");
+    let cfg = crate::config_dir();
+    std::fs::create_dir_all(&cfg).unwrap();
+    let files = [
+        "{}",
+        r#"{"spread_artists_in_shuffle":true,"queue_window_size":40}"#,
+        r#"{"someFutureField":1,"scrobblingEnabledTypo":true,"queue_window_size":30}"#,
+        r#"{"scrobbling_enabled":"yes","autoplay_enabled":true}"#, // wrong type: the whole file is rejected
+        "not json at all {{{",
+        "",
+    ];
+    for f in files {
+        std::fs::write(cfg.join("settings.json"), f).unwrap();
+        let b = RealBackend::open();
+        let s = b.settings_get().unwrap();
+        assert!(
+            !s.scrobbling_enabled && !s.autoplay_enabled && !s.sync_play_queue && !s.auto_check_updates && !s.mcp_enabled && !s.mcp_allow_control,
+            "flags on for {f:?}: {s:?}"
+        );
+        assert!(!b.0.scrobbling.load(Ordering::Relaxed) && !b.0.prefs.autoplay() && !b.0.prefs.sync_play_queue(), "live flags on for {f:?}");
+        assert!((10..=100).contains(&s.queue_window_size) && (10..=300).contains(&s.play_threshold_sec));
+    }
+    // a legacy file naming only some fields keeps those and defaults the rest to off
+    std::fs::write(cfg.join("settings.json"), r#"{"scrobbling_enabled":true}"#).unwrap();
+    let s = RealBackend::open().settings_get().unwrap();
+    assert!(s.scrobbling_enabled && !s.autoplay_enabled && !s.sync_play_queue && !s.auto_check_updates);
+    // and the Prefs default itself is opt-out
+    let p = sonix_core::audio::Prefs::default();
+    assert!(!p.autoplay() && !p.sync_play_queue());
+}
+
+#[test]
+fn art_cache_status_counts_distinct_covers_not_size_buckets() {
+    let _e = Env::new("art");
+    let b = RealBackend::open();
+    b.0.db
+        .with_tx(|tx| {
+            tx.execute("INSERT INTO albums (id, name, artist, song_count, duration, cover_art) VALUES ('al1','A','X',1,1,'al-1'),('al2','B','X',1,1,'al-2')", [])?;
+            tx.execute("INSERT INTO artists (id, name, album_count, cover_art) VALUES ('ar1','X',2,'ar-1')", [])?;
+            Ok(())
+        })
+        .unwrap();
+    let dir = crate::data_dir().join("art");
+    std::fs::create_dir_all(&dir).unwrap();
+    for (name, n) in [("al-1_64.img", 10), ("al-1_160.img", 20), ("al-1_320.img", 30), ("ar-1_64.img", 5), ("playlist_x_64.img", 7)] {
+        std::fs::write(dir.join(name), vec![0u8; n]).unwrap();
+    }
+    let s = b.art_cache_status().unwrap();
+    assert_eq!((s.cached, s.total, s.bytes), (2, 3, 72));
+    assert!(s.cached <= s.total);
+}
+
+#[test]
+fn queued_scrobbles_replay_only_to_their_own_account() {
+    let _e = Env::new("acct");
+    let mock = Mock::start(empty_server);
+    let client = mock.client();
+    let mine = sonix_core::scrobble::service::account_of(&client);
+    let q = sonix_core::scrobble::queue::ScrobbleQueue::open(&crate::config_dir()).unwrap();
+    q.enqueue_for(&mine, "mine-1", 1_000).unwrap();
+    q.enqueue_for("bob@http://other.example", "theirs-1", 2_000).unwrap();
+    q.enqueue_for("", "legacy-1", 3_000).unwrap();
+    sonix_core::rt::block_on(sonix_core::scrobble::service::drain_for(&client, &q));
+    let r = mock.requests();
+    assert_eq!(r.len(), 1, "{r:?}");
+    assert!(r[0].starts_with("/rest/scrobble?") && r[0].contains("id=mine-1") && r[0].contains("time=1000"), "{}", r[0]);
+    assert!(q.is_empty().unwrap(), "other accounts' rows are dropped, not replayed");
 }
 
 /// Listens to 0..=`to` seconds of "t1" (200 s long) through a watch channel.

@@ -35,7 +35,8 @@ CREATE TABLE IF NOT EXISTS pending_scrobbles (
     time_ms    INTEGER NOT NULL,
     queued_at  TEXT NOT NULL,
     attempts   INTEGER NOT NULL DEFAULT 0,
-    last_error TEXT
+    last_error TEXT,
+    account    TEXT NOT NULL DEFAULT ''
 );
 "#;
 
@@ -58,6 +59,8 @@ impl ScrobbleQueue {
         // A handful of tiny rows: 128 KiB of page cache is plenty (default 2 MiB).
         conn.pragma_update(None, "cache_size", -128).map_err(sqlite_err)?;
         conn.execute_batch(SCHEMA_SQL).map_err(sqlite_err)?;
+        // Queues created before accounts were tracked: add the column (error = already there).
+        let _ = conn.execute("ALTER TABLE pending_scrobbles ADD COLUMN account TEXT NOT NULL DEFAULT ''", []);
         Ok(Self { conn: Mutex::new(conn) })
     }
 
@@ -68,36 +71,48 @@ impl ScrobbleQueue {
         Self { conn: Mutex::new(conn) }
     }
 
-    /// Queues a scrobble submission for later retry, keeping its original
-    /// listening timestamp.
-    pub fn enqueue(&self, track_id: &str, time_ms: i64) -> Result<(), IpcError> {
+    /// Queues a scrobble submission of `account` (`"{username}@{url}"`) for later retry, keeping its original
+    /// listening timestamp. A queued scrobble only ever replays to the account it was queued for.
+    pub fn enqueue_for(&self, account: &str, track_id: &str, time_ms: i64) -> Result<(), IpcError> {
         let conn = self.conn.lock().unwrap_or_else(|p| p.into_inner());
         let now = chrono::Utc::now().to_rfc3339();
         conn.execute(
-            "INSERT INTO pending_scrobbles (track_id, time_ms, queued_at) VALUES (?1, ?2, ?3)",
-            params![track_id, time_ms, now],
+            "INSERT INTO pending_scrobbles (track_id, time_ms, queued_at, account) VALUES (?1, ?2, ?3, ?4)",
+            params![track_id, time_ms, now, account],
         )
         .map_err(sqlite_err)?;
         Ok(())
     }
 
-    /// All rows currently queued, oldest first (retry order = scrobble order).
-    pub fn pending(&self) -> Result<Vec<PendingScrobble>, IpcError> {
+    /// Rows queued for `account`, oldest first (retry order = scrobble order).
+    pub fn pending_for(&self, account: &str) -> Result<Vec<PendingScrobble>, IpcError> {
         let conn = self.conn.lock().unwrap_or_else(|p| p.into_inner());
         let mut stmt = conn
-            .prepare("SELECT id, track_id, time_ms, attempts FROM pending_scrobbles ORDER BY id ASC")
+            .prepare("SELECT id, track_id, time_ms, attempts FROM pending_scrobbles WHERE account = ?1 ORDER BY id ASC")
             .map_err(sqlite_err)?;
         let rows = stmt
-            .query_map([], |row| {
-                Ok(PendingScrobble {
-                    id: row.get(0)?,
-                    track_id: row.get(1)?,
-                    time_ms: row.get(2)?,
-                    attempts: row.get(3)?,
-                })
+            .query_map(params![account], |row| {
+                Ok(PendingScrobble { id: row.get(0)?, track_id: row.get(1)?, time_ms: row.get(2)?, attempts: row.get(3)? })
             })
             .map_err(sqlite_err)?;
         rows.collect::<Result<Vec<_>, _>>().map_err(sqlite_err)
+    }
+
+    /// Drops every row that belongs to another account (switch / logout / pre-account rows): they must never
+    /// be submitted to a different server or user. Returns how many were dropped.
+    pub fn purge_other_accounts(&self, account: &str) -> Result<usize, IpcError> {
+        let conn = self.conn.lock().unwrap_or_else(|p| p.into_inner());
+        conn.execute("DELETE FROM pending_scrobbles WHERE account <> ?1", params![account]).map_err(sqlite_err)
+    }
+
+    #[cfg(test)]
+    pub fn enqueue(&self, track_id: &str, time_ms: i64) -> Result<(), IpcError> {
+        self.enqueue_for("", track_id, time_ms)
+    }
+
+    #[cfg(test)]
+    pub fn pending(&self) -> Result<Vec<PendingScrobble>, IpcError> {
+        self.pending_for("")
     }
 
     pub fn len(&self) -> Result<u64, IpcError> {
@@ -209,6 +224,19 @@ mod tests {
         assert_eq!(row.time_ms, original_time_ms);
     }
 
+
+    #[test]
+    fn rows_are_scoped_to_their_account_and_other_accounts_are_purged() {
+        let q = ScrobbleQueue::open_in_memory();
+        q.enqueue_for("a@http://one", "t1", 1).unwrap();
+        q.enqueue_for("b@http://two", "t2", 2).unwrap();
+        q.enqueue("legacy", 3).unwrap();
+        assert_eq!(q.pending_for("a@http://one").unwrap().len(), 1);
+        assert_eq!(q.pending_for("b@http://two").unwrap()[0].track_id, "t2");
+        assert_eq!(q.purge_other_accounts("b@http://two").unwrap(), 2);
+        assert_eq!(q.len().unwrap(), 1);
+        assert!(q.pending_for("a@http://one").unwrap().is_empty());
+    }
     #[test]
     fn persists_across_reopen_on_disk() {
         let dir = std::env::temp_dir().join(format!("sonix-scrobble-queue-test-{}", std::process::id()));

@@ -100,34 +100,45 @@ impl SettingsApi for RealBackend {
         })
     }
 
-    /// Cover-art disk cache: files and bytes in `%LOCALAPPDATA%\dev.sonix.native\art`; `total` = distinct album/artist
-    /// covers in the library mirror (there is no background prefetch in the native app, so it fills on browsing).
+    /// Like the reference ("cached / total covers - bytes"): `total` = distinct album and artist covers in the library
+    /// mirror, `cached` = how many of those have at least one size cached (the native cache stores one file per
+    /// size bucket, so files are not counted), `bytes` = size of the whole art dir. `cached <= total` always.
     fn art_cache_status(&self) -> ApiResult<ArtCacheStatus> {
-        let (mut cached, mut bytes) = (0u64, 0u64);
+        let mut keys = std::collections::HashSet::new();
+        let mut bytes = 0u64;
         if let Ok(rd) = std::fs::read_dir(crate::data_dir().join("art")) {
             for e in rd.flatten() {
                 if let Ok(m) = e.metadata()
                     && m.is_file()
                 {
-                    cached += 1;
                     bytes += m.len();
+                    // `{key}_{size}.img`
+                    if let Some(stem) = e.file_name().to_string_lossy().strip_suffix(".img")
+                        && let Some((key, size)) = stem.rsplit_once('_')
+                        && size.chars().all(|c| c.is_ascii_digit())
+                    {
+                        keys.insert(key.to_string());
+                    }
                 }
             }
         }
-        let total = self
+        let covers: Vec<String> = self
             .0
             .db
             .read(|c| {
-                c.query_row(
-                    "SELECT COUNT(*) FROM (SELECT cover_art FROM albums WHERE cover_art IS NOT NULL UNION SELECT cover_art FROM artists WHERE cover_art IS NOT NULL)",
-                    [],
-                    |r| r.get::<_, i64>(0),
-                )
+                let mut st = c.prepare("SELECT cover_art FROM albums WHERE cover_art IS NOT NULL UNION SELECT cover_art FROM artists WHERE cover_art IS NOT NULL")?;
+                st.query_map([], |r| r.get::<_, String>(0))?.collect::<Result<Vec<_>, _>>()
             })
-            .unwrap_or(0)
-            .max(0) as u64;
-        Ok(ArtCacheStatus { cached, total, bytes })
+            .unwrap_or_default();
+        let wanted: std::collections::HashSet<String> = covers.iter().map(|c| art_key(c)).collect();
+        let cached = wanted.iter().filter(|k| keys.contains(*k)).count() as u64;
+        Ok(ArtCacheStatus { cached, total: wanted.len() as u64, bytes })
     }
+}
+
+/// Cache file key of a cover id (same sanitising as `ArtApi::art_get` in `reads.rs`).
+fn art_key(cover_art: &str) -> String {
+    cover_art.chars().map(|c| if c.is_ascii_alphanumeric() || c == '-' { c } else { '_' }).collect()
 }
 
 impl RealBackend {

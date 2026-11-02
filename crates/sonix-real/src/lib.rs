@@ -150,10 +150,12 @@ impl RealBackend {
         );
         me.spawn_session_restore();
         {
-            let b = me.clone();
+            // Weak: the pump must not keep the backend (engine, DB) alive once every handle is dropped.
+            let weak = Arc::downgrade(&me.0);
             std::thread::spawn(move || {
                 while let Ok(ev) = ev_rx.recv() {
-                    b.emit(ev);
+                    let Some(inner) = weak.upgrade() else { break };
+                    RealBackend(inner).emit(ev);
                 }
             });
         }

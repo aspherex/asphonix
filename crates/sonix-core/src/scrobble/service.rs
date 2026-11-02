@@ -144,7 +144,7 @@ fn spawn_counter(ctx: ScrobbleCtx, queue: Option<Arc<ScrobbleQueue>>, mut rx: to
                     let client = ctx.client.read().unwrap_or_else(|p| p.into_inner()).clone();
                     match client {
                         Some(client) => submit_classic_scrobble(&client, queue.as_deref(), &hit.track_id, hit.started_at_ms).await,
-                        None => queue_or_warn(queue.as_deref(), &hit.track_id, hit.started_at_ms),
+                        None => log::debug!("scrobble for {} dropped: no account connected", hit.track_id),
                     }
                     mirror_play_locally(&ctx, &hit.track_id, hit.started_at_ms);
                 });
@@ -258,14 +258,19 @@ async fn probe_playback_report(client: Option<&Client>) -> Option<bool> {
 async fn submit_classic_scrobble(client: &Client, queue: Option<&ScrobbleQueue>, track_id: &str, started_at_ms: i64) {
     if let Err(e) = client.scrobble(track_id, true, Some(started_at_ms)).await {
         log::debug!("scrobble submission failed, queueing for retry: {}", e.message);
-        queue_or_warn(queue, track_id, started_at_ms);
+        queue_or_warn(queue, &account_of(client), track_id, started_at_ms);
     }
 }
 
-fn queue_or_warn(queue: Option<&ScrobbleQueue>, track_id: &str, started_at_ms: i64) {
+/// The account a client submits for (`"{username}@{url}"`): queued scrobbles are scoped to it.
+pub fn account_of(client: &Client) -> String {
+    crate::secrets::profiles::profile_account(client.base_url().as_str(), client.username())
+}
+
+fn queue_or_warn(queue: Option<&ScrobbleQueue>, account: &str, track_id: &str, started_at_ms: i64) {
     match queue {
         Some(q) => {
-            if let Err(e) = q.enqueue(track_id, started_at_ms) {
+            if let Err(e) = q.enqueue_for(account, track_id, started_at_ms) {
                 log::warn!("failed to queue scrobble retry for {track_id}: {}", e.message);
             }
         }
@@ -277,7 +282,19 @@ async fn drain_retry_queue(ctx: &ScrobbleCtx, queue: &ScrobbleQueue) {
     if !ctx.scrobbling.load(Ordering::Relaxed) {
         return;
     }
-    let pending = match queue.pending() {
+    let Some(client) = ctx.client.read().unwrap_or_else(|p| p.into_inner()).clone() else { return };
+    drain_for(&client, queue).await;
+}
+
+/// Replays the rows queued for `client`'s account only; rows of other accounts are deleted, never submitted.
+pub async fn drain_for(client: &Client, queue: &ScrobbleQueue) {
+    let account = account_of(client);
+    match queue.purge_other_accounts(&account) {
+        Ok(0) => {}
+        Ok(n) => log::info!("dropped {n} queued scrobble(s) of another account"),
+        Err(e) => log::warn!("failed to purge scrobble retry queue: {}", e.message),
+    }
+    let pending = match queue.pending_for(&account) {
         Ok(p) if !p.is_empty() => p,
         Ok(_) => return,
         Err(e) => {
@@ -285,7 +302,6 @@ async fn drain_retry_queue(ctx: &ScrobbleCtx, queue: &ScrobbleQueue) {
             return;
         }
     };
-    let Some(client) = ctx.client.read().unwrap_or_else(|p| p.into_inner()).clone() else { return };
     for row in pending {
         match client.scrobble(&row.track_id, true, Some(row.time_ms)).await {
             Ok(()) => {

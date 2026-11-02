@@ -70,16 +70,16 @@ pub struct Settings {
     #[serde(default = "default_queue_window_size")]
     pub queue_window_size: u32,
     // --- continuity ---
-    /// "Autoplay similar music when the queue ends". Defaults on.
+    /// "Autoplay similar music when the queue ends". Defaults OFF in the native port.
     #[serde(default)]
     pub autoplay_enabled: bool,
-    /// "Sync play queue with server" (`savePlayQueue`). Defaults on.
+    /// "Sync play queue with server" (`savePlayQueue`). Defaults OFF in the native port.
     #[serde(default)]
     pub sync_play_queue: bool,
     /// "Volume normalization (ReplayGain)". Defaults off.
     #[serde(default)]
     pub replay_gain_mode: crate::audio::replaygain::ReplayGainMode,
-    /// "Check for updates automatically" (`updates::`). Defaults on.
+    /// "Check for updates automatically" (`updates::`). Defaults OFF in the native port.
     #[serde(default)]
     pub auto_check_updates: bool,
     /// "Count a play after" N seconds of real listening, for both listening
