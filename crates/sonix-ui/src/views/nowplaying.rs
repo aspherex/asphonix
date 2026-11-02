@@ -40,6 +40,8 @@ pub struct NowPlayingView {
     cover_area_h: Rc<Cell<f32>>,
     device: String,
     wave_filled: usize,
+    wave_live: bool,
+    wave_gen: u64,
     wave_hover: Option<f32>,
     upnext_open: bool,
     source: Option<QueueSourceInfo>,
@@ -74,6 +76,8 @@ impl NowPlayingView {
             device: String::new(),
             add_btn: Rc::new(Cell::new(Bounds::default())),
             wave_filled: 0,
+            wave_live: false,
+            wave_gen: 0,
             wave_hover: None,
             upnext_open: false,
             source: None,
@@ -141,8 +145,18 @@ impl NowPlayingView {
         if !self.visible || self.suspended {
             return;
         }
-        let id = self.player.read(cx).current_id().map(str::to_string);
+        let (id, live) = {
+            let m = self.player.read(cx);
+            (m.current_id().map(str::to_string), matches!(m.state.status, PlaybackStatus::Playing | PlaybackStatus::Paused))
+        };
+        // `Waveform.svelte`: the scan reads playback's own download, so a track asked about before it was live may have
+        // answered "no waveform" (done, nothing filled): ask once more when it turns live while the bar is still empty.
+        let became_live = live && !self.wave_live;
+        self.wave_live = live;
         if id == self.wave_for {
+            if let Some(id) = id.filter(|_| became_live && self.wave_filled == 0) {
+                self.poll_waveform(id, cx);
+            }
             cx.notify();
             return;
         }
@@ -489,12 +503,17 @@ impl NowPlayingView {
     }
 
     fn poll_waveform(&mut self, id: String, cx: &mut Context<Self>) {
+        self.wave_gen += 1;
+        self.poll_waveform_gen(id, self.wave_gen, cx);
+    }
+
+    fn poll_waveform_gen(&mut self, id: String, gen_: u64, cx: &mut Context<Self>) {
         let b = self.backend.clone();
         cx.spawn(async move |this, cx| {
             let want = id.clone();
             let w = cx.background_executor().spawn(async move { b.player_get_waveform(&want) }).await;
             let _ = this.update(cx, |t, cx| {
-                if t.wave_for.as_deref() != Some(id.as_str()) {
+                if t.wave_for.as_deref() != Some(id.as_str()) || t.wave_gen != gen_ {
                     return;
                 }
                 if let Ok(w) = w {
@@ -505,8 +524,8 @@ impl NowPlayingView {
                         cx.spawn(async move |this, cx| {
                             cx.background_executor().timer(std::time::Duration::from_millis(400)).await;
                             let _ = this.update(cx, |t, cx| {
-                                if t.wave_for.as_deref() == Some(id.as_str()) {
-                                    t.poll_waveform(id, cx);
+                                if t.wave_for.as_deref() == Some(id.as_str()) && t.wave_gen == gen_ {
+                                    t.poll_waveform_gen(id, gen_, cx);
                                 }
                             });
                         })

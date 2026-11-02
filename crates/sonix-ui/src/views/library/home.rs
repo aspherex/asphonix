@@ -493,7 +493,7 @@ impl Render for HomeView {
                 let t = tile(
                     &ctx,
                     &th,
-                    Tile { id: &p.id, art: TileArt::Mosaic(p.song_count > 0), genre: None, title: &p.name, link: None, sub_text: format!("{} TRACKS", p.song_count), overlays: Some(overlays) },
+                    Tile { id: &p.id, art: TileArt::Mosaic((p.song_count > 0).then(|| crate::art::mosaic_key(p))), genre: None, title: &p.name, link: None, sub_text: format!("{} TRACKS", p.song_count), overlays: Some(overlays) },
                     card_w,
                     window,
                     cx,

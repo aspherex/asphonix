@@ -119,8 +119,8 @@ pub struct ArtistInfo {
 // Pure helpers (unit tested)
 // ---------------------------------------------------------------------------
 
-const TOP_SONGS_COUNT: u32 = 10;
-const MAX_SIMILAR: usize = 12;
+pub const TOP_SONGS_COUNT: u32 = 10;
+pub const MAX_SIMILAR: usize = 12;
 /// Cache lifetime of a non-empty server answer.
 pub const CACHE_TTL_MS: i64 = 7 * 24 * 3600 * 1000;
 /// An empty answer (no Last.fm agent, unknown artist) is retried sooner.
@@ -280,18 +280,18 @@ fn decode_entities(s: &str) -> String {
 // ---------------------------------------------------------------------------
 
 #[derive(Debug, Serialize, Deserialize, Default)]
-struct CachedTop {
-    ids: Vec<String>,
+pub struct CachedTop {
+    pub ids: Vec<String>,
 }
 
 #[derive(Debug, Serialize, Deserialize, Default)]
-struct CachedInfo {
-    biography: Option<String>,
+pub struct CachedInfo {
+    pub biography: Option<String>,
     /// `(artist id if the server gave one, name)`.
-    similar: Vec<(Option<String>, String)>,
+    pub similar: Vec<(Option<String>, String)>,
 }
 
-fn now_ms() -> i64 {
+pub(crate) fn now_ms() -> i64 {
     chrono::Utc::now().timestamp_millis()
 }
 

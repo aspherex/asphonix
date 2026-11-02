@@ -258,8 +258,8 @@ pub fn card<V: 'static>(
 pub enum TileArt {
     /// An album/track cover (or the empty-state icon when the item has none).
     Cover(Option<String>, &'static str),
-    /// A playlist mosaic: not generated natively; the slot stays empty (the web's plain-browser mock cannot resolve it either).
-    Mosaic(bool),
+    /// A playlist mosaic: `Some(art::mosaic_key(playlist))` when it has tracks (the backend composes it), else the empty-state icon.
+    Mosaic(Option<String>),
 }
 
 pub struct Tile<'a> {
@@ -298,8 +298,8 @@ pub fn tile<V: 'static>(ctx: &Ctx, th: &Theme, t: Tile<'_>, width: f32, window: 
     let mut slot = match &t.art {
         TileArt::Cover(Some(id), _) => slot.child(crate::art::cover_bucket(&ctx.art, &ctx.backend, Some(id), m::PL_ART, 64, window, cx)),
         TileArt::Cover(None, ic) => slot.child(icon(ic, 18.0, th.muted)),
-        TileArt::Mosaic(true) => slot,
-        TileArt::Mosaic(false) => slot.child(icon("queue", 18.0, th.muted)),
+        TileArt::Mosaic(Some(key)) => slot.child(crate::art::cover_bucket(&ctx.art, &ctx.backend, Some(key), m::PL_ART, 64, window, cx)),
+        TileArt::Mosaic(None) => slot.child(icon("queue", 18.0, th.muted)),
     };
     if let Some(o) = &t.overlays {
         let play = o.play.clone();

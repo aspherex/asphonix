@@ -1,6 +1,8 @@
 //! `RealBackend`: the `Backend` trait over the vendored SONIX core (`sonix-core`).
 //! Phase 2 step 1: login, profiles, keychain, session status. Everything else
 //! returns `unimplemented` (see `stubs.rs`) until the later steps land.
+mod art;
+mod extras;
 mod player;
 mod reads;
 mod stubs;
@@ -48,6 +50,7 @@ struct Inner {
     epoch: AtomicU64,
     client: Arc<std::sync::RwLock<Option<Client>>>,
     engine: sonix_core::audio::EngineHandle,
+    waveform: sonix_core::audio::waveform::WaveformStore,
     prefs: Arc<sonix_core::audio::Prefs>,
     /// Keeps the watch channel's value updating (`watch::Sender::send` is a no-op without receivers).
     _state_rx: tokio::sync::watch::Receiver<sonix_core::ipc::PlayerState>,
@@ -111,6 +114,7 @@ impl RealBackend {
         let prefs = Arc::new(sonix_core::audio::Prefs::default());
         let (ev_tx, ev_rx) = channel::<Event>();
         let source: Arc<dyn sonix_core::audio::TrackSource> = Arc::new(sonix_core::audio::SubsonicTrackSource::new(client.clone()));
+        let waveform_source = source.clone();
         let engine = sonix_core::audio::EngineHandle::with_events(Arc::new(player::Events(ev_tx)), source, db.clone(), false, 20)
             .with_continuity(prefs.clone(), None, None)
             .with_listen(sonix_core::listen::spawn_writer(db.clone()));
@@ -122,6 +126,7 @@ impl RealBackend {
             smart: sonix_core::smartlists::SmartStore::new(&dir),
             rt,
             db,
+            waveform: sonix_core::audio::waveform::WaveformStore::new(waveform_source),
             _state_rx: engine.subscribe_player_state(),
             engine,
             prefs,

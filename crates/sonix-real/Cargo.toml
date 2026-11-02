@@ -13,8 +13,8 @@ serde_json.workspace = true
 image = { version = "0.25", default-features = false, features = ["jpeg", "png"] }
 chrono = "0.4"
 rand = "0.8"
+log = "0.4"
 
 [dev-dependencies]
-log = "0.4"
 sonix-mcp = { path = "../sonix-mcp" }
 url = "2"

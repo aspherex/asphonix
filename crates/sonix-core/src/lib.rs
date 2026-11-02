@@ -12,3 +12,4 @@ pub mod smartlists;
 pub mod updates;
 pub mod media;
 pub mod mcp_bridge;
+pub mod extras;

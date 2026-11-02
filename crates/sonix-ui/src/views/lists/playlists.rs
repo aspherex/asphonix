@@ -1,4 +1,5 @@
 //! `Playlists.svelte`: smart (local) and server playlists as a card grid.
+use sonix_api::bucket_for;
 use super::menus;
 use super::smart_rules::describe_smart;
 use super::ui::scroll_page;
@@ -109,7 +110,7 @@ impl PlaylistsView {
             sub = format!("{} TRACKS · {}", pl.song_count, fmt::format_total_duration(pl.duration));
             rules = None;
             id = pl.id.clone();
-            art_el = if pl.song_count > 0 { art::cover(&self.art, &self.backend, pl.cover_art.as_deref(), lm::CARD_ART, window, cx) } else { icon("queue", 20., th.muted).into_any_element() };
+            art_el = if pl.song_count > 0 { art::cover_bucket(&self.art, &self.backend, Some(&art::mosaic_key(&pl)), lm::CARD_ART, bucket_for((64.0 * window.scale_factor()).ceil() as u32), window, cx) } else { icon("queue", 20., th.muted).into_any_element() };
             if pl.read_only {
                 badges = Some(
                     div()
