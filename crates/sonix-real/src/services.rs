@@ -13,11 +13,13 @@ use std::time::Duration;
 pub(crate) const LISTEN_FLUSH_TIMEOUT: Duration = Duration::from_secs(2);
 /// Final session write bound at exit (reference lib.rs `persist_now(4 s)`).
 pub(crate) const EXIT_PERSIST_TIMEOUT: Duration = Duration::from_secs(4);
+/// Delay before a saved-on MCP bridge starts listening (reference `spawn_if_enabled`).
+const MCP_START_DELAY: Duration = Duration::from_secs(3);
 
 /// Per-service state held by `Inner`.
 pub(crate) struct Services {
     pub updater: Arc<Updater>,
-    /// `Settings.autoCheckUpdates` (OFF by default; the merge connects it to the persisted setting).
+    /// `Settings.autoCheckUpdates` (OFF by default; set from the persisted settings at startup and on change).
     pub auto_check_updates: Arc<AtomicBool>,
     checker_started: AtomicBool,
     media_attached: AtomicBool,
@@ -149,7 +151,7 @@ impl MediaHost for RealMedia {
 
 // --- Claude (MCP) bridge ---------------------------------------------------------------------------
 // Contract: docs/MCP.md of the reference. OFF by default: nothing listens and no `mcp.json` exists until
-// `set_mcp_enabled(true)`; the merge connects these methods to the persisted settings.
+// `set_mcp_enabled(true)`; `settings_set` and `apply_service_settings` (startup) drive these methods.
 
 /// Tool calls run against the backend's own library DB / engine; both gates are re-read on every call.
 struct RealDispatch(RealBackend);
@@ -163,9 +165,8 @@ impl sonix_core::mcp_bridge::Dispatch for RealDispatch {
             return Err("Claude (MCP) is turned off in SONIX settings.".into());
         }
         let me = b.session.lock().unwrap().cfg.as_ref().map(|c| c.username.clone());
-        // A fresh store per call: the smart-playlist file is the source of truth, so edits made elsewhere show up.
-        let smart = sonix_core::smartlists::SmartStore::new(&b.dir);
-        let ctx = tools::Ctx { db: &b.db, smart: &smart, player: &b.engine, me, allow_control: b.svc.mcp_allow_control.load(Ordering::Relaxed) };
+        // The backend's own store: smart-playlist edits from the UI and from MCP share one copy.
+        let ctx = tools::Ctx { db: &b.db, smart: &b.smart, player: &b.engine, me, allow_control: b.svc.mcp_allow_control.load(Ordering::Relaxed) };
         tools::call(&ctx, tool, args)
     }
 }
@@ -208,6 +209,29 @@ impl RealBackend {
             self.0.rt.block_on(s.mcp.stop(&self.0.dir));
         }
         self.mcp_status_impl()
+    }
+
+    /// Startup: applies the persisted service flags before anything else runs (reference `lib.rs` setup: the flags are
+    /// stored at once, the MCP listener starts 3 s later and only if still enabled, `spawn_if_enabled`).
+    pub(crate) fn apply_service_settings(&self, s: &sonix_core::secrets::Settings) {
+        self.set_auto_check_updates(s.auto_check_updates);
+        self.0.svc.mcp_allow_control.store(s.mcp_allow_control, Ordering::Relaxed);
+        if !s.mcp_enabled {
+            return;
+        }
+        self.0.svc.mcp_enabled.store(true, Ordering::Relaxed);
+        // Weak: a backend dropped within the delay (tests, early exit) starts nothing.
+        let weak = Arc::downgrade(&self.0);
+        std::thread::spawn(move || {
+            std::thread::sleep(MCP_START_DELAY);
+            let Some(inner) = weak.upgrade() else { return };
+            let b = RealBackend(inner);
+            if b.0.svc.mcp_enabled.load(Ordering::Relaxed)
+                && let Err(e) = b.set_mcp_enabled(true)
+            {
+                log::warn!("Claude (MCP) bridge not started: {}", e.message);
+            }
+        });
     }
 
     /// "Allow playback control" (default OFF, only meaningful while enabled). Read live on every tool call.

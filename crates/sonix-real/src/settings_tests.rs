@@ -187,6 +187,10 @@ fn defaults_are_off_and_every_field_roundtrips_and_persists() {
     for c in changes {
         b.settings_set(c).unwrap();
     }
+    // MCP is live, not just stored: the bridge listens in this test's config dir
+    let st = b.mcp_status().unwrap();
+    assert!(st.enabled && st.allow_control && st.listening, "{st:?}");
+    assert!(e.cfg().join("mcp.json").exists());
     let want = Settings {
         scrobbling_enabled: true,
         auto_check_updates: true,
@@ -220,8 +224,15 @@ fn defaults_are_off_and_every_field_roundtrips_and_persists() {
     let b2 = e.open();
     assert_eq!(b2.settings_get().unwrap(), want);
     assert!(b2.0.prefs.autoplay() && b2.0.prefs.sync_play_queue() && b2.0.scrobbling.load(Ordering::Relaxed));
-    assert!(!b2.mcp_status().unwrap().listening);
+    // saved-on MCP: flags at once, the listener only after the startup delay
+    let st = b2.mcp_status().unwrap();
+    assert!(st.enabled && st.allow_control && !st.listening, "{st:?}");
     assert!(b2.art_cache_status().is_ok());
+    drop(b2);
+    // turning it off stops the bridge (and drops its handle on the backend) and persists the flag
+    b.settings_set(SettingChange::McpEnabled(false)).unwrap();
+    assert!(!b.mcp_status().unwrap().listening && !e.cfg().join("mcp.json").exists());
+    assert!(!sonix_core::secrets::load_settings(&e.cfg()).mcp_enabled);
 }
 
 #[test]

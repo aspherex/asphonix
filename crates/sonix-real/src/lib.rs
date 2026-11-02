@@ -158,6 +158,11 @@ impl RealBackend {
             scrobbling,
             store,
         }));
+        // Persisted service flags first (all default OFF), before any background task or the reconnect starts.
+        {
+            let s = me.0.settings.lock().unwrap_or_else(|p| p.into_inner()).clone();
+            me.apply_service_settings(&s);
+        }
         sonix_core::scrobble::service::spawn(
             sonix_core::scrobble::service::ScrobbleCtx {
                 client: me.0.client.clone(),

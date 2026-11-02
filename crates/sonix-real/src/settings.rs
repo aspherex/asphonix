@@ -60,6 +60,11 @@ impl SettingsApi for RealBackend {
     }
 
     fn settings_set(&self, change: SettingChange) -> ApiResult<()> {
+        // Reference `settings_set_mcp_enabled`: start/stop first (no settings lock held: it blocks on the runtime);
+        // a failed start returns the error and persists nothing.
+        if let SettingChange::McpEnabled(on) = change {
+            self.set_mcp_enabled(on)?;
+        }
         let mut s = self.0.settings.lock().unwrap_or_else(|p| p.into_inner());
         apply_change(&mut s, &change)?;
         // Live effects, like the reference's settings_set_* commands.
@@ -76,13 +81,14 @@ impl SettingsApi for RealBackend {
                 }
             }
             SettingChange::PlayThreshold(_) => self.0.prefs.set_play_threshold_sec(s.play_threshold_sec),
-            // Stored only: the overlay/background-mode/updater/MCP services are not wired in the native app yet.
-            SettingChange::AutoCheckUpdates(_)
-            | SettingChange::TrackOverlay(_)
-            | SettingChange::TrackOverlayCorner(_)
-            | SettingChange::FreeMemoryWhenMinimized(_)
-            | SettingChange::McpEnabled(_)
-            | SettingChange::McpAllowControl(_) => {}
+            SettingChange::AutoCheckUpdates(_) => self.set_auto_check_updates(s.auto_check_updates),
+            SettingChange::McpAllowControl(_) => {
+                self.set_mcp_allow_control(s.mcp_allow_control)?;
+            }
+            // Applied above, before the lock.
+            SettingChange::McpEnabled(_) => {}
+            // Stored only: the overlay and background-mode services are not wired in the native app yet.
+            SettingChange::TrackOverlay(_) | SettingChange::TrackOverlayCorner(_) | SettingChange::FreeMemoryWhenMinimized(_) => {}
         }
         secrets::save_settings(&self.0.dir, &s).map_err(err)
     }
