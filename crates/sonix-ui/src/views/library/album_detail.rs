@@ -305,7 +305,7 @@ impl AlbumDetailView {
         let ctx = self.ctx.clone();
         let album_c = album.clone();
         // native-only: the loaded album's button shows the active state (outline, pause icon, click pauses / resumes)
-        let pst = self.ctx.player.read(cx).play_state(&crate::app::PlayTarget::Album(self.id.clone()));
+        let pst = self.ctx.player.read(cx).play_state(&crate::app::PlayTarget::Album { id: self.id.clone(), tracks: album.song_count });
         let fg = if pst.active() { th.accent_fg } else { th.accent_text };
         let play_btn = div()
             .id("album-play")

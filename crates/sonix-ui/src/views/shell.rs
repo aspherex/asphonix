@@ -76,6 +76,8 @@ pub struct Shell {
     last_vw: f32,
     spectrum_on: bool,
     pub(crate) suspended: bool,
+    /// ordering of the queue-source refreshes (a slow older answer never overwrites a newer one)
+    source_seq: u64,
     backdrop: Option<Arc<RenderImage>>,
     shown: bool,
     resumed_at: Option<Instant>,
@@ -183,6 +185,7 @@ impl Shell {
             last_vw: 1440.0,
             spectrum_on: false,
             suspended: false,
+            source_seq: 0,
             backdrop: None,
             shown: false,
             resumed_at: None,
@@ -328,12 +331,23 @@ impl Shell {
     /// The queue's source identity into the player model (`PlayerModel::source`: which play button is "playing").
     fn refresh_source(&mut self, cx: &mut Context<Self>) {
         let b = self.backend.clone();
+        self.source_seq += 1;
+        let seq = self.source_seq;
         cx.spawn(async move |this, cx| {
-            let q = cx.background_executor().spawn(async move { b.player_get_queue(sonix_api::PageRequest { offset: 0, limit: 1 }) }).await;
+            let q = cx.background_executor().spawn(async move { b.player_get_queue(sonix_api::PageRequest { offset: 0, limit: 100 }) }).await;
             if let Ok(q) = q {
                 let _ = this.update(cx, |sh, cx| {
+                    if seq != sh.source_seq {
+                        return; // a newer refresh is in flight / done
+                    }
                     let live = !sh.suspended;
-                    sh.player.update(cx, |p, cx| p.set_source(q.source, live, cx));
+                    // a static queue that is entirely one album (all rows loaded)
+                    let album = (q.source.is_none() && !q.items.is_empty() && q.items.len() == q.total)
+                        .then(|| q.items[0].track.album_id.clone())
+                        .flatten()
+                        .filter(|a| q.items.iter().all(|it| it.track.album_id.as_deref() == Some(a.as_str())))
+                        .map(|a| (a, q.total as u32));
+                    sh.player.update(cx, |p, cx| p.set_source(q.source, album, live, cx));
                 });
             }
         })

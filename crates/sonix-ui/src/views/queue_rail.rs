@@ -14,10 +14,16 @@ use crate::tracking::{BODY_LG, BODY_MD, BODY_SM, LABEL_CAPS, MONO_CODE, MONO_DAT
 use crate::widgets::context_menu::ContextMenu;
 use crate::widgets::{hard_shadow, icon};
 use crate::selection::Selection;
-use gpui::{Bounds, ClickEvent, Context, CursorStyle, DragMoveEvent, Entity, FocusHandle, Focusable, IntoElement, MouseDownEvent, Render, Subscription, Window, canvas, div, fill, point, prelude::*, px, size};
+use crate::rail_dnd::{self, Gap, Hit, RowBox};
+use std::cell::{Cell, RefCell};
+use std::collections::HashMap;
+use std::rc::Rc;
+use gpui::{Bounds, ClickEvent, Context, CursorStyle, DragMoveEvent, Entity, FocusHandle, Focusable, IntoElement, MouseDownEvent, Render, Subscription, Window, canvas, Pixels, Point, div, fill, point, prelude::*, px, size};
 use sonix_api::format as fmt;
 use sonix_api::*;
 use std::sync::Arc;
+
+type RowBounds = Rc<RefCell<HashMap<usize, (Bounds<Pixels>, bool)>>>;
 
 pub enum RailEvent {
     Navigate(crate::router::Route),
@@ -38,8 +44,17 @@ pub struct QueueRail {
     drag_dy: f32,
     /// the drag in flight over the rail (internal reorder or an external drop) and where it would land
     drag: Option<RailDrag>,
-    /// px height of the grey gap currently shown (hit-testing skips it)
-    gap_ph: f32,
+    /// play-order index of `state.items[0]` (the page is a window around the current row for long queues)
+    base: usize,
+    /// painted extents of the rows (abs index -> bounds, user-queued), the open gap, the deck / "Next in queue" section /
+    /// list: the web hit-tests with `elementFromPoint` + `data-qabs`, native with what the last frame painted
+    rows: RowBounds,
+    ph_bounds: Rc<Cell<Option<Bounds<Pixels>>>>,
+    deck_b: Rc<Cell<Bounds<Pixels>>>,
+    user_b: Rc<Cell<Bounds<Pixels>>>,
+    list_b: Rc<Cell<Bounds<Pixels>>>,
+    /// last pointer position of a reorder drag (the gap is re-located every frame while the list auto-scrolls)
+    drag_pos: Point<Pixels>,
     menu: Entity<ContextMenu>,
     /// multi-select over absolute queue indices (`QueueRail.svelte`: Ctrl/Shift click, remove acts on the selection)
     sel: Selection,
@@ -52,6 +67,8 @@ struct RowFlags {
     n: usize,
     active: bool,
     flow_rows: bool,
+    /// in the "Next in queue" run
+    user: bool,
 }
 
 /// Internal drag of a queue row (reorder). External drops use `crate::dnd::SonixDrag`.
@@ -60,12 +77,12 @@ struct QueueDrag {
     label: String,
 }
 /// What is being dragged over the rail. `moving` = absolute indices of an internal reorder (empty for an external drag);
-/// `gap` = insertion position in main-list rows (before row N, `QueueRail.svelte gapAt`); `ext` = the zone an external
+/// `gap` = insertion position (before play-order index N, `QueueRail.svelte gapAt`); `ext` = the zone an external
 /// drop would land in (`data-drop-next` regions = Play next, the main list = Add to queue).
 #[derive(Clone, Default)]
 struct RailDrag {
     moving: Vec<usize>,
-    gap: Option<usize>,
+    gap: Option<Gap>,
     ext: Option<EnqueuePosition>,
 }
 /// `.reorder-ghost`: accent chip, mono-code, bold, uppercase, max 240 px, hard shadow.
@@ -89,8 +106,21 @@ impl Render for QueueGhost {
 
 /// Native-only grey gap (a deliberate deviation from the web, which only shows the 2 px insertion line): a row-high
 /// `surface-high` placeholder opens at the insertion point, the 2 px `accent-fg` line (`.gap-before::before`) on its edge.
-fn gap_placeholder(th: &Theme, h: f32) -> gpui::AnyElement {
-    div().relative().flex_none().w_full().h(px(h)).bg(th.high).child(div().absolute().top_0().left_0().w_full().h(px(2.)).bg(th.accent_fg)).into_any_element()
+fn gap_placeholder(th: &Theme, h: f32, cell: Rc<Cell<Option<Bounds<Pixels>>>>) -> gpui::AnyElement {
+    div()
+        .relative()
+        .flex_none()
+        .w_full()
+        .h(px(h))
+        .bg(th.high)
+        .child(canvas(move |b, _, _| cell.set(Some(b)), |_, _, _, _| {}).absolute().top_0().left_0().size_full())
+        .child(div().absolute().top_0().left_0().w_full().h(px(2.)).bg(th.accent_fg))
+        .into_any_element()
+}
+
+/// Records where an element was painted (zone / row hit-testing of the drag and drop).
+fn bounds_probe(cell: Rc<Cell<Bounds<Pixels>>>) -> gpui::AnyElement {
+    canvas(move |b, _, _| cell.set(b), |_, _, _, _| {}).absolute().top_0().left_0().size_full().into_any_element()
 }
 
 /// `.rail.drop-next .deck / .user-queue, .rail.drop-end .queue-list { outline: 1px dashed accent-fg; outline-offset: -2px }`
@@ -101,7 +131,7 @@ fn drop_frame(th: &Theme) -> gpui::Div {
 impl QueueRail {
     pub fn new(backend: Arc<dyn Backend>, art: ArtHandle, player: &Entity<PlayerModel>, menu: &Entity<ContextMenu>, cx: &mut Context<Self>) -> Self {
         let sub = cx.subscribe(player, |this: &mut Self, _, _: &PlayerEvent, cx| this.refresh(cx));
-        let mut s = Self { backend, art, player: player.clone(), state: None, scroll: gpui::ScrollHandle::new(), scroll_key: None, menu: menu.clone(), focus: cx.focus_handle().tab_stop(true), drag_dy: 0.0, drag: None, gap_ph: 0.0, sel: Selection::default(), _sub: sub };
+        let mut s = Self { backend, art, player: player.clone(), state: None, scroll: gpui::ScrollHandle::new(), scroll_key: None, menu: menu.clone(), focus: cx.focus_handle().tab_stop(true), drag_dy: 0.0, drag: None, base: 0, rows: Default::default(), ph_bounds: Default::default(), deck_b: Default::default(), user_b: Default::default(), list_b: Default::default(), drag_pos: Point::default(), sel: Selection::default(), _sub: sub };
         s.refresh(cx);
         s
     }
@@ -109,9 +139,27 @@ impl QueueRail {
     pub fn refresh(&mut self, cx: &mut Context<Self>) {
         let b = self.backend.clone();
         cx.spawn(async move |this, cx| {
-            let q = cx.background_executor().spawn(async move { b.player_get_queue(PageRequest { offset: 0, limit: 100 }) }).await;
+            let q = cx
+                .background_executor()
+                .spawn(async move {
+                    const WINDOW: usize = 100;
+                    let q = b.player_get_queue(PageRequest { offset: 0, limit: WINDOW })?;
+                    // the page must carry the current row: a long static queue can have it far beyond the first page
+                    if q.total > WINDOW && q.current_index >= WINDOW as i64 - 10 {
+                        let base = (q.current_index as usize).saturating_sub(10).min(q.total - WINDOW);
+                        return Ok((base, b.player_get_queue(PageRequest { offset: base, limit: WINDOW })?));
+                    }
+                    Ok::<_, ApiError>((0usize, q))
+                })
+                .await;
             let _ = this.update(cx, |t, cx| {
-                t.state = q.ok();
+                match q {
+                    Ok((base, q)) => {
+                        t.base = base;
+                        t.state = Some(q);
+                    }
+                    Err(_) => t.state = None,
+                }
                 t.scroll_current_to_top(cx);
                 cx.notify();
             });
@@ -122,7 +170,7 @@ impl QueueRail {
     /// `QueueRail.svelte` (the `scrolledForTrack` effect): with a rolling source the queue keeps played history
     /// above the current track, so once per queue change (`pager.reset()` key: length, current track, shuffle)
     /// and only after the fetched page carries the current track, the current row goes to the top of the list
-    /// (`scrollIndexToTop`). The current index is before any user run, so its list position is the index itself.
+    /// (`scrollIndexToTop`). The current row's list position is its distance from the page start (user rows follow it).
     fn scroll_current_to_top(&mut self, cx: &mut Context<Self>) {
         let (cur_id, shuffle) = {
             let m = self.player.read(cx);
@@ -133,13 +181,14 @@ impl QueueRail {
             return;
         }
         let ci = q.current_index as usize;
-        if q.items.get(ci).map(|it| it.track.id.as_str()) != Some(id.as_str()) {
+        let Some(pos) = ci.checked_sub(self.base) else { return };
+        if q.items.get(pos).map(|it| it.track.id.as_str()) != Some(id.as_str()) {
             return; // stale index from before the refetch
         }
         let key = (q.total, id, shuffle);
         if self.scroll_key.as_ref() != Some(&key) {
             self.scroll_key = Some(key);
-            self.scroll.scroll_to_top_of_item(ci);
+            self.scroll.scroll_to_top_of_item(pos);
         }
     }
 
@@ -175,7 +224,10 @@ impl Render for QueueRail {
             if cx.has_active_drag() {
                 let off = self.scroll.offset();
                 let max = f32::from(self.scroll.max_offset().height);
-                self.scroll.set_offset(point(off.x, px((f32::from(off.y) - self.drag_dy).clamp(-max, 0.0))));
+                let new_y = (f32::from(off.y) - self.drag_dy).clamp(-max, 0.0);
+                self.scroll.set_offset(point(off.x, px(new_y)));
+                // the rows moved under the pointer: `startAutoScroll` re-runs `gapAt` every frame
+                self.locate(f32::from(off.y) - new_y);
                 window.request_animation_frame();
             } else {
                 self.drag_dy = 0.0;
@@ -184,6 +236,10 @@ impl Render for QueueRail {
         if self.drag.is_some() && !cx.has_active_drag() {
             self.drag = None; // dropped elsewhere / cancelled
         }
+        // painted extents are re-recorded by this frame
+        self.rows.borrow_mut().clear();
+        self.ph_bounds.set(None);
+        self.user_b.set(Bounds::default());
         let th: Theme = app::theme(cx);
         let (ps, frame) = {
             let m = self.player.read(cx);
@@ -252,26 +308,23 @@ impl Render for QueueRail {
             .flex_none()
             .border_b_1()
             .border_color(th.border)
-            // external drops on the deck = Play next (`data-drop-next`)
-            .on_drag_move::<crate::dnd::SonixDrag>(cx.listener(|this, ev: &DragMoveEvent<crate::dnd::SonixDrag>, _, cx| this.set_ext(EnqueuePosition::Next, ev.bounds.contains(&ev.event.position), cx)))
-            .on_drop(cx.listener(|this, d: &crate::dnd::SonixDrag, _, cx| {
-                this.drag = None;
-                this.drop_external(d.0.clone(), EnqueuePosition::Next, cx)
-            }))
             .when(ext_zone == Some(EnqueuePosition::Next), |d| d.child(drop_frame(&th)))
-            .child(header(&th, "rail.deckheader", "Live Transport Deck".into(), Some(format!("{total} QUEUED")))).child(deck_body);
+            .child(bounds_probe(self.deck_b.clone()))
+            .child(header(&th, "rail.deckheader", "Live Transport Deck".into(), Some(format!("{total} QUEUED"))))
+            .child(deck_body);
 
         // ---- queue sections: "Next in queue" (user-queued, always ahead) and "Next from <source>" (the rolling window)
+        let (ustart, ucount) = self.user_range();
+        let is_user = |i: usize| i >= ustart && i < ustart + ucount;
         let label = match q.as_ref().and_then(|q| q.source.as_ref()) {
             Some(s) => format!("Next from {}{}", s.label, match s.mode {
                 SourceMode::Shuffle => " · Shuffle".to_string(),
                 SourceMode::Flow => fmt::flow_mode_label(s.arc),
                 SourceMode::InOrder => String::new(),
             }),
-            None if q.as_ref().map(|q| q.items.iter().enumerate().any(|(i, it)| (i as i64) > cur && it.origin == QueueItemOrigin::User)).unwrap_or(false) => "Queue".to_string(),
+            None if ucount > 0 => "Queue".to_string(),
             None => "Next in buffer".to_string(),
         };
-        let is_user = |i: usize, it: &QueueItem| (i as i64) > cur && it.origin == QueueItemOrigin::User;
         let src_info = q.as_ref().and_then(|q| q.source.clone());
         let flow_rows = src_info.as_ref().map(|s| s.mode == SourceMode::Flow).unwrap_or(false);
         let flow_hint = match &src_info {
@@ -290,44 +343,53 @@ impl Render for QueueRail {
             let (bar, overflow) = crate::widgets::scrollbar::passive(th, &self.scroll);
             let mut list = div().id("queue-list").track_scroll(&self.scroll).size_full().overflow_y_scroll().flex().flex_col().when(overflow, |d| d.pr(px(tr::SCROLLBAR_W)));
             let mut user_rows = Vec::new();
-            // the grey gap: where the dragged row(s) / the external drop would land (main-list position)
-            let main_len = q.as_ref().map(|q| q.items.iter().enumerate().filter(|(i, it)| !is_user(*i, it)).count()).unwrap_or(0);
-            let has_user = q.as_ref().map(|q| q.items.iter().enumerate().any(|(i, it)| is_user(i, it))).unwrap_or(false);
+            // the grey gap (native-only): where the dragged row(s) / the external drop would really land
+            let base = self.base;
             let drag = self.drag.clone();
-            let gap_main = drag.as_ref().and_then(|d| match d.ext {
-                Some(EnqueuePosition::End) => Some(main_len),
-                Some(EnqueuePosition::Next) if !has_user => Some(((cur + 1).max(0) as usize).min(main_len)),
-                Some(EnqueuePosition::Next) => None,
+            let has_source = src_info.is_some();
+            let gap: Option<Gap> = drag.as_ref().and_then(|d| match d.ext {
+                Some(z) => Some(rail_dnd::external_gap(z == EnqueuePosition::Next, has_source, ustart, ucount, total)),
+                None if d.moving.is_empty() => None,
                 None => d.gap,
             });
-            let gap_user = has_user && drag.as_ref().is_some_and(|d| d.ext == Some(EnqueuePosition::Next));
+            let to_user = gap.is_some_and(|g| rail_dnd::in_user_section(g, ustart, ucount));
             let row_h = if flow_rows { 56.0 } else { 44.0 };
             // 120 ms ease: the gap opens, it does not pop (the web has no such gap; row transitions elsewhere are 100 ms)
-            let open = crate::anim::transition(window, ("qgap", 0), if gap_main.is_some() || gap_user { 1.0 } else { 0.0 }, 0.12);
-            self.gap_ph = if gap_main.is_some() { row_h * open } else { 0.0 };
+            let open = crate::anim::transition(window, ("qgap", 0), if gap.is_some() { 1.0 } else { 0.0 }, 0.12);
             let ph_h = row_h * open;
-            let mut main_pos = 0usize;
+            let (mut placed_u, mut placed_m) = (false, false);
             if let Some(q) = &q {
-                for (i, it) in q.items.iter().enumerate() {
+                for (k, it) in q.items.iter().enumerate() {
                     // `QueueRail.svelte`: the main list renders every index (played history above the current
                     // row included); `rail.row.$i` is `data-qabs`, the absolute queue index.
+                    let i = base + k;
                     let n = i;
-                    if is_user(i, it) {
-                        user_rows.push(self.queue_row(&th, it, i, RowFlags { n, active: false, flow_rows }, window, cx));
-                    } else {
-                        if gap_main == Some(main_pos) && ph_h > 0.0 {
-                            list = list.child(gap_placeholder(&th, ph_h));
+                    let user = is_user(i);
+                    if user {
+                        if to_user && !placed_u && gap.is_some_and(|g| g.at <= i) {
+                            placed_u = true;
+                            if ph_h > 0.0 {
+                                user_rows.push(gap_placeholder(&th, ph_h, self.ph_bounds.clone()));
+                            }
                         }
-                        main_pos += 1;
-                        list = list.child(self.queue_row(&th, it, i, RowFlags { n, active: (i as i64) == cur, flow_rows }, window, cx));
+                        user_rows.push(self.queue_row(&th, it, i, RowFlags { n, active: false, flow_rows, user: true }, window, cx));
+                    } else {
+                        if !to_user && !placed_m && gap.is_some_and(|g| i >= g.at) {
+                            placed_m = true;
+                            if ph_h > 0.0 {
+                                list = list.child(gap_placeholder(&th, ph_h, self.ph_bounds.clone()));
+                            }
+                        }
+                        list = list.child(self.queue_row(&th, it, i, RowFlags { n, active: (i as i64) == cur, flow_rows, user: false }, window, cx));
                     }
                 }
             }
-            if gap_main == Some(main_pos) && ph_h > 0.0 {
-                list = list.child(gap_placeholder(&th, ph_h));
-            }
-            if gap_user && ph_h > 0.0 {
-                user_rows.push(gap_placeholder(&th, ph_h));
+            if gap.is_some() && ph_h > 0.0 {
+                if to_user && !placed_u {
+                    user_rows.push(gap_placeholder(&th, ph_h, self.ph_bounds.clone()));
+                } else if !to_user && !placed_m {
+                    list = list.child(gap_placeholder(&th, ph_h, self.ph_bounds.clone()));
+                }
             }
             let footer = q.as_ref().and_then(|q| q.source.as_ref()).filter(|s| s.remaining > 0).map(|s| {
                 div()
@@ -346,15 +408,8 @@ impl Render for QueueRail {
                     .flex_col()
                     .border_b_1()
                     .border_color(th.border)
-                    // external drops on "Next in queue" = Play next (`data-drop-next`)
-                    .on_drag_move::<crate::dnd::SonixDrag>(cx.listener(|this, ev: &DragMoveEvent<crate::dnd::SonixDrag>, _, cx| this.set_ext(EnqueuePosition::Next, ev.bounds.contains(&ev.event.position), cx)))
-                    .on_drop(cx.listener(|this, d: &crate::dnd::SonixDrag, _, cx| {
-                        this.drag = None;
-                        this.drop_external(d.0.clone(), EnqueuePosition::Next, cx)
-                    }))
-                    // an internal row dropped here goes right after the playing row
-                    .on_drop(cx.listener(|this, _: &QueueDrag, _, cx| this.finish_reorder(Some(0), cx)))
                     .when(ext_zone == Some(EnqueuePosition::Next), |d| d.child(drop_frame(&th)))
+                    .child(bounds_probe(self.user_b.clone()))
                     .child(header(&th, "rail.user.header", "Next in queue".into(), None))
                     .children(user_rows)
             });
@@ -394,35 +449,8 @@ impl Render for QueueRail {
                                 this.open_menu(c, pos, window, cx);
                             }
                         }))
-                        // `startAutoScroll`: the list scrolls while a dragged row sits within 36 px of its top/bottom edge
-                        .on_drag_move::<crate::dnd::SonixDrag>(cx.listener(|this, ev: &DragMoveEvent<crate::dnd::SonixDrag>, _, cx| this.set_ext(EnqueuePosition::End, ev.bounds.contains(&ev.event.position), cx)))
-                        .on_drag_move::<QueueDrag>(cx.listener(|this, ev: &DragMoveEvent<QueueDrag>, _window, cx| {
-                            this.set_gap(ev.bounds.contains(&ev.event.position).then(|| f32::from(ev.event.position.y - ev.bounds.top())), cx);
-                            const EDGE: f32 = 36.0;
-                            let (y, top, bottom) = (f32::from(ev.event.position.y), f32::from(ev.bounds.top()), f32::from(ev.bounds.bottom()));
-                            let dy = if y < top + EDGE && y > top - EDGE {
-                                -((top + EDGE - y) / 4.0).ceil()
-                            } else if y > bottom - EDGE && y < bottom + EDGE {
-                                ((y - (bottom - EDGE)) / 4.0).ceil()
-                            } else {
-                                0.0
-                            };
-                            if dy != this.drag_dy {
-                                this.drag_dy = dy;
-                                // NOT window.request_animation_frame(): outside render/paint GPUI has no current view
-                                // and unwraps None (panic = abort: the crash at fault offset 0x65e1e5). notify()
-                                // re-renders, and render keeps requesting frames while drag_dy != 0.
-                                cx.notify();
-                            }
-                        }))
-                        // everywhere else on the rail = Add to queue
-                        .on_drop(cx.listener(|this, d: &crate::dnd::SonixDrag, _, cx| {
-                            this.drag = None;
-                            this.drop_external(d.0.clone(), EnqueuePosition::End, cx)
-                        }))
-                        // reorder: the row(s) land in the gap under the pointer (`onWindowPointerUp` -> `moveBlock`)
-                        .on_drop(cx.listener(|this, _: &QueueDrag, _, cx| this.finish_reorder(None, cx)))
                         .when(ext_zone == Some(EnqueuePosition::End), |d| d.child(drop_frame(&th)))
+                        .child(bounds_probe(self.list_b.clone()))
                         .child(list)
                         .child(bar)
                         .child(crate::widgets::smooth::drive(window, crate::widgets::smooth::Scrollable::div(std::ptr::addr_of!(self.scroll) as usize, &self.scroll))),
@@ -434,6 +462,13 @@ impl Render for QueueRail {
             "rail",
             div()
                 .w(px(layout::RAIL_W))
+                // one decision per pointer move, from the pointer position: deck / "Next in queue" = Play next
+                // (`data-drop-next`), anywhere else on the rail (header, flow hint, list, footer, empty state) = end
+                .on_drag_move::<crate::dnd::SonixDrag>(cx.listener(|this, ev: &DragMoveEvent<crate::dnd::SonixDrag>, _, cx| this.ext_move(ev.event.position, ev.bounds, cx)))
+                .on_drag_move::<QueueDrag>(cx.listener(|this, ev: &DragMoveEvent<QueueDrag>, _, cx| this.reorder_move(ev.event.position, cx)))
+                .on_drop(cx.listener(|this, d: &crate::dnd::SonixDrag, _, cx| this.drop_ext(d.0.clone(), cx)))
+                // reorder: the row(s) land in the gap under the pointer (`onWindowPointerUp` -> `moveBlock`)
+                .on_drop(cx.listener(|this, _: &QueueDrag, _, cx| this.finish_reorder(cx)))
                 .h_full()
                 .flex_none()
                 .flex()
@@ -471,7 +506,7 @@ impl QueueRail {
     /// One queue row (`QueueRail.svelte .row`): drag handle, title/artist, time, "more", remove. Click selects (Ctrl/Shift
     /// extend), double-click plays; rows are drag sources (reorder) and drop targets (reorder / add).
     fn queue_row(&mut self, th: &Theme, it: &QueueItem, i: usize, flags: RowFlags, window: &mut Window, cx: &mut Context<Self>) -> gpui::AnyElement {
-        let RowFlags { n, active, flow_rows } = flags;
+        let RowFlags { n, active, flow_rows, user } = flags;
         let th = *th;
         let t = &it.track;
         let selected = self.sel.contains(i);
@@ -501,6 +536,10 @@ impl QueueRail {
                 .group("qrow")
                 .when(active, |d| d.bg(th.mid))
                 .when(dim, |d| d.opacity(0.35)) // `.qrow.dragging { opacity: 0.35 }`
+                .child({
+                    let rows = self.rows.clone();
+                    canvas(move |b, _, _| { rows.borrow_mut().insert(i, (b, user)); }, |_, _, _, _| {}).absolute().top_0().left_0().size_full()
+                })
                 .child(icon("drag", 13., th.muted))
                 .child(
                     div()
@@ -585,76 +624,119 @@ impl QueueRail {
         .into_any_element()
     }
 
-    /// Rows of the main list as they are laid out (a Flow source's rows have a third line).
-    fn main_heights(&self) -> Vec<f32> {
-        let Some(q) = &self.state else { return Vec::new() };
-        let flow = q.source.as_ref().is_some_and(|s| s.mode == SourceMode::Flow);
-        let cur = q.current_index;
-        q.items.iter().enumerate().filter(|(i, it)| !((*i as i64) > cur && it.origin == QueueItemOrigin::User)).map(|(_, it)| if flow && it.origin != QueueItemOrigin::User { 56.0 } else { 44.0 }).collect()
+    /// The contiguous run of user-queued rows after the current one, as absolute `(start, count)`.
+    fn user_range(&self) -> (usize, usize) {
+        let Some(q) = &self.state else { return (0, 0) };
+        let origins: Vec<bool> = q.items.iter().map(|it| it.origin == QueueItemOrigin::User).collect();
+        rail_dnd::user_run(self.base, &origins, q.current_index)
     }
 
-    /// `onWindowPointerMove`: the gap under the pointer (`y` = distance from the list's top edge, `None` = outside it).
-    fn set_gap(&mut self, y: Option<f32>, cx: &mut Context<Self>) {
-        let Some(d) = self.drag.as_ref() else { return };
-        let cur_gap = d.gap;
-        let new = y.map(|y| {
-            let off = f32::from(self.scroll.offset().y);
-            crate::rail_dnd::gap_with_placeholder(y - off, &self.main_heights(), cur_gap, self.gap_ph)
-        });
-        if let Some(d) = self.drag.as_mut().filter(|d| d.gap != new) {
-            d.gap = new;
-            cx.notify();
-        }
+    /// The loaded item at play-order index `abs`.
+    fn item(&self, abs: usize) -> Option<&QueueItem> {
+        self.state.as_ref()?.items.get(abs.checked_sub(self.base)?)
     }
 
-    /// An external drag (tracks/albums/artists) entered / left a drop zone: next (deck + "Next in queue") or end (the list).
-    fn set_ext(&mut self, zone: EnqueuePosition, inside: bool, cx: &mut Context<Self>) {
-        let d = self.drag.get_or_insert_with(RailDrag::default);
-        if !d.moving.is_empty() {
-            return; // an internal reorder never shows a drop zone
-        }
-        let new = if inside { Some(zone) } else if d.ext == Some(zone) { None } else { d.ext };
-        if d.ext != new {
-            d.ext = new;
-            cx.notify();
-        }
+    /// Runs backend calls in order on the background executor, then refreshes (the web awaits each `reorderQueue` /
+    /// `removeFromQueue` before `pager.reset()`).
+    fn run_then_refresh(&mut self, cx: &mut Context<Self>, f: impl FnOnce(&dyn Backend) + Send + 'static) {
+        let b = self.backend.clone();
+        cx.spawn(async move |this, cx| {
+            cx.background_executor()
+                .spawn(async move {
+                    f(&*b);
+                })
+                .await;
+            let _ = this.update(cx, |t, cx| t.refresh(cx));
+        })
+        .detach();
     }
 
-    /// `onWindowPointerUp` -> `moveBlock`: moves the dragged row(s) into the gap (`abs_gap` = Some: the "Next in queue"
-    /// section, right after the playing row).
-    fn finish_reorder(&mut self, abs_gap: Option<usize>, cx: &mut Context<Self>) {
-        let Some(d) = self.drag.take() else { return };
-        let Some(q) = &self.state else { return };
-        if d.moving.is_empty() {
+    /// `onWindowPointerMove` of an internal reorder: remember the pointer, locate the gap, start / stop the edge auto-scroll.
+    fn reorder_move(&mut self, pos: Point<Pixels>, cx: &mut Context<Self>) {
+        if self.drag.as_ref().is_none_or(|d| d.moving.is_empty()) {
             return;
         }
-        let user_start = (q.current_index + 1).max(0) as usize;
-        let user_count = q.items.len() - self.main_heights().len();
-        let gap = match (abs_gap, d.gap) {
-            (Some(_), _) => user_start,
-            (None, Some(g)) => {
-                if g < user_start {
-                    g
-                } else {
-                    g + user_count
-                }
-            }
-            (None, None) => return,
+        self.drag_pos = pos;
+        self.locate(0.0);
+        const EDGE: f32 = 36.0;
+        let lb = self.list_b.get();
+        let (y, top, bottom) = (f32::from(pos.y), f32::from(lb.top()), f32::from(lb.bottom()));
+        let dy = if y < top + EDGE && y > top - EDGE {
+            -((top + EDGE - y) / 4.0).ceil()
+        } else if y > bottom - EDGE && y < bottom + EDGE {
+            ((y - (bottom - EDGE)) / 4.0).ceil()
+        } else {
+            0.0
         };
+        self.drag_dy = dy; // NOT window.request_animation_frame() here (no current view outside render/paint); render keeps requesting frames while drag_dy != 0
+        cx.notify();
+    }
+
+    /// `gapAt` over what the last frame painted: the row under the pointer (`shift` = how far the list scrolled since),
+    /// else the list's / the section's background (end of the queue / front of "Next in queue").
+    fn locate(&mut self, shift: f32) {
+        let pos = self.drag_pos;
+        let (in_list, in_user) = (self.list_b.get().contains(&pos), self.user_b.get().contains(&pos));
+        let mut rows: Vec<RowBox> = self
+            .rows
+            .borrow()
+            .iter()
+            .filter(|(_, (_, user))| if *user { in_user } else { in_list })
+            .map(|(abs, (b, user))| RowBox { abs: *abs, top: f32::from(b.top()), bottom: f32::from(b.bottom()), user: *user })
+            .collect();
+        rows.sort_by(|a, b| a.top.total_cmp(&b.top));
+        let ph = self.ph_bounds.get().filter(|_| in_list || in_user).map(|b| (f32::from(b.top()), f32::from(b.bottom())));
+        let new = match rail_dnd::hit(f32::from(pos.y) + shift, &rows, ph) {
+            Some(Hit::Keep) => return,
+            Some(Hit::Gap(g)) => Some(g),
+            None if in_list => self.state.as_ref().filter(|q| self.base + q.items.len() >= q.total).map(|q| Gap { at: q.total, user: false }),
+            None if in_user => Some(Gap { at: self.user_range().0, user: true }),
+            None => None,
+        };
+        if let Some(d) = self.drag.as_mut() {
+            d.gap = new;
+        }
+    }
+
+    /// An external drag (tracks/albums/artists) moved over the rail: the zone is decided once, from the pointer.
+    fn ext_move(&mut self, pos: Point<Pixels>, rail: Bounds<Pixels>, cx: &mut Context<Self>) {
+        let zone = if !rail.contains(&pos) {
+            None
+        } else if self.deck_b.get().contains(&pos) || self.user_b.get().contains(&pos) {
+            Some(EnqueuePosition::Next)
+        } else {
+            Some(EnqueuePosition::End)
+        };
+        let d = self.drag.get_or_insert_with(RailDrag::default);
+        if d.moving.is_empty() && d.ext != zone {
+            d.ext = zone;
+            cx.notify();
+        }
+    }
+
+    /// Drop of an external payload: where the zone shown at the last move says.
+    fn drop_ext(&mut self, payload: crate::dnd::DragPayload, cx: &mut Context<Self>) {
+        let zone = self.drag.take().and_then(|d| d.ext).unwrap_or(EnqueuePosition::End);
+        self.drop_external(payload, zone, cx);
+    }
+
+    /// `onWindowPointerUp` -> `moveBlock`: moves the dragged row(s) into the gap.
+    fn finish_reorder(&mut self, cx: &mut Context<Self>) {
+        let Some(d) = self.drag.take() else { return };
+        let (Some(q), Some(g)) = (&self.state, d.gap) else { return };
         let mut moving = d.moving;
         moving.sort_unstable();
         moving.dedup();
-        if crate::rail_dnd::is_noop(&moving, gap) {
+        if moving.is_empty() || rail_dnd::is_noop(&moving, g.at) {
             return;
         }
-        let ops = crate::rail_dnd::move_block(q.total, &moving, gap);
+        let ops = rail_dnd::move_block(q.total, &moving, g.at);
         self.sel.clear();
-        app::call(cx, move |b| {
+        self.run_then_refresh(cx, move |b| {
             for (from, to) in ops {
                 let _ = b.player_reorder_queue(from, to);
             }
         });
-        self.refresh(cx);
         cx.notify();
     }
 
@@ -662,19 +744,17 @@ impl QueueRail {
         ix.sort_unstable();
         ix.dedup();
         self.sel.clear();
-        app::call(cx, move |b| {
+        self.run_then_refresh(cx, move |b| {
             for i in ix.into_iter().rev() {
                 let _ = b.player_remove_from_queue(i);
             }
         });
-        self.refresh(cx);
     }
 
     /// Context menu of a queue row / the selection it belongs to (`QueueRail.svelte buildQueueRowMenu` -> `trackMenuItems`).
     fn open_menu(&mut self, i: usize, pos: gpui::Point<gpui::Pixels>, window: &mut Window, cx: &mut Context<Self>) {
         let ix = self.sel.for_context_menu(i);
-        let Some(q) = &self.state else { return };
-        let tracks: Vec<Track> = ix.iter().filter_map(|k| q.items.get(*k).map(|it| it.track.clone())).collect();
+        let tracks: Vec<Track> = ix.iter().filter_map(|k| self.item(*k).map(|it| it.track.clone())).collect();
         if tracks.is_empty() {
             return;
         }
@@ -699,13 +779,12 @@ impl QueueRail {
                         let mut idx = ix;
                         idx.sort_unstable();
                         idx.dedup();
-                        app::call(cx, move |b| {
+                        t.run_then_refresh(cx, move |b| {
                             for i in idx.iter().rev() {
                                 let _ = b.player_remove_from_queue(*i);
                             }
                             let _ = b.player_enqueue(EnqueueRequest { track_ids: ids, position: EnqueuePosition::Next });
                         });
-                        t.refresh(cx);
                     });
                 }
             })),
@@ -764,8 +843,8 @@ impl QueueRail {
     /// Absolute indices of the main list's rows (current track onwards, minus the "Next in queue" section).
     fn main_indices(&self) -> Vec<usize> {
         let Some(q) = &self.state else { return Vec::new() };
-        let cur = q.current_index;
-        q.items.iter().enumerate().filter(|(i, it)| !((*i as i64) > cur && it.origin == QueueItemOrigin::User)).map(|(i, _)| i).collect()
+        let (us, uc) = self.user_range();
+        (0..q.items.len()).map(|k| self.base + k).filter(|i| !(*i >= us && *i < us + uc)).collect()
     }
 
     /// `trackListKeydown`: Up/Down move a single selection (clamped), scrolling it into view.

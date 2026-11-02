@@ -553,8 +553,8 @@ fn rolling_sources_start_at_the_clicked_row_and_static_queues_keep_the_earlier_r
     let ids = |q: &QueueState| q.items.iter().map(|i| i.track.id.as_str().to_owned()).collect::<Vec<_>>();
     // the engine may start (silent) playback and advance; the rows it holds, history included, do not change.
     let playing = |b: &RealBackend| b.player_get_state().map(|s| s.status == PlaybackStatus::Playing).unwrap_or(false);
-    let mut rx = b.subscribe();
-    let mut queue_events = || std::iter::from_fn(|| rx.try_recv().ok()).filter(|e| matches!(e, Event::QueueChanged)).count();
+    let rx = b.subscribe();
+    let queue_events = || std::iter::from_fn(|| rx.try_recv().ok()).filter(|e| matches!(e, Event::QueueChanged)).count();
 
     // playlist, in order, from row 3: the pool continues from t3 (no earlier rows)
     b.player_play_playlist(PlaySourceRequest { id: "pl1".into(), start_track_id: Some("t3".into()), ..Default::default() }).unwrap();

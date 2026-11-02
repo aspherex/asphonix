@@ -130,7 +130,7 @@ pub fn card<V: 'static>(
         art = art.child(div().absolute().top(px(m::CARD_STAR_INSET)).right(px(m::CARD_STAR_INSET)).child(icon("star-filled", m::CARD_STAR_ICON, th.accent_fg)));
     }
     // native-only (not in the web): the play overlay of the source that is loaded shows the active state (outline, pause icon, always visible)
-    let target = if is_album { crate::app::PlayTarget::Album(id.clone()) } else { crate::app::PlayTarget::Artist(id.clone()) };
+    let target = if let CardItem::Album(a) = &item { crate::app::PlayTarget::Album { id: id.clone(), tracks: a.song_count } } else { crate::app::PlayTarget::Artist(id.clone()) };
     let pst = ctx.player.read(cx).play_state(&target);
     let t_play = if pst.active() { 1.0 } else { t };
     let sh = m::CARD_OVERLAY_SHIFT * (1.0 - t_play);
