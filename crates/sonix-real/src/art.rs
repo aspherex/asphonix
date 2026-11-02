@@ -10,9 +10,11 @@ use sonix_api::*;
 use sonix_core::library;
 use sonix_core::subsonic::Client;
 use std::collections::hash_map::DefaultHasher;
+use std::collections::HashMap;
 use std::hash::{Hash, Hasher};
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
+use std::sync::{Arc, Condvar, Mutex, OnceLock};
 
 /// Hard gutter color between tiles (`--color-surface-base` / `#0A0A0C`).
 const GUTTER: [u8; 3] = [0x0A, 0x0A, 0x0C];
@@ -190,6 +192,15 @@ fn read_cached(path: &Path) -> Option<DynamicImage> {
     }
 }
 
+/// Raw bytes of a cache file (recency bumped); no decode.
+fn read_bytes_touch(path: &Path) -> Option<Vec<u8>> {
+    let bytes = std::fs::read(path).ok().filter(|b| !b.is_empty())?;
+    if let Ok(f) = std::fs::OpenOptions::new().write(true).open(path) {
+        let _ = f.set_modified(std::time::SystemTime::now());
+    }
+    Some(bytes)
+}
+
 /// Encoded bytes of a cache hit (SMTC thumbnail), bumping its recency like [`read_cached`]; junk is deleted.
 pub(crate) fn read_cached_bytes(path: &Path) -> Option<Vec<u8>> {
     let bytes = std::fs::read(path).ok().filter(|b| !b.is_empty())?;
@@ -225,28 +236,260 @@ fn not_found(msg: String) -> ApiError {
     ApiError::new(ErrorCode::NotFound, msg)
 }
 
+/// The only size ever requested from the server (`art/sizes.rs` `MASTER_SIZE`): every smaller bucket is derived from
+/// these bytes locally, so one cover costs one network round trip no matter how many sizes the UI asks for.
+pub(crate) const MASTER_SIZE: u32 = 640;
+/// Concurrent foreground `getCoverArt` fetches (`art/mod.rs` `MAX_CONCURRENT_FETCHES`).
+const MAX_CONCURRENT_FETCHES: usize = 4;
+/// Background prefetch budget, separate so it never queues a foreground request (`prefetch.rs` `PREFETCH_CONCURRENCY`).
+const PREFETCH_CONCURRENCY: usize = 2;
+const PREFETCH_START_DELAY: std::time::Duration = std::time::Duration::from_secs(5);
+const PREFETCH_PAUSE_POLL: std::time::Duration = std::time::Duration::from_millis(500);
+/// JPEG quality of a derived bucket (`art/resize.rs` `DERIVED_JPEG_QUALITY`).
+const DERIVED_JPEG_QUALITY: u8 = 85;
+
+/// Counting semaphore for the blocking `art_get` callers.
+struct Gate {
+    free: Mutex<usize>,
+    cv: Condvar,
+}
+
+struct Permit<'a>(&'a Gate);
+
+impl Gate {
+    const fn new(n: usize) -> Self {
+        Self { free: Mutex::new(n), cv: Condvar::new() }
+    }
+    fn acquire(&self) -> Permit<'_> {
+        let mut free = self.free.lock().unwrap_or_else(|p| p.into_inner());
+        while *free == 0 {
+            free = self.cv.wait(free).unwrap_or_else(|p| p.into_inner());
+        }
+        *free -= 1;
+        Permit(self)
+    }
+}
+
+impl Drop for Permit<'_> {
+    fn drop(&mut self) {
+        *self.0.free.lock().unwrap_or_else(|p| p.into_inner()) += 1;
+        self.0.cv.notify_one();
+    }
+}
+
+static FETCH_GATE: Gate = Gate::new(MAX_CONCURRENT_FETCHES);
+static BACKGROUND_GATE: Gate = Gate::new(PREFETCH_CONCURRENCY);
+/// `art_get` calls currently missing the disk cache; the prefetcher pauses while nonzero (`foreground_inflight`).
+static FOREGROUND_INFLIGHT: AtomicUsize = AtomicUsize::new(0);
+static PREFETCHING: AtomicBool = AtomicBool::new(false);
+
+/// Collapses concurrent identical work into one execution (`art/singleflight.rs`): the first caller (leader) runs the
+/// closure, everyone arriving while it runs waits for and clones its result. Keyed by cache file path.
+struct SingleFlight<V> {
+    inflight: Mutex<HashMap<PathBuf, Arc<Slot<V>>>>,
+}
+
+struct Slot<V> {
+    value: Mutex<Option<V>>,
+    cv: Condvar,
+}
+
+impl<V: Clone + FromErr> SingleFlight<V> {
+    fn new() -> Self {
+        Self { inflight: Mutex::new(HashMap::new()) }
+    }
+
+    fn run(&self, key: &Path, work: impl FnOnce() -> V) -> V {
+        let (slot, leader) = {
+            let mut map = self.inflight.lock().unwrap_or_else(|p| p.into_inner());
+            match map.get(key) {
+                Some(s) => (s.clone(), false),
+                None => {
+                    let s = Arc::new(Slot { value: Mutex::new(None), cv: Condvar::new() });
+                    map.insert(key.to_path_buf(), s.clone());
+                    (s, true)
+                }
+            }
+        };
+        if leader {
+            // Removes the entry and wakes the waiters even if `work` panics.
+            struct Done<'a, V>(&'a SingleFlight<V>, &'a Path, &'a Slot<V>);
+            impl<V> Drop for Done<'_, V> {
+                fn drop(&mut self) {
+                    self.0.inflight.lock().unwrap_or_else(|p| p.into_inner()).remove(self.1);
+                    self.2.cv.notify_all();
+                }
+            }
+            let _done = Done(self, key, &slot);
+            let v = work();
+            *slot.value.lock().unwrap_or_else(|p| p.into_inner()) = Some(v.clone());
+            v
+        } else {
+            let mut g = slot.value.lock().unwrap_or_else(|p| p.into_inner());
+            loop {
+                if let Some(v) = g.as_ref() {
+                    return v.clone();
+                }
+                if Arc::strong_count(&slot) == 1 {
+                    // the leader panicked without a value: do not hang
+                    return V::from_err(ApiError::new(ErrorCode::Unknown, "art fetch aborted"));
+                }
+                g = slot.cv.wait_timeout(g, std::time::Duration::from_millis(200)).unwrap_or_else(|p| p.into_inner()).0;
+            }
+        }
+    }
+}
+
+trait FromErr {
+    fn from_err(e: ApiError) -> Self;
+}
+
+impl<T> FromErr for ApiResult<T> {
+    fn from_err(e: ApiError) -> Self {
+        Err(e)
+    }
+}
+
+type ImageFlight = SingleFlight<ApiResult<Arc<DynamicImage>>>;
+type BytesFlight = SingleFlight<ApiResult<Arc<Vec<u8>>>>;
+
+fn image_flight() -> &'static ImageFlight {
+    static F: OnceLock<ImageFlight> = OnceLock::new();
+    F.get_or_init(SingleFlight::new)
+}
+
+fn master_flight() -> &'static BytesFlight {
+    static F: OnceLock<BytesFlight> = OnceLock::new();
+    F.get_or_init(SingleFlight::new)
+}
+
+/// Downscale `img` to fit `target x target` keeping the aspect ratio; never upscales (`art/resize.rs`).
+fn downscale(img: &DynamicImage, target: u32) -> DynamicImage {
+    let (w, h) = img.dimensions();
+    if w <= target && h <= target {
+        return img.clone();
+    }
+    let filter = if target <= 64 { imageops::FilterType::Triangle } else { imageops::FilterType::CatmullRom };
+    let scale = f64::from(target) / f64::from(w.max(h));
+    let nw = ((f64::from(w) * scale).round() as u32).max(1);
+    let nh = ((f64::from(h) * scale).round() as u32).max(1);
+    img.resize_exact(nw, nh, filter)
+}
+
+fn encode_jpeg(img: &DynamicImage) -> Option<Vec<u8>> {
+    let mut out = Vec::new();
+    let enc = image::codecs::jpeg::JpegEncoder::new_with_quality(&mut out, DERIVED_JPEG_QUALITY);
+    img.to_rgb8().write_with_encoder(enc).ok()?;
+    Some(out)
+}
+
+fn looks_like_image(b: &[u8]) -> bool {
+    b.starts_with(&[0xFF, 0xD8]) || b.starts_with(&[0x89, b'P', b'N', b'G'])
+}
+
+/// Counts `art_get` calls that are past the disk cache (what the prefetcher yields to).
+struct ForegroundGuard;
+
+impl ForegroundGuard {
+    fn new() -> Self {
+        FOREGROUND_INFLIGHT.fetch_add(1, Ordering::AcqRel);
+        Self
+    }
+}
+
+impl Drop for ForegroundGuard {
+    fn drop(&mut self) {
+        FOREGROUND_INFLIGHT.fetch_sub(1, Ordering::AcqRel);
+    }
+}
+
 impl RealBackend {
     fn current_client(&self) -> Option<Client> {
         self.0.client.read().unwrap_or_else(|p| p.into_inner()).clone()
     }
 
-    /// Cover at `size`: disk cache first, else `getCoverArt?size=` (the server resizes). Bytes are stored as received,
-    /// but only once they decode.
-    fn cover_image(&self, cover_art: &str, size: u32) -> ApiResult<DynamicImage> {
+    /// `getCoverArt?size=` of one id through the concurrency gate (blocking); the body must look like an image.
+    fn fetch_from_server(&self, cover_art: &str, size: u32, gate: &'static Gate) -> ApiResult<Vec<u8>> {
+        let client = self.current_client().ok_or_else(|| ApiError::new(ErrorCode::NotConnected, "not connected"))?;
+        let _permit = gate.acquire();
+        let (b, _) = self.0.rt.block_on(client.get_cover_art(cover_art, Some(size))).map_err(err)?;
+        if !looks_like_image(&b) {
+            return Err(not_found(format!("cover art {cover_art}: server returned a non-image payload")));
+        }
+        Ok(b)
+    }
+
+    /// Bytes of the cached master (`<id>_640.img`), fetching it once (single-flight, gated) on a miss.
+    fn master_bytes(&self, cover_art: &str, gate: &'static Gate) -> ApiResult<Arc<Vec<u8>>> {
+        let path = cache_path(&self.art_dir(), cover_art, MASTER_SIZE);
+        if let Some(b) = read_bytes_touch(&path) {
+            return Ok(Arc::new(b));
+        }
+        master_flight().run(&path, || {
+            // a flight that finished just before this one started has filled the disk cache
+            if let Some(b) = read_bytes_touch(&path) {
+                return Ok(Arc::new(b));
+            }
+            let b = self.fetch_from_server(cover_art, MASTER_SIZE, gate)?;
+            store(&path, &b);
+            Ok(Arc::new(b))
+        })
+    }
+
+    /// Decoded master plus its bytes; a master that does not decode is deleted and reported as `Decode`.
+    fn master_image(&self, cover_art: &str) -> ApiResult<(Arc<DynamicImage>, Arc<Vec<u8>>)> {
+        let bytes = self.master_bytes(cover_art, &FETCH_GATE)?;
+        match decode_limited(&bytes) {
+            Ok(img) => Ok((Arc::new(img), bytes)),
+            Err(e) => {
+                let _ = std::fs::remove_file(cache_path(&self.art_dir(), cover_art, MASTER_SIZE));
+                Err(ApiError::new(ErrorCode::Decode, format!("cover decode: {e}")))
+            }
+        }
+    }
+
+    /// Cover at `size`: bucket file on disk, else derived from the (once fetched) 640 master, else - when the master
+    /// is not a decodable jpeg/png - fetched at exactly `size` like the reference's odd-format fallback.
+    fn cover_image(&self, cover_art: &str, size: u32) -> ApiResult<Arc<DynamicImage>> {
         let path = cache_path(&self.art_dir(), cover_art, size);
         if let Some(img) = read_cached(&path) {
-            return Ok(img);
+            return Ok(Arc::new(img));
         }
-        let client = self.current_client().ok_or_else(|| ApiError::new(ErrorCode::NotConnected, "not connected"))?;
-        let (b, _) = self.0.rt.block_on(client.get_cover_art(cover_art, Some(size))).map_err(err)?;
-        let img = decode_limited(&b).map_err(|e| ApiError::new(ErrorCode::Decode, format!("cover decode: {e}")))?;
-        store(&path, &b);
-        Ok(img)
+        let _fg = ForegroundGuard::new();
+        if size >= MASTER_SIZE {
+            return self.master_image(cover_art).map(|(img, _)| img);
+        }
+        image_flight().run(&path, || {
+            if let Some(img) = read_cached(&path) {
+                return Ok(Arc::new(img));
+            }
+            match self.master_image(cover_art) {
+                Ok((master, bytes)) => {
+                    let (w, h) = master.dimensions();
+                    if w <= size && h <= size {
+                        store(&path, &bytes);
+                        return Ok(master);
+                    }
+                    let small = downscale(&master, size);
+                    if let Some(enc) = encode_jpeg(&small) {
+                        store(&path, &enc);
+                    }
+                    Ok(Arc::new(small))
+                }
+                Err(e) if e.code == ErrorCode::Decode => {
+                    let b = self.fetch_from_server(cover_art, size, &FETCH_GATE)?;
+                    let img = decode_limited(&b).map_err(|e| ApiError::new(ErrorCode::Decode, format!("cover decode: {e}")))?;
+                    store(&path, &b);
+                    Ok(Arc::new(img))
+                }
+                Err(e) => Err(e),
+            }
+        })
     }
 
     /// Mosaic of a playlist's first distinct covers, cached (JPEG) under a key that includes a hash of the source
     /// cover ids (so it invalidates when the leading covers change). A partial mosaic (some cover failed) is served
-    /// but not cached.
+    /// but not cached. The tiles load in parallel (each through the shared gate / single-flight).
     fn mosaic_image(&self, playlist_id: &str, size: u32) -> ApiResult<DynamicImage> {
         let covers = library::get_playlist_distinct_covers(&self.0.db, playlist_id, MOSAIC_TILES).map_err(err)?;
         if covers.is_empty() {
@@ -257,10 +500,14 @@ impl RealBackend {
         if let Some(img) = read_cached(&path) {
             return Ok(img);
         }
+        let loaded: Vec<ApiResult<Arc<DynamicImage>>> = std::thread::scope(|s| {
+            let hs: Vec<_> = covers.iter().map(|c| s.spawn(move || self.cover_image(c, size))).collect();
+            hs.into_iter().map(|h| h.join().unwrap_or_else(|_| Err(ApiError::new(ErrorCode::Unknown, "mosaic tile panicked")))).collect()
+        });
         let mut tiles: Vec<DynamicImage> = Vec::with_capacity(covers.len());
-        for cover in &covers {
-            match self.cover_image(cover, size) {
-                Ok(img) => tiles.push(img),
+        for (cover, r) in covers.iter().zip(loaded) {
+            match r {
+                Ok(img) => tiles.push((*img).clone()),
                 Err(e) => log::debug!("mosaic: cover {cover} unavailable: {}", e.message),
             }
         }
@@ -282,16 +529,69 @@ impl RealBackend {
     /// playlist mosaic, anything else a real cover.
     pub(crate) fn art_pixels(&self, cover_art: &str, size: u32) -> ApiResult<ArtPixels> {
         let size = bucket_for(size);
-        let img = if let Some(pid) = cover_art.strip_prefix(MOSAIC_PREFIX) {
-            self.mosaic_image(pid.split('?').next().unwrap_or(pid), size)?
+        let img: Arc<DynamicImage> = if let Some(pid) = cover_art.strip_prefix(MOSAIC_PREFIX) {
+            Arc::new(self.mosaic_image(pid.split('?').next().unwrap_or(pid), size)?)
         } else {
             self.cover_image(cover_art, size)?
         };
-        let img = if img.width() > size.max(img.height()) || img.height() > size { img.resize(size, size, imageops::FilterType::Triangle) } else { img };
-        let rgba = img.to_rgba8();
+        let rgba = if img.width() > size || img.height() > size { img.resize(size, size, imageops::FilterType::Triangle).to_rgba8() } else { img.to_rgba8() };
         Ok(ArtPixels { width: rgba.width(), height: rgba.height(), rgba: rgba.into_raw() })
     }
+
+    /// Reference `Prefetcher`: after a sync, fetch the missing 640 masters of every album/artist cover in the
+    /// background (2 at a time, paused while a foreground request runs), so grids open from disk. Idempotent: ids that
+    /// already hold a master are skipped, and only one pass runs at a time.
+    pub(crate) fn schedule_art_prefetch(&self, epoch: u64) {
+        let me = self.clone();
+        std::thread::spawn(move || {
+            std::thread::sleep(PREFETCH_START_DELAY);
+            let Ok(ids) = me.0.db.list_art_ids() else { return };
+            me.art_prefetch_pass(&ids, epoch);
+        });
+    }
+
+    /// One prefetch pass over `ids`; returns how many masters it fetched.
+    pub(crate) fn art_prefetch_pass(&self, ids: &[String], epoch: u64) -> usize {
+        if PREFETCHING.swap(true, Ordering::AcqRel) {
+            return 0;
+        }
+        struct Reset;
+        impl Drop for Reset {
+            fn drop(&mut self) {
+                PREFETCHING.store(false, Ordering::Release);
+            }
+        }
+        let _reset = Reset;
+        let dir = self.art_dir();
+        let missing: Vec<&String> = ids.iter().filter(|id| !cache_path(&dir, id, MASTER_SIZE).exists()).collect();
+        let next = AtomicUsize::new(0);
+        let done = AtomicUsize::new(0);
+        std::thread::scope(|s| {
+            for _ in 0..PREFETCH_CONCURRENCY {
+                s.spawn(|| {
+                    loop {
+                        let i = next.fetch_add(1, Ordering::Relaxed);
+                        let Some(id) = missing.get(i) else { break };
+                        // foreground requests always win
+                        while FOREGROUND_INFLIGHT.load(Ordering::Acquire) > 0 && self.0.epoch.load(Ordering::SeqCst) == epoch {
+                            std::thread::sleep(PREFETCH_PAUSE_POLL);
+                        }
+                        if self.0.epoch.load(Ordering::SeqCst) != epoch {
+                            break;
+                        }
+                        if self.master_bytes(id, &BACKGROUND_GATE).is_ok() {
+                            done.fetch_add(1, Ordering::Relaxed);
+                        }
+                    }
+                });
+            }
+        });
+        done.load(Ordering::Relaxed)
+    }
 }
+
+#[cfg(test)]
+mod perf_tests;
 
 #[cfg(test)]
 mod tests {

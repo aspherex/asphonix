@@ -267,6 +267,9 @@ impl RealBackend {
                 st.track_count = me.0.db.track_count().ok();
             }
             me.emit(Event::LibraryChanged);
+            if res.is_ok() {
+                me.schedule_art_prefetch(epoch);
+            }
         });
     }
 
