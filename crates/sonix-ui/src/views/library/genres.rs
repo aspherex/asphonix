@@ -28,7 +28,7 @@ pub struct GenresView {
 
 impl GenresView {
     pub fn new(ctx: Ctx, cx: &mut Context<Self>) -> Self {
-        let mut this = Self { ctx, sort: GenreSort::Tracks, items: Vec::new(), loaded: false, error: false, seq: 0, page: PageScroll::new(), w: Rc::new(Cell::new(0.0)) };
+        let mut this = Self { ctx, sort: GenreSort::Tracks, items: Vec::new(), loaded: false, error: false, seq: 0, page: PageScroll::new(), w: Rc::new(Cell::new(super::parts::initial_width("genres"))) };
         this.load(cx);
         this
     }
@@ -134,7 +134,7 @@ impl Render for GenresView {
             }
             grid.into_any_element()
         };
-        let page = div().relative().w_full().flex_none().flex().flex_col().gap(px(m::PAGE_GAP)).p(px(m::PAGE_PAD)).child(measure(&self.w)).child(pid("lib.header", header)).child(pid("genres.body", body));
+        let page = div().relative().w_full().flex_none().flex().flex_col().gap(px(m::PAGE_GAP)).p(px(m::PAGE_PAD)).child(super::parts::measure_keyed("genres", &self.w)).child(pid("lib.header", header)).child(pid("genres.body", body));
         self.page.wrap(window, &th, "genres-scroll", pid("page", page))
     }
 }

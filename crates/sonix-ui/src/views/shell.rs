@@ -577,6 +577,14 @@ impl Focusable for Shell {
     }
 }
 
+/// Keeps `library::parts` told the stage width, so views created on navigation start at their real width.
+fn stage_probe() -> gpui::AnyElement {
+    gpui::canvas(|b, _, _| super::library::parts::set_stage_width(f32::from(b.size.width)), |_, _, _, _| {})
+        .absolute()
+        .size_full()
+        .into_any_element()
+}
+
 impl Render for Shell {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let th = self.th;
@@ -632,7 +640,7 @@ impl Render for Shell {
             .min_h_0()
             .relative()
             .children((!is_login).then_some(side))
-            .child(crate::probe::pid(stage_id, div().flex_1().min_w_0().h_full().overflow_hidden().child(stage)))
+            .child(crate::probe::pid(stage_id, div().flex_1().min_w_0().h_full().overflow_hidden().relative().child(stage_probe()).child(stage)))
             .when(docked, |d| d.child(self.queue.clone()))
             .when(!docked && !on_np && self.queue_drawer, |d| {
                 d.child(div().absolute().top_0().right_0().bottom_0().child(self.queue.clone()))

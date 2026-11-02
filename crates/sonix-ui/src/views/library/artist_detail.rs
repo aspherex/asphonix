@@ -81,7 +81,7 @@ impl ArtistDetailView {
             selected_top: None,
             flow_btn: Rc::new(Cell::new(Bounds::default())),
             page: PageScroll::new(),
-            page_w: Rc::new(Cell::new(0.0)),
+            page_w: Rc::new(Cell::new(super::parts::initial_width("artist.page"))),
             top_w: Rc::new(Cell::new(1000.0)),
             bio_w: Rc::new(Cell::new(0.0)),
             row_anchor: anchor_cell(),
@@ -478,7 +478,7 @@ impl Render for ArtistDetailView {
         } else if let Some(d) = self.detail.clone() {
             let vw = f32::from(window.viewport_size().width);
             let header = self.header(&th, &d, window, cx);
-            let mut page = div().relative().w_full().flex_none().flex().flex_col().p(px(m::PAGE_PAD)).gap(px(crate::metrics::space::XL)).child(measure(&self.page_w)).child(header);
+            let mut page = div().relative().w_full().flex_none().flex().flex_col().p(px(m::PAGE_PAD)).gap(px(crate::metrics::space::XL)).child(super::parts::measure_keyed("artist.page", &self.page_w)).child(header);
             let content_w = (self.page_w.get() - 2.0 * m::PAGE_PAD).max(1.0);
             let show_top = self.top_pending || !self.top_items().is_empty();
             let show_about = self.info_pending || self.info.as_ref().is_some_and(|i| i.biography.is_some());
