@@ -15,6 +15,7 @@ mod menus;
 mod pager;
 mod playback;
 mod playerkeys;
+mod rail_dnd;
 #[cfg(feature = "parity")]
 mod parity;
 mod perf;

@@ -60,7 +60,6 @@ pub enum PlayTarget {
     /// Genre sources carry the genre name as their label (no id).
     Genre(String),
     Liked,
-    AllTracks,
 }
 
 /// How a play button looks and acts for its target: `Idle` = accent fill, play icon, click starts it;
@@ -113,7 +112,6 @@ impl PlayerModel {
             PlayTarget::Artist(id) => src.is_some_and(|s| s.kind == SourceKind::Artist && s.id.as_deref() == Some(id.as_str())),
             PlayTarget::Genre(name) => src.is_some_and(|s| s.kind == SourceKind::Genre && s.label == *name),
             PlayTarget::Liked => src.is_some_and(|s| s.kind == SourceKind::Liked),
-            PlayTarget::AllTracks => src.is_some_and(|s| s.kind == SourceKind::AllTracks),
         };
         if hit { PlayState::Active { playing: loaded } } else { PlayState::Idle }
     }
@@ -163,8 +161,7 @@ mod tests {
 
     #[test]
     fn play_buttons_are_active_only_for_the_loaded_source() {
-        let mut m = PlayerModel::default();
-        m.source = src(SourceKind::Playlist, Some("pl1"), "Mix");
+        let mut m = PlayerModel { source: src(SourceKind::Playlist, Some("pl1"), "Mix"), ..Default::default() };
         // stopped: nothing is active, whatever the source says
         assert_eq!(m.play_state(&PlayTarget::Playlist("pl1".into())), PlayState::Idle);
         m.state.status = PlaybackStatus::Playing;
