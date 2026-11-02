@@ -51,7 +51,7 @@ impl RealBackend {
             RadioSeedKind::Album => core::StarTargetType::Album,
             RadioSeedKind::Artist => core::StarTargetType::Artist,
         };
-        let (track_ids, artists) = self.0.rt.block_on(extras::radio_pool(&client, &self.0.db, kind, &req.seed.id)).map_err(err)?;
+        let (track_ids, artists) = self.0.rt.block_on(sonix_core::continuity::radio_pool(&client, &self.0.db, kind, &req.seed.id)).map_err(err)?;
         if track_ids.is_empty() {
             return Err(err(extras::no_similar()));
         }

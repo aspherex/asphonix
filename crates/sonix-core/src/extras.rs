@@ -1,7 +1,7 @@
-//! Read-only discovery and player extras: lyrics, artist top tracks / info, radio pool.
+//! Read-only discovery and player extras: lyrics, artist top tracks / info (the radio pool is `continuity::radio_pool`).
 //!
 //! Vendored from SoniX @ 642db10: `fullplayer.rs` (lyrics part), `discovery.rs` (`browse_get_artist_top_tracks`,
-//! `browse_get_artist_info`) and `ipc.rs` (`radio_pool`). The `#[tauri::command]` wrappers are replaced by plain
+//! `browse_get_artist_info`) (the radio error helper). The `#[tauri::command]` wrappers are replaced by plain
 //! async functions over `(&Db, Option<Client>)`; behaviour, cache keys and TTLs are unchanged.
 //! Everything here only reads from the server (`getLyrics*`, `getTopSongs`, `getArtistInfo2`, `getSimilarSongs*`).
 
@@ -12,8 +12,8 @@ use serde::{Deserialize, Serialize};
 use crate::discovery::{
     cache_is_fresh, now_ms, resolve_top, sanitize_bio, ArtistInfo, ArtistTopTracks, CachedInfo, CachedTop, MAX_SIMILAR, TOP_SONGS_COUNT,
 };
-use crate::ipc::{Artist, IpcError, IpcErrorCode, IpcResult, StarTargetType, Track};
-use crate::library::{self, Db, StarKindLocal};
+use crate::ipc::{Artist, IpcError, IpcErrorCode, IpcResult, Track};
+use crate::library::{self, Db};
 use crate::subsonic::lyrics::ParsedLyrics;
 use crate::subsonic::Client;
 
@@ -200,51 +200,10 @@ pub async fn artist_info(db: &Db, client: Option<Client>, id: &str) -> IpcResult
 }
 
 // ---------------------------------------------------------------------------
-// Radio (ipc.rs `radio_pool`)
+// Radio: the pool is `crate::continuity::radio_pool` (the single copy of `ipc::radio_pool`)
 // ---------------------------------------------------------------------------
 
-/// Server-side "count" requested from `getSimilarSongs`/`getSimilarSongs2`.
-pub const RADIO_TRACK_COUNT: u32 = 50;
-/// Below this many locally-known tracks, radio tops up from the local fallback.
-pub const RADIO_MIN_TRACKS: usize = 10;
-
-/// The radio pool for a seed: server similarity first, topped up from the local fallback when the server knows
-/// too little, restricted to tracks the local mirror has, 1-star tracks removed. Parallel `(ids, artists)`;
-/// empty when nothing is found.
-pub async fn radio_pool(client: &Client, db: &Db, kind: StarTargetType, seed_id: &str) -> IpcResult<(Vec<String>, Vec<Option<String>>)> {
-    let local_kind = match kind {
-        StarTargetType::Track => StarKindLocal::Track,
-        StarTargetType::Album => StarKindLocal::Album,
-        StarTargetType::Artist => StarKindLocal::Artist,
-    };
-    let from_server = match kind {
-        StarTargetType::Artist => client.get_similar_songs2(seed_id, RADIO_TRACK_COUNT).await,
-        StarTargetType::Track | StarTargetType::Album => client.get_similar_songs(seed_id, RADIO_TRACK_COUNT).await,
-    };
-    let mut track_ids: Vec<String> = match from_server {
-        Ok(songs) if !songs.is_empty() => songs.into_iter().map(|s| s.id).collect(),
-        _ => Vec::new(),
-    };
-    let known_count = if track_ids.is_empty() { 0 } else { library::get_tracks_by_ids(db, &track_ids)?.len() };
-    if known_count < RADIO_MIN_TRACKS {
-        let mut seen: std::collections::HashSet<String> = track_ids.iter().cloned().collect();
-        for id in library::radio_fallback_tracks(db, local_kind, seed_id, RADIO_TRACK_COUNT as usize)? {
-            if seen.insert(id.clone()) {
-                track_ids.push(id);
-            }
-        }
-    }
-    let mut artist_by_id: std::collections::HashMap<String, String> = std::collections::HashMap::new();
-    if !track_ids.is_empty() {
-        let known = library::get_tracks_by_ids(db, &track_ids)?;
-        let ok_ids: std::collections::HashSet<&str> = known.iter().filter(|t| t.rating != Some(1)).map(|t| t.id.as_str()).collect();
-        track_ids.retain(|id| ok_ids.contains(id.as_str()));
-        artist_by_id = known.into_iter().map(|t| (t.id, t.artist)).collect();
-    }
-    let artists: Vec<Option<String>> = track_ids.iter().map(|id| artist_by_id.get(id).cloned()).collect();
-    Ok((track_ids, artists))
-}
-
+/// `radio_start`'s error when the pool is empty (reference `ipc.rs`).
 pub fn no_similar() -> IpcError {
     IpcError { code: IpcErrorCode::NotFound, message: "no similar tracks found for this radio seed".into() }
 }

@@ -248,13 +248,13 @@ fn extras_against_a_local_mock_server() {
     });
     use_server(&b, &m.url);
     let client = b.client_now().unwrap();
-    let (ids, artists) = b.0.rt.block_on(extras::radio_pool(&client, &b.0.db, core::StarTargetType::Track, "t1")).unwrap();
+    let (ids, artists) = b.0.rt.block_on(sonix_core::continuity::radio_pool(&client, &b.0.db, core::StarTargetType::Track, "t1")).unwrap();
     assert!(m.find("getSimilarSongs").contains("count=50") && m.find("getSimilarSongs").contains("id=t1"));
     assert_eq!(&ids[..2], ["t2", "t1"]);
     assert!(!ids.contains(&"t3".to_string()) && !ids.contains(&"ghost".to_string()));
     assert_eq!(artists.len(), ids.len());
     assert!(artists.iter().all(|a| a.as_deref() == Some("Band")));
-    let (ids, _) = b.0.rt.block_on(extras::radio_pool(&client, &b.0.db, core::StarTargetType::Artist, "ar1")).unwrap();
+    let (ids, _) = b.0.rt.block_on(sonix_core::continuity::radio_pool(&client, &b.0.db, core::StarTargetType::Artist, "ar1")).unwrap();
     assert!(m.count("getSimilarSongs2") == 1 && !ids.is_empty(), "artist seeds use getSimilarSongs2 plus the local fallback");
     let e = b.radio_start(RadioStartRequest { seed: RadioSeed { kind: RadioSeedKind::Artist, id: "none".into() } }).unwrap_err();
     assert_eq!(e.code, ErrorCode::NotFound);
