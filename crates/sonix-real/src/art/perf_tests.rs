@@ -9,6 +9,8 @@ use std::io::{Read, Write};
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::{Duration, Instant};
 
+type ImageMap = Mutex<HashMap<(u32, u32), Arc<Vec<u8>>>>;
+
 struct Server {
     url: String,
     hits: Arc<Mutex<HashMap<String, usize>>>,
@@ -47,7 +49,7 @@ impl Server {
         let (hits, requests, conns, max_active) = (s.hits.clone(), s.requests.clone(), s.conns.clone(), s.max_active.clone());
         let gate: Arc<(Mutex<usize>, Condvar)> = Arc::new((Mutex::new(slots), Condvar::new()));
         let active = Arc::new(AtomicUsize::new(0));
-        let images: Arc<Mutex<HashMap<(u32, u32), Arc<Vec<u8>>>>> = Default::default();
+        let images: Arc<ImageMap> = Default::default();
         std::thread::spawn(move || {
             for sock in listener.incoming() {
                 let Ok(mut sock) = sock else { break };
