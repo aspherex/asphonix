@@ -26,7 +26,9 @@ use rusqlite::Connection;
 use crate::ipc::{Album, Artist, IpcError, IpcErrorCode, Playlist, Track};
 
 pub use sync::{run_full_sync, run_incremental_sync, scan_fingerprint, SyncProgressSink};
-pub(crate) use sync::{META_LAST_SYNC_AT, META_SERVER_FINGERPRINT};
+pub(crate) use sync::META_LAST_SYNC_AT;
+#[allow(unused_imports)] // reference: read by the connection monitor in `lib.rs` (not vendored)
+pub(crate) use sync::META_SERVER_FINGERPRINT;
 
 pub use convert::playlist_from_raw;
 pub use liked::{

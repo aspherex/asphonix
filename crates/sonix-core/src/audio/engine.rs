@@ -872,7 +872,7 @@ impl Engine {
             && self.autoplay.inflight.is_none()
             && !self.autoplay.start_on_arrival
             && !self.ab_loop.is_active()
-            && self.playback.as_ref().map_or(true, |pb| pb.pending.is_none())
+            && self.playback.as_ref().is_none_or(|pb| pb.pending.is_none())
     }
 
     // --- listen events (`listen::`) --------------------------------------
@@ -1144,7 +1144,7 @@ impl Engine {
                 // Re-selecting the mode that is already in effect is a no-op
                 // (it used to tear down playback and re-fetch the stream). A
                 // refused exclusive request still retries on a second press.
-                let in_effect = self.playback.as_ref().map_or(true, |pb| pb.negotiated.mode == mode);
+                let in_effect = self.playback.as_ref().is_none_or(|pb| pb.negotiated.mode == mode);
                 if mode == self.output_mode_pref && in_effect {
                     return;
                 }

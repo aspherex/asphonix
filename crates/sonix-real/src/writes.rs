@@ -320,7 +320,7 @@ impl RealBackend {
         if rows.is_empty() {
             return Err(ApiError::not_found("matching tracks in this smart playlist"));
         }
-        self.play_rows(core::SourceKind::Smart, p.def.name.clone(), Some(req.id), rows, req.shuffle, req.flow, req.start_track_id)
+        self.play_rows(core::SourceKind::Smart, p.def.name.clone(), Some(req.id), rows, crate::player::PlayOpts { shuffle: req.shuffle, flow: req.flow, start: req.start_track_id })
     }
 
     /// `flow_get_coverage`: real coverage over the exact pool a Flow play of the source would use.

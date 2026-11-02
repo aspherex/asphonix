@@ -34,7 +34,9 @@ use rusqlite::params;
 use serde::{Deserialize, Serialize};
 use tokio::sync::mpsc::UnboundedSender;
 
-use crate::ipc::{IpcError, IpcResult, Paged, PlaybackStatus, QueueItemOrigin, SourceKind};
+use crate::ipc::{IpcError, Paged, PlaybackStatus, QueueItemOrigin, SourceKind};
+#[allow(unused_imports)] // reference: return type of the `history_*` Tauri commands (not vendored)
+use crate::ipc::IpcResult;
 use crate::library::Db;
 use crate::scrobble::is_new_play;
 use crate::scrobble::threshold::PlayThresholdTracker;

@@ -415,7 +415,7 @@ fn exclusive_formats_cached(device: &wasapi::Device, channels: u8) -> Vec<(u32, 
 }
 
 fn khz(rate: u32) -> String {
-    if rate % 1000 == 0 {
+    if rate.is_multiple_of(1000) {
         (rate / 1000).to_string()
     } else {
         format!("{:.1}", rate as f64 / 1000.0)

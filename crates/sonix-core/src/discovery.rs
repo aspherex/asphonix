@@ -9,7 +9,9 @@
 
 use serde::{Deserialize, Serialize};
 
-use crate::ipc::{Artist, FlowArc, IpcError, IpcErrorCode, IpcResult, Paged, SourceKind, Track};
+use crate::ipc::{Artist, FlowArc, IpcError, IpcErrorCode, Track};
+#[allow(unused_imports)] // used by the reference's genre `#[tauri::command]`s, which are not vendored
+use crate::ipc::{IpcResult, Paged, SourceKind};
 
 // ---------------------------------------------------------------------------
 // Wire types
@@ -296,6 +298,7 @@ pub(crate) fn now_ms() -> i64 {
 }
 
 
+#[allow(dead_code)] // reference: used by `browse_get_genre` / `player_play_genre` (Tauri commands, not vendored)
 fn not_found(msg: String) -> IpcError {
     IpcError { code: IpcErrorCode::NotFound, message: msg }
 }

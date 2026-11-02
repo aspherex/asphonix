@@ -212,14 +212,14 @@ pub fn volume_to_db(p: f32) -> Option<f32> {
 pub(crate) fn apply_gain_in_place(buf: &mut [u8], container: Container, volume: f32) {
     match container {
         Container::I16 => {
-            for chunk in buf.chunks_exact_mut(2) {
+            for chunk in buf.as_chunks_mut::<2>().0 {
                 let s = i16::from_le_bytes([chunk[0], chunk[1]]);
                 let v = ((s as f32) * volume).clamp(i16::MIN as f32, i16::MAX as f32) as i16;
                 chunk.copy_from_slice(&v.to_le_bytes());
             }
         }
         Container::I24In32 | Container::I32 => {
-            for chunk in buf.chunks_exact_mut(4) {
+            for chunk in buf.as_chunks_mut::<4>().0 {
                 let s = i32::from_le_bytes([chunk[0], chunk[1], chunk[2], chunk[3]]);
                 let mut v = ((s as f64) * volume as f64).clamp(i32::MIN as f64, i32::MAX as f64) as i32;
                 if container == Container::I24In32 {
@@ -229,7 +229,7 @@ pub(crate) fn apply_gain_in_place(buf: &mut [u8], container: Container, volume: 
             }
         }
         Container::I24Packed => {
-            for chunk in buf.chunks_exact_mut(3) {
+            for chunk in buf.as_chunks_mut::<3>().0 {
                 // `chunk` is bytes 1..4 of the MSB-aligned 32-bit value (byte
                 // 0, always zero, was dropped when packing) — reconstructing
                 // it with a zero low byte recovers that exact value,
@@ -241,7 +241,7 @@ pub(crate) fn apply_gain_in_place(buf: &mut [u8], container: Container, volume: 
             }
         }
         Container::F32 => {
-            for chunk in buf.chunks_exact_mut(4) {
+            for chunk in buf.as_chunks_mut::<4>().0 {
                 let s = f32::from_le_bytes([chunk[0], chunk[1], chunk[2], chunk[3]]);
                 let v = (s * volume).clamp(-1.0, 1.0);
                 chunk.copy_from_slice(&v.to_le_bytes());
