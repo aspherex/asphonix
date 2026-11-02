@@ -560,3 +560,292 @@ pub fn skip_stats_page(db: &Db, req: &SkipStatsRequest) -> Result<Paged<TrackSki
     })
 }
 
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    const THR: u32 = 30;
+
+    fn sample<'a>(track: Option<&'a str>, status: PlaybackStatus, pos: f64, dur: f64) -> Sample<'a> {
+        Sample { track_id: track, status, position_sec: pos, duration_sec: dur, entry_origin: Some(QueueItemOrigin::Source), source: None }
+    }
+
+    /// Plays `track` in 250 ms ticks from `from` to `to`, returning any
+    /// sessions closed on the way (none expected for one track).
+    fn play(t: &mut ListenTracker, track: &str, from: f64, to: f64, dur: f64, now: &mut i64) -> Vec<ListenSession> {
+        let mut out = vec![];
+        let mut p = from;
+        while p <= to + 1e-9 {
+            *now += 250;
+            out.extend(t.observe(&sample(Some(track), PlaybackStatus::Playing, p, dur), *now, THR));
+            p += 0.25;
+        }
+        out
+    }
+
+    #[test]
+    fn natural_transition_is_finished_and_counted() {
+        let mut t = ListenTracker::default();
+        let mut now = 1_000_000;
+        assert!(play(&mut t, "a", 0.0, 100.0, 100.0, &mut now).is_empty());
+        // Gapless hand-off: the next sample already shows track b, no note.
+        let s = t.observe(&sample(Some("b"), PlaybackStatus::Playing, 0.0, 200.0), now + 250, THR).unwrap();
+        assert_eq!(s.track_id, "a");
+        assert_eq!(s.end_reason, EndReason::Finished);
+        assert!(s.counted);
+        assert_eq!(s.listened_ms, 100_000);
+        assert_eq!(s.duration_ms, 100_000);
+        assert_eq!(s.max_position_ms, 100_000);
+        assert_eq!(s.origin, ListenOrigin::Source);
+        // b's session is open and starts now.
+        let fin = t.finish(EndReason::Quit, now + 5_000, THR).unwrap();
+        assert_eq!((fin.track_id.as_str(), fin.end_reason, fin.started_at_ms), ("b", EndReason::Quit, now + 250));
+    }
+
+    #[test]
+    fn each_noted_reason_labels_the_session_it_ends() {
+        for reason in [EndReason::Next, EndReason::Previous, EndReason::Jump, EndReason::Error] {
+            let mut t = ListenTracker::default();
+            let mut now = 0;
+            play(&mut t, "a", 0.0, 12.0, 200.0, &mut now);
+            t.note(reason);
+            // The command lands: new track is Loading.
+            let s = t.observe(&sample(Some("b"), PlaybackStatus::Loading, 0.0, 0.0), now + 100, THR).unwrap();
+            assert_eq!(s.end_reason, reason);
+            assert!(!s.counted, "12 s of 200 s is under the threshold");
+            assert_eq!(s.listened_ms, 12_000);
+        }
+    }
+
+    #[test]
+    fn stop_and_end_of_queue() {
+        let mut t = ListenTracker::default();
+        let mut now = 0;
+        play(&mut t, "a", 0.0, 50.0, 60.0, &mut now);
+        t.note(EndReason::Next); // Next at the end of the queue: engine just stops
+        let s = t.observe(&sample(Some("a"), PlaybackStatus::Stopped, 50.0, 60.0), now + 10, THR).unwrap();
+        assert_eq!(s.end_reason, EndReason::Next);
+        // Queue ran out with no command: finished.
+        play(&mut t, "b", 0.0, 10.0, 10.0, &mut now);
+        let s = t.observe(&sample(None, PlaybackStatus::Stopped, 0.0, 0.0), now + 10, THR).unwrap();
+        assert_eq!(s.end_reason, EndReason::Finished);
+        // Stop command.
+        play(&mut t, "c", 0.0, 3.0, 100.0, &mut now);
+        assert_eq!(t.finish(EndReason::Stopped, now, THR).unwrap().end_reason, EndReason::Stopped);
+    }
+
+    #[test]
+    fn pause_and_seek_never_inflate_listened_time() {
+        let mut t = ListenTracker::default();
+        let mut now = 0;
+        play(&mut t, "a", 0.0, 10.0, 300.0, &mut now);
+        // Paused for a long while.
+        for _ in 0..100 {
+            now += 250;
+            t.observe(&sample(Some("a"), PlaybackStatus::Paused, 10.0, 300.0), now, THR);
+        }
+        // Seek forward to 200 s, play 5 s there.
+        play(&mut t, "a", 200.0, 205.0, 300.0, &mut now);
+        // Seek back to 5 s (heard before) and replay 3 s.
+        play(&mut t, "a", 5.0, 8.0, 300.0, &mut now);
+        let s = t.finish(EndReason::Quit, now, THR).unwrap();
+        // 10 s + 5 s + 3 s of real, contiguous playback; the seeks add nothing.
+        assert_eq!(s.listened_ms, 18_000);
+        assert_eq!(s.max_position_ms, 205_000);
+    }
+
+    #[test]
+    fn repeat_one_loops_are_separate_sessions() {
+        let mut t = ListenTracker::default();
+        let mut now = 0;
+        play(&mut t, "a", 0.0, 40.0, 40.0, &mut now);
+        // Same id restarts from zero right after its end.
+        let s = t.observe(&sample(Some("a"), PlaybackStatus::Playing, 0.0, 40.0), now + 250, THR).unwrap();
+        assert_eq!(s.end_reason, EndReason::Finished);
+        assert!(s.counted);
+        play(&mut t, "a", 0.25, 5.0, 40.0, &mut now);
+        let s2 = t.finish(EndReason::Next, now, THR).unwrap();
+        assert!(!s2.counted);
+        assert_eq!(s2.listened_ms, 5_000);
+    }
+
+    #[test]
+    fn jump_to_the_same_track_restarts_the_session() {
+        let mut t = ListenTracker::default();
+        let mut now = 0;
+        play(&mut t, "a", 0.0, 20.0, 200.0, &mut now);
+        t.note(EndReason::Jump);
+        let s = t.observe(&sample(Some("a"), PlaybackStatus::Loading, 0.0, 0.0), now + 50, THR).unwrap();
+        assert_eq!(s.end_reason, EndReason::Jump);
+    }
+
+    #[test]
+    fn a_stale_note_never_labels_a_later_natural_end() {
+        let mut t = ListenTracker::default();
+        let mut now = 0;
+        play(&mut t, "a", 0.0, 5.0, 100.0, &mut now);
+        t.note(EndReason::Next); // command that changed nothing
+        assert!(t.observe(&sample(Some("a"), PlaybackStatus::Playing, 5.25, 100.0), now + 250, THR).is_none());
+        let s = t.observe(&sample(Some("b"), PlaybackStatus::Playing, 0.0, 100.0), now + 500, THR).unwrap();
+        assert_eq!(s.end_reason, EndReason::Finished);
+    }
+
+    #[test]
+    fn origin_user_source_autoplay_and_source_identity() {
+        let mut t = ListenTracker::default();
+        let src = |label| Some((SourceKind::Playlist, Some("pl1"), label));
+        // Explicit start (new queue) is user, even though the entry is "source".
+        t.note(EndReason::Jump);
+        let mut s = sample(Some("a"), PlaybackStatus::Playing, 0.0, 100.0);
+        s.source = src("Mix");
+        t.observe(&s, 1, THR);
+        let a = t.finish(EndReason::Next, 2, THR).unwrap();
+        assert_eq!((a.origin, a.source_kind, a.source_id.as_deref()), (ListenOrigin::User, Some("playlist"), Some("pl1")));
+        // User-queued entry.
+        let mut s = sample(Some("b"), PlaybackStatus::Playing, 0.0, 100.0);
+        s.entry_origin = Some(QueueItemOrigin::User);
+        t.observe(&s, 3, THR);
+        assert_eq!(t.finish(EndReason::Next, 4, THR).unwrap().origin, ListenOrigin::User);
+        // Drawn from the autoplay radio.
+        let mut s = sample(Some("c"), PlaybackStatus::Playing, 0.0, 100.0);
+        s.source = Some((SourceKind::Radio, None, "Autoplay · Some Song"));
+        t.observe(&s, 5, THR);
+        assert_eq!(t.finish(EndReason::Quit, 6, THR).unwrap().origin, ListenOrigin::Autoplay);
+        // Static ad-hoc queue: no source.
+        t.observe(&sample(Some("d"), PlaybackStatus::Playing, 0.0, 100.0), 7, THR);
+        let d = t.finish(EndReason::Quit, 8, THR).unwrap();
+        assert_eq!((d.origin, d.source_kind), (ListenOrigin::Source, None));
+    }
+
+    #[test]
+    fn never_audible_tracks_are_not_recorded() {
+        let mut t = ListenTracker::default();
+        assert!(t.observe(&sample(Some("a"), PlaybackStatus::Loading, 0.0, 0.0), 1, THR).is_none());
+        assert!(t.observe(&sample(Some("a"), PlaybackStatus::Paused, 0.0, 100.0), 2, THR).is_none());
+        assert!(t.finish(EndReason::Quit, 3, THR).is_none());
+    }
+
+    fn session(track: &str, started: i64, reason: EndReason, listened: i64, duration: i64) -> ListenSession {
+        ListenSession {
+            track_id: track.into(),
+            started_at_ms: started,
+            ended_at_ms: started + listened,
+            listened_ms: listened,
+            duration_ms: duration,
+            end_reason: reason,
+            source_kind: Some("playlist"),
+            source_id: Some("p".into()),
+            origin: ListenOrigin::Source,
+            counted: listened >= 30_000,
+            max_position_ms: listened,
+        }
+    }
+
+    #[test]
+    fn insert_prunes_to_the_newest_cap_rows() {
+        let db = Db::open_in_memory().unwrap();
+        for i in 0..10 {
+            insert_session_capped(&db, &session("t", i, EndReason::Finished, 1000, 2000), 4).unwrap();
+        }
+        let page = listen_events_page(&db, &ListenRangeRequest { offset: 0, limit: 100, since: None, until: None }).unwrap();
+        assert_eq!(page.total, 4);
+        assert_eq!(page.items.iter().map(|e| e.started_at).collect::<Vec<_>>(), vec![9, 8, 7, 6]);
+        record_feedback_capped(&db, "t", 1, FeedbackKind::Like, None, 2).unwrap();
+        record_feedback_capped(&db, "t", 2, FeedbackKind::Rating, Some(5), 2).unwrap();
+        record_feedback_capped(&db, "t", 3, FeedbackKind::Unlike, None, 2).unwrap();
+        let fb = feedback_events_page(&db, &ListenRangeRequest { offset: 0, limit: 10, since: None, until: None }).unwrap();
+        assert_eq!(fb.total, 2);
+    }
+
+    #[test]
+    fn paging_window_and_roundtrip() {
+        let db = Db::open_in_memory().unwrap();
+        insert_session(&db, &session("a", 100, EndReason::Next, 5_000, 200_000)).unwrap();
+        insert_session(&db, &session("b", 200, EndReason::Finished, 200_000, 200_000)).unwrap();
+        insert_session(&db, &session("c", 300, EndReason::Quit, 1_000, 0)).unwrap();
+        let all = listen_events_page(&db, &ListenRangeRequest { offset: 0, limit: 2, since: None, until: None }).unwrap();
+        assert_eq!((all.total, all.items.len(), all.items[0].track_id.as_str()), (3, 2, "c"));
+        let win = listen_events_page(&db, &ListenRangeRequest { offset: 0, limit: 10, since: Some(100), until: Some(300) }).unwrap();
+        assert_eq!(win.items.iter().map(|e| e.track_id.as_str()).collect::<Vec<_>>(), vec!["b", "a"]);
+        let a = &win.items[1];
+        assert_eq!((a.end_reason.as_str(), a.origin.as_str(), a.source_kind.as_deref(), a.counted), ("next", "source", Some("playlist"), false));
+    }
+
+    #[test]
+    fn skip_stats_aggregate_per_track() {
+        let db = Db::open_in_memory().unwrap();
+        // Track a: skipped at 10%, skipped at 90% (not a skip), finished.
+        insert_session(&db, &session("a", 1, EndReason::Next, 20_000, 200_000)).unwrap();
+        insert_session(&db, &session("a", 2, EndReason::Next, 180_000, 200_000)).unwrap();
+        insert_session(&db, &session("a", 3, EndReason::Finished, 200_000, 200_000)).unwrap();
+        insert_session(&db, &session("b", 4, EndReason::Quit, 1_000, 0)).unwrap();
+        let p = skip_stats_page(&db, &SkipStatsRequest { offset: 0, limit: 10, since: None, until: None, min_sessions: None }).unwrap();
+        assert_eq!(p.total, 2);
+        let a = &p.items[0];
+        assert_eq!((a.track_id.as_str(), a.sessions, a.skips, a.counted, a.last_listened_at), ("a", 3, 1, 2, 3));
+        assert!((a.avg_listened_fraction.unwrap() - (0.1 + 0.9 + 1.0) / 3.0).abs() < 1e-9);
+        assert_eq!(p.items[1].avg_listened_fraction, None);
+        let p = skip_stats_page(&db, &SkipStatsRequest { offset: 0, limit: 10, since: None, until: None, min_sessions: Some(2) }).unwrap();
+        assert_eq!((p.total, p.items.len()), (1, 1));
+    }
+
+    #[test]
+    fn finish_does_not_reopen_the_same_playback_and_clears_the_explicit_start() {
+        let mut t = ListenTracker::default();
+        let mut now = 0;
+        play(&mut t, "a", 0.0, 10.0, 100.0, &mut now);
+        assert_eq!(t.finish(EndReason::Quit, now, THR).unwrap().end_reason, EndReason::Quit);
+        // Still playing after the exit flush (update install): no new session,
+        // so the Stop that follows has nothing to close.
+        assert!(play(&mut t, "a", 10.25, 11.0, 100.0, &mut now).is_empty());
+        assert!(t.finish(EndReason::Stopped, now, THR).is_none());
+        // A Jump note that never led to a session (the new queue never
+        // played), then Stop: the next naturally drawn session is not "user".
+        t.note(EndReason::Jump);
+        assert!(t.observe(&sample(Some("x"), PlaybackStatus::Loading, 0.0, 0.0), now, THR).is_none());
+        t.finish(EndReason::Stopped, now, THR);
+        play(&mut t, "b", 0.0, 1.0, 100.0, &mut now);
+        assert_eq!(t.finish(EndReason::Quit, now, THR).unwrap().origin, ListenOrigin::Source);
+        // Once the held track stops playing, sessions open normally again.
+        t.observe(&sample(Some("b"), PlaybackStatus::Paused, 1.0, 100.0), now, THR);
+        play(&mut t, "b", 1.0, 2.0, 100.0, &mut now);
+        assert!(t.finish(EndReason::Quit, now, THR).is_some());
+    }
+
+    #[test]
+    fn writer_flush_answers_after_earlier_sessions_are_stored() {
+        let db = Arc::new(Db::open_in_memory().unwrap());
+        let tx = spawn_writer(db.clone());
+        for i in 0..5 {
+            tx.send(WriterMsg::Session(session("t", i, EndReason::Next, 1000, 2000))).unwrap();
+        }
+        let (done_tx, done_rx) = tokio::sync::oneshot::channel();
+        tx.send(WriterMsg::Flush(done_tx)).unwrap();
+        crate::rt::block_on(done_rx).unwrap();
+        let n: i64 = db.read(|c| c.query_row("SELECT COUNT(*) FROM listen_events", [], |r| r.get(0))).unwrap();
+        assert_eq!(n, 5);
+    }
+
+    #[test]
+    fn wire_shape_is_camel_case() {
+        let e = ListenEvent {
+            id: 1,
+            track_id: "t".into(),
+            started_at: 2,
+            ended_at: 3,
+            listened_ms: 4,
+            duration_ms: 5,
+            end_reason: "next".into(),
+            source_kind: None,
+            source_id: None,
+            origin: "user".into(),
+            counted: true,
+            max_position_ms: 6,
+        };
+        let v = serde_json::to_value(&e).unwrap();
+        for k in ["trackId", "startedAt", "endedAt", "listenedMs", "durationMs", "endReason", "sourceKind", "maxPositionMs"] {
+            assert!(v.get(k).is_some(), "missing {k}");
+        }
+    }
+}

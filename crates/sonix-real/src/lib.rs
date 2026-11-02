@@ -4,6 +4,7 @@
 mod player;
 mod reads;
 mod stubs;
+mod services;
 
 use sonix_api::*;
 use sonix_core::ipc::{IpcError, IpcErrorCode};
@@ -51,6 +52,8 @@ struct Inner {
     _state_rx: tokio::sync::watch::Receiver<sonix_core::ipc::PlayerState>,
     session: Mutex<Session>,
     subs: Mutex<Vec<Sender<Event>>>,
+    /// OS integration + background services (listen flush, SMTC, MCP bridge, updater).
+    svc: services::Services,
 }
 
 #[derive(Clone)]
@@ -101,7 +104,8 @@ impl RealBackend {
         let (ev_tx, ev_rx) = channel::<Event>();
         let source: Arc<dyn sonix_core::audio::TrackSource> = Arc::new(sonix_core::audio::SubsonicTrackSource::new(client.clone()));
         let engine = sonix_core::audio::EngineHandle::with_events(Arc::new(player::Events(ev_tx)), source, db.clone(), false, 20)
-            .with_continuity(prefs.clone(), None, None);
+            .with_continuity(prefs.clone(), None, None)
+            .with_listen(sonix_core::listen::spawn_writer(db.clone()));
         // Safety default: shared mode until the user picks exclusive in Settings.
         engine.send(sonix_core::audio::EngineCommand::SetOutputMode(sonix_core::ipc::OutputMode::Shared));
         let rt = tokio::runtime::Builder::new_multi_thread().worker_threads(2).enable_all().build().expect("tokio");
@@ -121,6 +125,7 @@ impl RealBackend {
                 ..Default::default()
             }),
             subs: Mutex::new(Vec::new()),
+            svc: Default::default(),
         }));
         {
             let b = me.clone();
@@ -201,6 +206,8 @@ impl RealBackend {
         let same = previous.as_ref().is_some_and(|p| p.url == url && p.username == username);
         self.0.epoch.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
         if !same && previous.is_some() {
+            // Stop + wait for the closing listen row before the wipe, so it goes with the old account.
+            self.flush_listen();
             self.0.db.clear_all().map_err(err)?;
         }
         *self.0.client.write().unwrap() = Some(client);
@@ -237,7 +244,7 @@ impl AuthApi for RealBackend {
             secrets::delete_profile_password(&cfg.url, &cfg.username, false).map_err(err)?;
         }
         secrets::clear_config(&self.0.dir).map_err(err)?;
-        self.0.engine.send(sonix_core::audio::EngineCommand::Stop);
+        self.flush_listen();
         *self.0.client.write().unwrap() = None;
         *self.0.session.lock().unwrap() = Session { state: Some(ConnectionState::Disconnected), ..Default::default() };
         self.set_state(ConnectionState::Disconnected, None);
@@ -300,5 +307,11 @@ impl Backend for RealBackend {
         let (tx, rx) = channel();
         self.0.subs.lock().unwrap().push(tx);
         rx
+    }
+    fn shutdown(&self) {
+        RealBackend::shutdown(self)
+    }
+    fn attach_window(&self, hwnd: isize) {
+        self.attach_media_window(hwnd)
     }
 }

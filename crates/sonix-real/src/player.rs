@@ -79,6 +79,12 @@ impl PlayerApi for RealBackend {
     fn player_previous(&self) -> ApiResult<()> {
         self.send(EngineCommand::Previous)
     }
+    fn updates_check(&self) -> ApiResult<UpdateInfo> {
+        self.updates_check_impl()
+    }
+    fn updates_install(&self) -> ApiResult<()> {
+        self.updates_install_impl()
+    }
     fn player_seek(&self, req: SeekRequest) -> ApiResult<()> {
         self.send(EngineCommand::Seek(req.position_sec))
     }
