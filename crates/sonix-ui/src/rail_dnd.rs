@@ -169,7 +169,7 @@ mod tests {
         assert_eq!(user_run(0, &o, 1), (2, 2));
         assert_eq!(user_run(0, &o, 3), (4, 0));
         // a window that starts at 10
-        assert_eq!(user_run(10, &o[2..], 11), (12, 2));
+        assert_eq!(user_run(10, &o[2..], 9), (10, 2));
         assert_eq!(user_run(0, &o, -1), (0, 0));
     }
 
