@@ -73,7 +73,7 @@ impl HomeView {
             list: UniformListScrollHandle::new(),
             sb: scrollbar::new_handle(),
             page: PageScroll::new(),
-            w: Rc::new(Cell::new(0.0)),
+            w: Rc::new(Cell::new(super::parts::initial_width("home"))),
             _sub: sub,
         };
         this.load(cx);
@@ -529,7 +529,7 @@ impl Render for HomeView {
         // Recently Ingested // Server Pipeline
         children.push(self.list_block(&th, window, cx));
 
-        let mut home = div().relative().w_full().flex_none().flex().flex_col().gap(px(m::HOME_GAP)).p(px(m::HOME_PAD)).child(measure(&self.w));
+        let mut home = div().relative().w_full().flex_none().flex().flex_col().gap(px(m::HOME_GAP)).p(px(m::HOME_PAD)).child(super::parts::measure_keyed("home", &self.w));
         for (i, c) in children.into_iter().enumerate() {
             home = home.child(pid(format!("home.child.{i}"), c));
         }

@@ -55,7 +55,7 @@ pub struct GridState<T> {
 
 impl<T> GridState<T> {
     pub fn new(key: String) -> Self {
-        Self { pager: Pager::default(), list: UniformListScrollHandle::new(), sb: scrollbar::new_handle(), width: Rc::new(Cell::new(0.0)), key, restored: false, vis: 0..0, cols: 1, loaded: false }
+        Self { pager: Pager::default(), list: UniformListScrollHandle::new(), sb: scrollbar::new_handle(), width: Rc::new(Cell::new(super::parts::initial_width("grid"))), key, restored: false, vis: 0..0, cols: 1, loaded: false }
     }
     /// New sort/filter: drop everything (the scroll offset of the *new* key is restored once its first page arrives).
     pub fn reset(&mut self, key: String) -> u64 {
@@ -142,7 +142,7 @@ pub fn grid_element<T: Clone + 'static, V: GridHost<T>>(this: &mut V, th: Theme,
     div()
         .relative()
         .size_full()
-        .child(measure(&width))
+        .child(super::parts::measure_keyed("grid", &width))
         .child(div().size_full().when(overflow, |d| d.pr(px(scrollbar::WIDTH))).child(body))
         .child(scrollbar::scrollbar("vgrid-scrollbar", th, &list, &sb))
         .child(crate::widgets::smooth::drive(window, crate::widgets::smooth::Scrollable::list(&list)))

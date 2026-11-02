@@ -82,10 +82,49 @@ pub fn checkbox(th: &Theme, id: &'static str, checked: bool, label: &'static str
 /// Records the width of the box it is placed in (absolute, full size) and asks for another frame when it changed,
 /// which is how the grids learn their `clientWidth` (a `ResizeObserver` in the Svelte app).
 pub fn measure(cell: &Rc<Cell<f32>>) -> AnyElement {
+    measure_inner(None, cell)
+}
+
+thread_local! {
+    /// Width of the shell's stage box (set every frame by the shell, which is never remounted).
+    static STAGE_W: Cell<f32> = const { Cell::new(0.0) };
+    /// Per measured box: how much narrower than the stage it was last time (padding, scrollbar gutter).
+    static INSETS: std::cell::RefCell<std::collections::HashMap<&'static str, f32>> = std::cell::RefCell::new(std::collections::HashMap::new());
+}
+
+/// Called by the shell with its stage box width.
+pub fn set_stage_width(w: f32) {
+    STAGE_W.with(|s| s.set(w));
+}
+
+/// Start width for a view that is created on navigation. The Svelte app lays out a new route at its real width in
+/// its first frame; a native view that starts at 0 and learns its width from `measure` one frame later draws once
+/// at the wrong width and then re-flows (grid columns, tiles). Seed from the stage width minus this box's inset.
+pub fn initial_width(key: &'static str) -> f32 {
+    let stage = STAGE_W.with(|s| s.get());
+    if stage <= 0.0 {
+        return 0.0;
+    }
+    let inset = INSETS.with(|m| m.borrow().get(key).copied().unwrap_or(0.0));
+    (stage - inset).max(0.0)
+}
+
+/// `measure` that also records the box's inset from the stage under `key` for [`initial_width`].
+pub fn measure_keyed(key: &'static str, cell: &Rc<Cell<f32>>) -> AnyElement {
+    measure_inner(Some(key), cell)
+}
+
+fn measure_inner(key: Option<&'static str>, cell: &Rc<Cell<f32>>) -> AnyElement {
     let cell = cell.clone();
     canvas(
         move |b, window, _| {
             let w = f32::from(b.size.width);
+            if let Some(k) = key {
+                let stage = STAGE_W.with(|s| s.get());
+                if stage > 0.0 {
+                    INSETS.with(|m| m.borrow_mut().insert(k, (stage - w).max(0.0)));
+                }
+            }
             if (cell.get() - w).abs() > 0.4 {
                 cell.set(w);
                 window.refresh();
