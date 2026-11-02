@@ -21,11 +21,15 @@ pub(crate) struct Services {
     pub auto_check_updates: Arc<AtomicBool>,
     checker_started: AtomicBool,
     media_attached: AtomicBool,
+    mcp: sonix_core::mcp_bridge::McpBridge,
+    /// `Settings.mcpEnabled` / `mcpAllowControl`: both OFF by default.
+    mcp_enabled: AtomicBool,
+    mcp_allow_control: AtomicBool,
 }
 
 impl Default for Services {
     fn default() -> Self {
-        Self { updater: Arc::new(Updater::built_in()), auto_check_updates: Arc::new(AtomicBool::new(false)), checker_started: AtomicBool::new(false), media_attached: AtomicBool::new(false) }
+        Self { updater: Arc::new(Updater::built_in()), auto_check_updates: Arc::new(AtomicBool::new(false)), checker_started: AtomicBool::new(false), media_attached: AtomicBool::new(false), mcp: Default::default(), mcp_enabled: AtomicBool::new(false), mcp_allow_control: AtomicBool::new(false) }
     }
 }
 
@@ -39,6 +43,8 @@ impl RealBackend {
     /// App exit: final session write (also records the `quit` listen row), then service teardown.
     pub fn shutdown(&self) {
         self.0.engine.persist_now(EXIT_PERSIST_TIMEOUT);
+        // No stale endpoint/token once the app is gone (reference `remove_discovery_on_exit`).
+        sonix_core::mcp_bridge::remove_discovery_on_exit(&self.0.dir);
     }
 
     // --- Windows media controls (SMTC / media keys) ---------------------------------------------
@@ -96,14 +102,12 @@ impl RealBackend {
         self.0.rt.spawn(async move {
             tokio::time::sleep(sonix_core::updates::FIRST_CHECK_DELAY).await;
             loop {
-                if me.0.svc.auto_check_updates.load(Ordering::Relaxed) {
-                    if let Ok(info) = me.0.svc.updater.check().await {
-                        if info.available {
-                            if let Ok(i) = conv::<_, UpdateInfo>(info) {
-                                me.emit(Event::UpdateAvailable(i));
-                            }
-                        }
-                    }
+                if me.0.svc.auto_check_updates.load(Ordering::Relaxed)
+                    && let Ok(info) = me.0.svc.updater.check().await
+                    && info.available
+                    && let Ok(i) = conv::<_, UpdateInfo>(info)
+                {
+                    me.emit(Event::UpdateAvailable(i));
                 }
                 tokio::time::sleep(sonix_core::updates::CHECK_INTERVAL).await;
             }
@@ -128,10 +132,10 @@ impl MediaHost for RealMedia {
             // Same cache layout as `art_get`: `<id>_<bucket>.img`, bytes as received from the server.
             let key: String = cover_art_id.chars().map(|c| if c.is_ascii_alphanumeric() || c == '-' { c } else { '_' }).collect();
             let path = dir.join(format!("{key}_{size}.img"));
-            if let Ok(b) = tokio::fs::read(&path).await {
-                if !b.is_empty() {
-                    return Some(b);
-                }
+            if let Ok(b) = tokio::fs::read(&path).await
+                && !b.is_empty()
+            {
+                return Some(b);
             }
             let (b, _) = client?.get_cover_art(&cover_art_id, Some(size)).await.ok()?;
             let _ = tokio::fs::create_dir_all(&dir).await;
@@ -141,5 +145,75 @@ impl MediaHost for RealMedia {
             }
             Some(b)
         })
+    }
+}
+
+// --- Claude (MCP) bridge ---------------------------------------------------------------------------
+// Contract: docs/MCP.md of the reference. OFF by default: nothing listens and no `mcp.json` exists until
+// `set_mcp_enabled(true)`; the merge connects these methods to the persisted settings.
+
+/// Tool calls run against the backend's own library DB / engine; both gates are re-read on every call.
+struct RealDispatch(RealBackend);
+
+impl sonix_core::mcp_bridge::Dispatch for RealDispatch {
+    fn call(&self, tool: &str, args: &serde_json::Value) -> Result<serde_json::Value, String> {
+        use sonix_core::mcp_bridge::tools;
+        let b = &self.0 .0;
+        // Re-checked per call: a client connected a moment before "off" is refused.
+        if !b.svc.mcp_enabled.load(Ordering::Relaxed) {
+            return Err("Claude (MCP) is turned off in SONIX settings.".into());
+        }
+        let me = b.session.lock().unwrap().cfg.as_ref().map(|c| c.username.clone());
+        // A fresh store per call: the smart-playlist file is the source of truth, so edits made elsewhere show up.
+        let smart = sonix_core::smartlists::SmartStore::new(&b.dir);
+        let ctx = tools::Ctx { db: &b.db, smart: &smart, player: &b.engine, me, allow_control: b.svc.mcp_allow_control.load(Ordering::Relaxed) };
+        tools::call(&ctx, tool, args)
+    }
+}
+
+impl RealBackend {
+    /// Where `sonix-mcp` is expected: next to the running executable.
+    fn mcp_bridge_path() -> Option<std::path::PathBuf> {
+        let exe = std::env::current_exe().ok()?;
+        Some(exe.parent()?.join(if cfg!(windows) { "sonix-mcp.exe" } else { "sonix-mcp" }))
+    }
+
+    /// `mcp_get_status`.
+    pub(crate) fn mcp_status_impl(&self) -> ApiResult<McpStatus> {
+        let path = Self::mcp_bridge_path();
+        let s = &self.0.svc;
+        Ok(McpStatus {
+            enabled: s.mcp_enabled.load(Ordering::Relaxed),
+            allow_control: s.mcp_allow_control.load(Ordering::Relaxed),
+            listening: s.mcp.is_listening(),
+            bridge_exists: path.as_ref().is_some_and(|p| p.exists()),
+            // `sonix-native`, not `sonix`: the installed WebView app registers itself as `sonix`.
+            register_command: path.as_ref().map(|p| format!("claude mcp add sonix-native -- \"{}\"", p.display())),
+            bridge_path: path.map(|p| p.display().to_string()),
+            last_error: s.mcp.last_error(),
+        })
+    }
+
+    /// "Claude (MCP)" master switch (default OFF). On = a fresh token, the local named pipe and `mcp.json`
+    /// in the config dir; off = all of that torn down. Persisting the flag is the settings layer's job.
+    pub fn set_mcp_enabled(&self, enabled: bool) -> ApiResult<McpStatus> {
+        let s = &self.0.svc;
+        if enabled {
+            let dispatch: Arc<dyn sonix_core::mcp_bridge::Dispatch> = Arc::new(RealDispatch(self.clone()));
+            self.0.rt.block_on(s.mcp.start(dispatch, &self.0.dir)).map_err(|m| ApiError::new(ErrorCode::Unknown, m))?;
+            s.mcp_enabled.store(true, Ordering::Relaxed);
+        } else {
+            // Gate first: from here on no new tool call passes `RealDispatch`, even on a connection the shutdown
+            // below has not closed yet. A call already running on the blocking pool still finishes.
+            s.mcp_enabled.store(false, Ordering::Relaxed);
+            self.0.rt.block_on(s.mcp.stop(&self.0.dir));
+        }
+        self.mcp_status_impl()
+    }
+
+    /// "Allow playback control" (default OFF, only meaningful while enabled). Read live on every tool call.
+    pub fn set_mcp_allow_control(&self, allow: bool) -> ApiResult<McpStatus> {
+        self.0.svc.mcp_allow_control.store(allow, Ordering::Relaxed);
+        self.mcp_status_impl()
     }
 }

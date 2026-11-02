@@ -5535,6 +5535,7 @@ dependencies = [
  "serde_json",
  "sonix-api",
  "sonix-core",
+ "sonix-mcp",
  "tokio",
 ]
 

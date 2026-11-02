@@ -43,3 +43,60 @@ fn logout_and_exit_flush_the_listen_writer_promptly() {
     assert!(t.elapsed() < Duration::from_secs(5), "flush/exit are bounded: {:?}", t.elapsed());
     assert_eq!(b.auth_session_status().unwrap().state, ConnectionState::Disconnected);
 }
+
+#[test]
+fn mcp_is_off_by_default_and_enable_disable_manage_the_discovery_file() {
+    let _g = sandbox().lock().unwrap_or_else(|p| p.into_inner());
+    let b = RealBackend::open();
+    let discovery = sonix_real::config_dir().join("mcp.json");
+    let _ = std::fs::remove_file(&discovery);
+    let st = b.mcp_status().unwrap();
+    assert!(!st.enabled && !st.allow_control && !st.listening, "off by default: {st:?}");
+    assert!(!discovery.exists(), "nothing written until enabled");
+    assert!(st.register_command.as_deref().is_some_and(|c| c.starts_with("claude mcp add sonix-native -- ")));
+
+    let st = b.set_mcp_enabled(true).unwrap();
+    assert!(st.enabled && st.listening && !st.allow_control);
+    let text = std::fs::read_to_string(&discovery).expect("mcp.json written on enable");
+    let d: serde_json::Value = serde_json::from_str(&text).unwrap();
+    assert!(d["endpoint"].as_str().unwrap().starts_with(r"\\.\pipe\sonix-native-mcp-"), "own pipe name, not the installed app's");
+    assert_eq!(d["token"].as_str().unwrap().len(), 64);
+    assert!(b.mcp_status().unwrap().enabled);
+
+    let st = b.set_mcp_allow_control(true).unwrap();
+    assert!(st.allow_control);
+
+    let st = b.set_mcp_enabled(false).unwrap();
+    assert!(!st.enabled && !st.listening);
+    assert!(!discovery.exists(), "mcp.json removed on disable");
+
+    // Exit removes the discovery file too (reference `remove_discovery_on_exit`).
+    b.set_mcp_enabled(true).unwrap();
+    assert!(discovery.exists());
+    b.shutdown();
+    assert!(!discovery.exists());
+    b.set_mcp_enabled(false).unwrap();
+}
+
+#[test]
+fn mcp_end_to_end_over_the_real_pipe_with_both_gates() {
+    let _g = sandbox().lock().unwrap_or_else(|p| p.into_inner());
+    let b = RealBackend::open();
+    let cfg = sonix_mcp::Config { config_dir: Some(sonix_real::config_dir()), call_timeout: Duration::from_secs(10) };
+    // Not enabled: no discovery file, the bridge client says so and nothing listens.
+    let _ = std::fs::remove_file(sonix_real::config_dir().join("mcp.json"));
+    assert!(matches!(sonix_mcp::client::call_app(&cfg, "library_stats", &serde_json::json!({})), Err(sonix_mcp::client::CallError::NotEnabled)));
+
+    b.set_mcp_enabled(true).unwrap();
+    // Read tool over the real named pipe (handshake: server proof, then token) against this backend's own (empty) library.
+    let stats = sonix_mcp::client::call_app(&cfg, "library_stats", &serde_json::json!({})).expect("library_stats");
+    assert_eq!(stats["tracks"], 0, "{stats}");
+    // Control tools are refused until 'Allow playback control' is on.
+    let refused = sonix_mcp::client::call_app(&cfg, "play_pause", &serde_json::json!({ "action": "pause" }));
+    assert!(refused.is_err(), "control is off by default");
+    b.set_mcp_allow_control(true).unwrap();
+    assert!(sonix_mcp::client::call_app(&cfg, "play_pause", &serde_json::json!({ "action": "pause" })).is_ok());
+    // Disabling closes the listener and removes the file.
+    b.set_mcp_enabled(false).unwrap();
+    assert!(matches!(sonix_mcp::client::call_app(&cfg, "library_stats", &serde_json::json!({})), Err(sonix_mcp::client::CallError::NotEnabled)));
+}

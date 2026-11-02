@@ -16,6 +16,7 @@ mod liked;
 mod queries;
 mod schema;
 mod sync;
+pub(crate) mod mcp_queries;
 
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
