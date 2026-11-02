@@ -61,6 +61,18 @@ impl PlayerApi for RealBackend {
     fn player_play_artist(&self, req: PlayArtistRequest) -> ApiResult<()> {
         self.play_artist_impl(req)
     }
+    fn player_get_waveform(&self, track_id: &str) -> ApiResult<Waveform> {
+        self.waveform_impl(track_id)
+    }
+    fn lyrics_get(&self, track_id: &str) -> ApiResult<Option<Lyrics>> {
+        self.lyrics_impl(track_id)
+    }
+    fn player_loop_cycle(&self) -> ApiResult<()> {
+        self.loop_cycle_impl()
+    }
+    fn radio_start(&self, req: RadioStartRequest) -> ApiResult<()> {
+        self.radio_start_impl(req)
+    }
     fn player_play_genre(&self, req: PlayGenreRequest) -> ApiResult<()> {
         self.play_genre_impl(req)
     }

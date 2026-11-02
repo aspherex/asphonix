@@ -56,6 +56,12 @@ impl BrowseApi for RealBackend {
         let g = library::discovery::get_genre(&self.0.db, name).map_err(err)?.ok_or_else(|| nf("genre", name))?;
         conv(g)
     }
+    fn browse_get_artist_top_tracks(&self, id: &str) -> ApiResult<ArtistTopTracks> {
+        self.top_tracks_impl(id)
+    }
+    fn browse_get_artist_info(&self, id: &str) -> ApiResult<ArtistInfo> {
+        self.artist_info_impl(id)
+    }
     fn history_recent(&self, req: HistoryRecentRequest) -> ApiResult<Paged<HistoryEntry>> {
         r!(library::discovery::history_recent_tracks(&self.0.db, req.limit as u32))
     }
@@ -117,29 +123,8 @@ impl library::SyncProgressSink for Sink {
 fn _unused(_: IpcError, _: IpcErrorCode) {}
 
 impl ArtApi for RealBackend {
-    /// Cover at the display bucket size: disk cache first (`%LOCALAPPDATA%\dev.sonix.native\art`), else
-    /// `getCoverArt?size=` (the server resizes), stored as received, decoded to RGBA.
+    /// Real covers and playlist mosaics: see `art.rs`.
     fn art_get(&self, cover_art: &str, size: u32) -> ApiResult<ArtPixels> {
-        let size = bucket_for(size);
-        let dir = crate::data_dir().join("art");
-        let key: String = cover_art.chars().map(|c| if c.is_ascii_alphanumeric() || c == '-' { c } else { '_' }).collect();
-        let path = dir.join(format!("{key}_{size}.img"));
-        let bytes = match std::fs::read(&path) {
-            Ok(b) if !b.is_empty() => b,
-            _ => {
-                let client = self.0.client.read().unwrap().clone().ok_or_else(|| ApiError::new(ErrorCode::NotConnected, "not connected"))?;
-                let (b, _) = self.0.rt.block_on(client.get_cover_art(cover_art, Some(size))).map_err(err)?;
-                let _ = std::fs::create_dir_all(&dir);
-                let tmp = path.with_extension("tmp");
-                if std::fs::write(&tmp, &b).is_ok() {
-                    let _ = std::fs::rename(&tmp, &path);
-                }
-                b
-            }
-        };
-        let img = image::load_from_memory(&bytes).map_err(|e| ApiError::new(ErrorCode::Decode, format!("cover decode: {e}")))?;
-        let img = if img.width() > size.max(img.height()) || img.height() > size { img.resize(size, size, image::imageops::FilterType::Triangle) } else { img };
-        let rgba = img.to_rgba8();
-        Ok(ArtPixels { width: rgba.width(), height: rgba.height(), rgba: rgba.into_raw() })
+        self.art_pixels(cover_art, size)
     }
 }
