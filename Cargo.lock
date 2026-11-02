@@ -5546,6 +5546,7 @@ dependencies = [
 name = "sonix-ui"
 version = "0.1.0"
 dependencies = [
+ "embed-resource",
  "futures",
  "gpui",
  "image",
