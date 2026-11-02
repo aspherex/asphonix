@@ -2962,13 +2962,16 @@ mod tests {
     }
 
     fn test_engine_with(source: Arc<dyn TrackSource>) -> Engine {
-        Engine::new(
+        let engine = Engine::new(
             Arc::new(NullEvents),
             source,
             Arc::new(Db::open_in_memory().unwrap()),
             false,
             super::super::queue::DEFAULT_WINDOW_SIZE as u32,
-        )
+        );
+        // `Prefs::default()` is autoplay OFF in the native port; these engine tests exercise autoplay.
+        engine.prefs.set_autoplay(true);
+        engine
     }
 
     fn test_engine() -> Engine {
