@@ -5459,6 +5459,7 @@ dependencies = [
  "sonix-api",
  "sonix-core",
  "tokio",
+ "url",
 ]
 
 [[package]]

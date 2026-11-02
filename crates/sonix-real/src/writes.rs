@@ -60,6 +60,12 @@ impl RealBackend {
     fn changed(&self) {
         self.emit(Event::LibraryChanged);
     }
+
+    /// A write was refused or failed part-way: re-sync the mirror from the server (best effort) and tell the UI to reload.
+    fn refresh_after_refusal(&self, client: &Client, id: &str) {
+        let _ = self.0.rt.block_on(Self::refresh_playlist(client, &self.0.db, id));
+        self.changed();
+    }
 }
 
 impl PlaylistsApi for RealBackend {
@@ -78,26 +84,32 @@ impl PlaylistsApi for RealBackend {
     fn playlists_create(&self, req: CreatePlaylistRequest) -> ApiResult<Playlist> {
         let client = self.require_client()?;
         let db = &self.0.db;
-        let mut playlist = self
+        let raw = self
             .0
             .rt
             .block_on(async {
                 let raw = client.create_playlist(&req.name).await?;
-                let mut playlist = library::playlist_from_raw(&raw);
-                library::upsert_playlist_meta(db, &playlist)?;
-                // The native UI can create from a selection (`trackIds`); the WebView command only takes a name.
-                if !req.track_ids.is_empty() {
-                    client.update_playlist_add_songs(&raw.id, &req.track_ids).await?;
-                    Self::refresh_playlist(&client, db, &raw.id).await?;
-                    if let Some(d) = library::playlist_detail(db, &raw.id)? {
-                        playlist = d.playlist;
-                    }
-                }
-                Ok::<_, core::IpcError>(playlist)
+                library::upsert_playlist_meta(db, &library::playlist_from_raw(&raw))?;
+                Ok::<_, core::IpcError>(raw)
             })
             .map_err(err)?;
-        self.access(&mut playlist);
+        // The native UI can create from a selection (`trackIds`); the WebView command only takes a name.
+        // The playlist exists on the server now, so whatever happens next the mirror is refreshed and the UI told.
+        let added = if req.track_ids.is_empty() {
+            Ok(())
+        } else {
+            self.0.rt.block_on(async {
+                client.update_playlist_add_songs(&raw.id, &req.track_ids).await?;
+                Self::refresh_playlist(&client, db, &raw.id).await
+            })
+        };
+        if let Err(e) = added {
+            self.refresh_after_refusal(&client, &raw.id);
+            return Err(err(e));
+        }
         self.changed();
+        let mut playlist = library::playlist_detail(db, &raw.id).map_err(err)?.map(|d| d.playlist).unwrap_or_else(|| library::playlist_from_raw(&raw));
+        self.access(&mut playlist);
         conv(playlist)
     }
 
@@ -136,7 +148,16 @@ impl PlaylistsApi for RealBackend {
     fn playlists_remove_tracks(&self, req: RemovePlaylistTracksRequest) -> ApiResult<()> {
         self.ensure_writable(&req.id)?;
         let client = self.require_client()?;
-        let indices: Vec<u32> = req.indices.iter().map(|i| *i as u32).collect();
+        // The UI list is the local mirror's inner join with `tracks`, so UI indices are NOT server indices when
+        // entries have no local track row. Map each UI index to the server position of that very entry.
+        let local = library::playlist_detail(&self.0.db, &req.id).map_err(err)?.map(|d| d.tracks).unwrap_or_default();
+        let server = self.0.rt.block_on(client.get_playlist(&req.id)).map_err(err)?;
+        let server_ids: Vec<&str> = server.entry.iter().map(|s| s.id.as_str()).collect();
+        let local_ids: Vec<&str> = local.iter().map(|t| t.id.as_str()).collect();
+        let Some(indices) = map_ui_indices(&local_ids, &server_ids, &req.indices) else {
+            self.refresh_after_refusal(&client, &req.id);
+            return Err(ApiError::new(ErrorCode::InvalidRequest, "playlist changed on the server; reloaded, try again"));
+        };
         self.0
             .rt
             .block_on(async {
@@ -149,14 +170,23 @@ impl PlaylistsApi for RealBackend {
     }
 
     /// `updatePlaylist` has no reorder primitive: remove every entry and re-add the full list in ONE request.
+    /// Refused unless `trackIds` is a permutation of the server's entries (a list missing hidden entries would drop them).
     fn playlists_reorder(&self, req: ReorderPlaylistRequest) -> ApiResult<()> {
         self.ensure_writable(&req.id)?;
         let client = self.require_client()?;
+        let current = self.0.rt.block_on(client.get_playlist(&req.id)).map_err(err)?;
+        let mut have: Vec<&str> = current.entry.iter().map(|s| s.id.as_str()).collect();
+        let mut want: Vec<&str> = req.track_ids.iter().map(String::as_str).collect();
+        have.sort_unstable();
+        want.sort_unstable();
+        if have != want {
+            self.refresh_after_refusal(&client, &req.id);
+            return Err(ApiError::new(ErrorCode::InvalidRequest, "playlist changed on the server; reloaded, try again"));
+        }
+        let indices: Vec<u32> = (0..current.entry.len() as u32).rev().collect();
         self.0
             .rt
             .block_on(async {
-                let current = client.get_playlist(&req.id).await?;
-                let indices: Vec<u32> = (0..current.entry.len() as u32).rev().collect();
                 client.update_playlist_replace(&req.id, &indices, &req.track_ids).await?;
                 Self::refresh_playlist(&client, &self.0.db, &req.id).await
             })
@@ -319,3 +349,24 @@ impl RealBackend {
 #[cfg(test)]
 #[path = "writes_tests.rs"]
 mod tests;
+
+/// UI row indices (positions in the local, inner-joined list) -> server entry positions (nth occurrence of the same
+/// track id). `None` when an index is out of range or the local list is not a subsequence of the server's entries
+/// (stale mirror): nothing may be sent then.
+fn map_ui_indices(local: &[&str], server: &[&str], ui: &[usize]) -> Option<Vec<u32>> {
+    // Entries without a local track row are the only ones allowed to be missing, in order.
+    let mut s = server.iter();
+    if !local.iter().all(|l| s.any(|x| x == l)) {
+        return None;
+    }
+    let mut out = Vec::with_capacity(ui.len());
+    for &i in ui {
+        let id = *local.get(i)?;
+        let nth = local[..i].iter().filter(|x| **x == id).count();
+        let pos = server.iter().enumerate().filter(|(_, x)| **x == id).nth(nth)?.0;
+        out.push(pos as u32);
+    }
+    out.sort_unstable();
+    out.dedup();
+    Some(out)
+}

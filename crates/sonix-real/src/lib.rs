@@ -95,10 +95,15 @@ impl RealBackend {
     /// Opens the backend; with a saved connection it reconnects in the background
     /// using the keychain password (state `Connecting` until the probe answers).
     pub fn open() -> Self {
+        Self::open_in(config_dir(), data_dir())
+    }
+
+    /// `open` with explicit config (`connection.json`, profiles, smart playlists) and data (library DB) dirs.
+    pub fn open_in(dir: PathBuf, data: PathBuf) -> Self {
         secrets::set_service_name(IDENTIFIER);
-        let dir = config_dir();
         let _ = std::fs::create_dir_all(&dir);
-        let db = Arc::new(Db::open(&data_dir()).expect("library db"));
+        let _ = std::fs::create_dir_all(&data);
+        let db = Arc::new(Db::open(&data).expect("library db"));
         let client: Arc<std::sync::RwLock<Option<Client>>> = Arc::new(std::sync::RwLock::new(None));
         let prefs = Arc::new(sonix_core::audio::Prefs::default());
         let (ev_tx, ev_rx) = channel::<Event>();

@@ -1,51 +1,144 @@
 //! Write paths against a local mock Subsonic server (127.0.0.1, random port). Never contacts a real server.
 use super::*;
+use std::collections::BTreeMap;
 use std::io::{Read, Write};
 use std::sync::{Arc, Mutex};
+use std::time::Duration;
 
-/// Mock server: records every request target (`/rest/<endpoint>?...`), answers with canned Subsonic JSON.
+#[derive(Debug, Clone)]
+struct Req {
+    endpoint: String,
+    pairs: Vec<(String, String)>,
+}
+
+impl Req {
+    fn all(&self, key: &str) -> Vec<String> {
+        self.pairs.iter().filter(|(k, _)| k == key).map(|(_, v)| v.clone()).collect()
+    }
+}
+
+#[derive(Default)]
+struct State {
+    log: Vec<Req>,
+    /// id -> (name, entry track ids)
+    playlists: BTreeMap<String, (String, Vec<String>)>,
+    next: u32,
+    /// `Some("*")` fails every endpoint with `status:"failed"`, `Some(name)` only that endpoint.
+    fail: Option<&'static str>,
+}
+
+/// Stateful mock server: records every request with exactly parsed query pairs, applies playlist edits.
 struct Mock {
     url: String,
-    log: Arc<Mutex<Vec<String>>>,
+    st: Arc<Mutex<State>>,
+}
+
+fn playlist_json(id: &str, name: &str, entries: &[String], with_entries: bool) -> String {
+    let song = |id: &str| format!(r#"{{"id":"{id}","title":"T {id}","suffix":"flac","artist":"A"}}"#);
+    let e = if with_entries { format!(r#","entry":[{}]"#, entries.iter().map(|i| song(i)).collect::<Vec<_>>().join(",")) } else { String::new() };
+    format!(r#""playlist":{{"id":"{id}","name":"{name}","owner":"me","songCount":{},"duration":10.0,"readonly":false{e}}}"#, entries.len())
 }
 
 impl Mock {
     fn start() -> Mock {
         let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
         let url = format!("http://{}", listener.local_addr().unwrap());
-        let log = Arc::new(Mutex::new(Vec::new()));
-        let l2 = log.clone();
+        let st = Arc::new(Mutex::new(State::default()));
+        let s2 = st.clone();
         std::thread::spawn(move || {
             for sock in listener.incoming() {
                 let Ok(mut sock) = sock else { break };
                 let mut buf = [0u8; 8192];
                 let n = sock.read(&mut buf).unwrap_or(0);
                 let req = String::from_utf8_lossy(&buf[..n]).to_string();
-                let line = req.lines().next().unwrap_or("").to_string();
-                let target = line.split(' ').nth(1).unwrap_or("").to_string();
-                l2.lock().unwrap().push(target.clone());
-                let ep = target.trim_start_matches("/rest/").split('?').next().unwrap_or("").to_string();
-                let song = |id: &str| format!(r#"{{"id":"{id}","title":"T {id}","suffix":"flac","artist":"A"}}"#);
-                let pl = |name: &str| format!(r#""id":"pl9","name":"{name}","owner":"me","songCount":2,"duration":20.0,"readonly":false"#);
-                let inner = match ep.as_str() {
-                    "createPlaylist" => format!(r#","playlist":{{{}}}"#, pl("Mix")),
-                    "getPlaylist" => format!(r#","playlist":{{{},"entry":[{},{}]}}"#, pl("Mix"), song("t1"), song("t2")),
-                    _ => String::new(),
+                let target = req.lines().next().unwrap_or("").split(' ').nth(1).unwrap_or("").to_string();
+                let u = url::Url::parse(&format!("http://x{target}")).unwrap();
+                let r = Req { endpoint: u.path().trim_start_matches("/rest/").to_string(), pairs: u.query_pairs().map(|(k, v)| (k.into_owned(), v.into_owned())).collect() };
+                let mut st = s2.lock().unwrap();
+                st.log.push(r.clone());
+                let body = if st.fail.is_some_and(|f| f == "*" || f == r.endpoint) {
+                    r#"{"subsonic-response":{"status":"failed","version":"1.16.1","error":{"code":0,"message":"boom"}}}"#.to_string()
+                } else {
+                    let first = |k: &str| r.all(k).into_iter().next().unwrap_or_default();
+                    let inner = match r.endpoint.as_str() {
+                        "createPlaylist" => {
+                            st.next += 1;
+                            let id = format!("pl{}", st.next);
+                            let name = first("name");
+                            st.playlists.insert(id.clone(), (name.clone(), vec![]));
+                            format!(",{}", playlist_json(&id, &name, &[], false))
+                        }
+                        "getPlaylist" => match st.playlists.get(&first("id")) {
+                            Some((name, e)) => format!(",{}", playlist_json(&first("id"), name, e, true)),
+                            None => String::new(),
+                        },
+                        "updatePlaylist" => {
+                            if let Some(p) = st.playlists.get_mut(&first("playlistId")) {
+                                if r.pairs.iter().any(|(k, _)| k == "name") {
+                                    p.0 = first("name");
+                                }
+                                let mut rm: Vec<usize> = r.all("songIndexToRemove").iter().map(|s| s.parse().unwrap()).collect();
+                                rm.sort_unstable_by(|a, b| b.cmp(a));
+                                for i in rm {
+                                    p.1.remove(i);
+                                }
+                                p.1.extend(r.all("songIdToAdd"));
+                            }
+                            String::new()
+                        }
+                        "deletePlaylist" => {
+                            st.playlists.remove(&first("id"));
+                            String::new()
+                        }
+                        _ => String::new(),
+                    };
+                    format!(r#"{{"subsonic-response":{{"status":"ok","version":"1.16.1"{inner}}}}}"#)
                 };
-                let body = format!(r#"{{"subsonic-response":{{"status":"ok","version":"1.16.1"{inner}}}}}"#);
+                drop(st);
                 let resp = format!("HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}", body.len(), body);
                 let _ = sock.write_all(resp.as_bytes());
             }
         });
-        Mock { url, log }
+        Mock { url, st }
     }
-    fn take(&self) -> Vec<String> {
-        std::mem::take(&mut *self.log.lock().unwrap())
+    fn take(&self) -> Vec<Req> {
+        std::mem::take(&mut self.st.lock().unwrap().log)
+    }
+    fn seed(&self, id: &str, name: &str, entries: &[&str]) {
+        self.st.lock().unwrap().playlists.insert(id.into(), (name.into(), entries.iter().map(|s| s.to_string()).collect()));
+    }
+    fn entries(&self, id: &str) -> Vec<String> {
+        self.st.lock().unwrap().playlists[id].1.clone()
+    }
+    fn fail(&self, on: Option<&'static str>) {
+        self.st.lock().unwrap().fail = on;
     }
 }
 
-fn has(reqs: &[String], endpoint: &str, params: &[&str]) -> bool {
-    reqs.iter().any(|r| r.starts_with(&format!("/rest/{endpoint}?")) && params.iter().all(|p| r.contains(p)))
+/// Exact pair match (`id=t1` never matches `albumId=t1`).
+fn has(reqs: &[Req], endpoint: &str, pairs: &[(&str, &str)]) -> bool {
+    reqs.iter().any(|r| r.endpoint == endpoint && pairs.iter().all(|(k, v)| r.pairs.iter().any(|(rk, rv)| rk == k && rv == v)))
+}
+
+fn find<'a>(reqs: &'a [Req], endpoint: &str) -> Vec<&'a Req> {
+    reqs.iter().filter(|r| r.endpoint == endpoint).collect()
+}
+
+/// Temp dir on D: (C: is nearly full), removed on drop even when the test panics.
+struct TmpDir(std::path::PathBuf);
+impl TmpDir {
+    fn new(tag: &str) -> Self {
+        let base = if std::path::Path::new("<build-dir>").exists() { std::path::PathBuf::from("<build-dir>/tmp") } else { std::env::temp_dir() };
+        let d = base.join(format!("sonix-writes-{tag}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&d);
+        std::fs::create_dir_all(&d).unwrap();
+        TmpDir(d)
+    }
+}
+impl Drop for TmpDir {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_dir_all(&self.0);
+    }
 }
 
 fn exec(b: &RealBackend, sql: &str) {
@@ -56,15 +149,41 @@ fn track_col(b: &RealBackend, id: &str, col: &str) -> Option<String> {
     b.0.db.read(|c| c.query_row(&format!("SELECT CAST({col} AS TEXT) FROM tracks WHERE id='{id}'"), [], |r| r.get(0))).unwrap()
 }
 
+fn local_ids(b: &RealBackend, pl: &str) -> Vec<String> {
+    b.playlists_get(pl).unwrap().tracks.into_iter().map(|t| t.id).collect()
+}
+
+/// Events seen within a short window.
+fn events(rx: &std::sync::mpsc::Receiver<Event>) -> Vec<Event> {
+    std::iter::from_fn(|| rx.recv_timeout(Duration::from_millis(300)).ok()).collect()
+}
+
+fn changed(evs: &[Event]) -> bool {
+    evs.iter().any(|e| matches!(e, Event::LibraryChanged))
+}
+
+fn connect(b: &RealBackend, mock: &Mock) {
+    *b.0.client.write().unwrap() = Some(Client::new(&mock.url, "me", "pw").unwrap());
+    b.0.session.lock().unwrap().cfg = Some(sonix_core::secrets::ConnectionConfig { url: mock.url.clone(), username: "me".into(), last_sync_at: None });
+}
+
+#[test]
+fn map_ui_indices_cases() {
+    // hidden entry X between A and B
+    assert_eq!(map_ui_indices(&["a", "b"], &["a", "x", "b"], &[1]), Some(vec![2]));
+    assert_eq!(map_ui_indices(&["a", "b"], &["a", "x", "b"], &[1, 0, 1]), Some(vec![0, 2]));
+    // nth occurrence of a duplicate
+    assert_eq!(map_ui_indices(&["a", "a"], &["a", "x", "a"], &[1]), Some(vec![2]));
+    // out of range, or local list not a subsequence of the server's
+    assert_eq!(map_ui_indices(&["a"], &["a"], &[1]), None);
+    assert_eq!(map_ui_indices(&["a", "c"], &["a", "b"], &[0]), None);
+    assert_eq!(map_ui_indices(&["b", "a"], &["a", "b"], &[0]), None);
+}
+
 #[test]
 fn writes_hit_the_mock_server_and_mirror_locally() {
-    // Isolated data/config dirs; no keychain is touched (no saved connection).
-    let tmp = std::env::temp_dir().join(format!("sonix-writes-test-{}", std::process::id()));
-    let _ = std::fs::remove_dir_all(&tmp);
-    std::fs::create_dir_all(&tmp).unwrap();
-    unsafe { std::env::set_var("APPDATA", tmp.join("roaming")) };
-    unsafe { std::env::set_var("LOCALAPPDATA", tmp.join("local")) };
-    let b = RealBackend::open();
+    let tmp = TmpDir::new("main");
+    let b = RealBackend::open_in(tmp.0.join("config"), tmp.0.join("data"));
     let rx = b.subscribe();
     let mock = Mock::start();
     exec(
@@ -78,77 +197,129 @@ fn writes_hit_the_mock_server_and_mirror_locally() {
     let e = b.star_add(StarRequest { id: "t1".into(), kind: StarTargetType::Track }).unwrap_err();
     assert_eq!(e.code, ErrorCode::NotConnected);
 
-    *b.0.client.write().unwrap() = Some(Client::new(&mock.url, "me", "pw").unwrap());
-    b.0.session.lock().unwrap().cfg = Some(sonix_core::secrets::ConnectionConfig { url: mock.url.clone(), username: "me".into(), last_sync_at: None });
+    connect(&b, &mock);
     assert!(mock.take().is_empty());
+    events(&rx);
 
-    // --- stars
+    // --- stars: exact parameter names per kind
     b.star_add(StarRequest { id: "t1".into(), kind: StarTargetType::Track }).unwrap();
-    assert!(has(&mock.take(), "star", &["id=t1"]));
-    let got = std::iter::from_fn(|| rx.recv_timeout(std::time::Duration::from_secs(2)).ok()).any(|e| matches!(e, Event::LibraryChanged));
-    assert!(got, "star must emit LibraryChanged");
+    let reqs = mock.take();
+    assert!(has(&reqs, "star", &[("id", "t1")]) && !has(&reqs, "star", &[("albumId", "t1")]));
+    assert!(changed(&events(&rx)), "star must emit LibraryChanged");
     assert!(track_col(&b, "t1", "starred").is_some());
     assert_eq!(b.liked_count().unwrap(), 1);
     b.star_add(StarRequest { id: "al1".into(), kind: StarTargetType::Album }).unwrap();
-    assert!(has(&mock.take(), "star", &["albumId=al1"]));
+    let reqs = mock.take();
+    assert!(has(&reqs, "star", &[("albumId", "al1")]) && !has(&reqs, "star", &[("id", "al1")]));
+    b.star_add(StarRequest { id: "ar1".into(), kind: StarTargetType::Artist }).unwrap();
+    assert!(has(&mock.take(), "star", &[("artistId", "ar1")]));
     b.star_remove(StarRequest { id: "t1".into(), kind: StarTargetType::Track }).unwrap();
-    assert!(has(&mock.take(), "unstar", &["id=t1"]));
+    assert!(has(&mock.take(), "unstar", &[("id", "t1")]));
     assert_eq!(b.liked_count().unwrap(), 0);
 
-    // --- ratings
+    // --- ratings (id checked on the clearing call too)
     b.rating_set(SetRatingRequest { id: "t2".into(), kind: StarTargetType::Track, rating: 4 }).unwrap();
-    assert!(has(&mock.take(), "setRating", &["id=t2", "rating=4"]));
+    assert!(has(&mock.take(), "setRating", &[("id", "t2"), ("rating", "4")]));
     assert_eq!(track_col(&b, "t2", "rating").as_deref(), Some("4"));
     b.rating_set(SetRatingRequest { id: "t2".into(), kind: StarTargetType::Track, rating: 0 }).unwrap();
-    assert!(has(&mock.take(), "setRating", &["rating=0"]));
+    assert!(has(&mock.take(), "setRating", &[("id", "t2"), ("rating", "0")]));
     assert_eq!(track_col(&b, "t2", "rating"), None);
     assert!(b.rating_set(SetRatingRequest { id: "t2".into(), kind: StarTargetType::Track, rating: 6 }).is_err());
     assert!(mock.take().is_empty(), "out-of-range rating must not reach the server");
+    events(&rx);
 
-    // --- playlists
-    let p = b.playlists_create(CreatePlaylistRequest { name: "Mix".into(), track_ids: vec!["t1".into(), "t2".into()] }).unwrap();
-    assert_eq!(p.id, "pl9");
+    // --- a failed server write (`status:"failed"`) leaves the mirror untouched and emits nothing
+    mock.fail(Some("*"));
+    assert!(b.star_add(StarRequest { id: "t3".into(), kind: StarTargetType::Track }).is_err());
+    assert!(b.rating_set(SetRatingRequest { id: "t3".into(), kind: StarTargetType::Track, rating: 3 }).is_err());
+    assert!(b.playlists_rename(RenamePlaylistRequest { id: "mine".into(), name: "Renamed".into() }).is_err());
+    assert!(b.playlists_delete(DeletePlaylistRequest { id: "mine".into() }).is_err());
+    assert_eq!(mock.take().len(), 4, "each failed write did reach the server");
+    assert_eq!(track_col(&b, "t3", "starred"), None);
+    assert_eq!(track_col(&b, "t3", "rating"), None);
+    assert_eq!(b.playlists_get("mine").unwrap().playlist.name, "Mine");
+    assert!(!changed(&events(&rx)), "failed writes must not emit LibraryChanged");
+    mock.fail(None);
+
+    // --- create with tracks keeps song order
+    let p = b.playlists_create(CreatePlaylistRequest { name: "Mix".into(), track_ids: vec!["t2".into(), "t1".into()] }).unwrap();
+    assert_eq!(p.id, "pl1");
     assert!(!p.smart && !p.read_only);
     let reqs = mock.take();
-    assert!(has(&reqs, "createPlaylist", &["name=Mix"]));
-    assert!(has(&reqs, "updatePlaylist", &["playlistId=pl9", "songIdToAdd=t1", "songIdToAdd=t2"]));
-    let d = b.playlists_get("pl9").unwrap();
-    assert_eq!(d.tracks.iter().map(|t| t.id.as_str()).collect::<Vec<_>>(), ["t1", "t2"]);
+    assert!(has(&reqs, "createPlaylist", &[("name", "Mix")]));
+    let add = find(&reqs, "updatePlaylist");
+    assert_eq!(add.len(), 1);
+    assert_eq!(add[0].all("playlistId"), ["pl1"]);
+    assert_eq!(add[0].all("songIdToAdd"), ["t2", "t1"]);
+    assert_eq!(local_ids(&b, "pl1"), ["t2", "t1"]);
 
-    b.playlists_rename(RenamePlaylistRequest { id: "pl9".into(), name: "New".into() }).unwrap();
-    assert!(has(&mock.take(), "updatePlaylist", &["playlistId=pl9", "name=New"]));
-    assert_eq!(b.playlists_get("pl9").unwrap().playlist.name, "New");
+    b.playlists_rename(RenamePlaylistRequest { id: "pl1".into(), name: "New".into() }).unwrap();
+    assert!(has(&mock.take(), "updatePlaylist", &[("playlistId", "pl1"), ("name", "New")]));
+    assert_eq!(b.playlists_get("pl1").unwrap().playlist.name, "New");
 
-    b.playlists_add_tracks(AddToPlaylistRequest { id: "pl9".into(), track_ids: vec!["t3".into()] }).unwrap();
+    b.playlists_add_tracks(AddToPlaylistRequest { id: "pl1".into(), track_ids: vec!["t3".into()] }).unwrap();
     let reqs = mock.take();
-    assert!(has(&reqs, "updatePlaylist", &["songIdToAdd=t3"]) && has(&reqs, "getPlaylist", &["id=pl9"]));
+    assert!(has(&reqs, "updatePlaylist", &[("playlistId", "pl1"), ("songIdToAdd", "t3")]) && has(&reqs, "getPlaylist", &[("id", "pl1")]));
+    assert_eq!(local_ids(&b, "pl1"), ["t2", "t1", "t3"]);
 
-    b.playlists_remove_tracks(RemovePlaylistTracksRequest { id: "pl9".into(), indices: vec![0, 2] }).unwrap();
-    assert!(has(&mock.take(), "updatePlaylist", &["songIndexToRemove=0", "songIndexToRemove=2"]));
-
-    // reorder: ONE updatePlaylist removing every current entry (mock has 2) and re-adding the new order
-    b.playlists_reorder(ReorderPlaylistRequest { id: "pl9".into(), track_ids: vec!["t2".into(), "t1".into()] }).unwrap();
+    // remove by UI index: playlistId and indices, mirror follows the server
+    b.playlists_remove_tracks(RemovePlaylistTracksRequest { id: "pl1".into(), indices: vec![0, 2] }).unwrap();
     let reqs = mock.take();
-    let upd: Vec<_> = reqs.iter().filter(|r| r.starts_with("/rest/updatePlaylist")).collect();
+    let upd = find(&reqs, "updatePlaylist");
     assert_eq!(upd.len(), 1);
-    assert!(upd[0].contains("songIndexToRemove=1") && upd[0].contains("songIndexToRemove=0"));
-    assert!(upd[0].find("songIdToAdd=t2").unwrap() < upd[0].find("songIdToAdd=t1").unwrap());
+    assert_eq!(upd[0].all("playlistId"), ["pl1"]);
+    let mut idx = upd[0].all("songIndexToRemove");
+    idx.sort();
+    assert_eq!(idx, ["0", "2"]);
+    assert_eq!(mock.entries("pl1"), ["t1"]);
+    assert_eq!(local_ids(&b, "pl1"), ["t1"]);
 
-    let dup = b.playlists_duplicate("pl9").unwrap();
+    // reorder: ONE updatePlaylist removing every current entry and re-adding the new order
+    b.playlists_add_tracks(AddToPlaylistRequest { id: "pl1".into(), track_ids: vec!["t2".into()] }).unwrap();
+    mock.take();
+    b.playlists_reorder(ReorderPlaylistRequest { id: "pl1".into(), track_ids: vec!["t2".into(), "t1".into()] }).unwrap();
     let reqs = mock.take();
-    assert_eq!(dup.id, "pl9");
-    assert!(has(&reqs, "createPlaylist", &["name=Mix+%28copy%29"]) || has(&reqs, "createPlaylist", &["name=Mix%20%28copy%29"]), "{reqs:?}");
+    let upd = find(&reqs, "updatePlaylist");
+    assert_eq!(upd.len(), 1);
+    let mut rm = upd[0].all("songIndexToRemove");
+    rm.sort();
+    assert_eq!(rm, ["0", "1"]);
+    assert_eq!(upd[0].all("songIdToAdd"), ["t2", "t1"]);
+    assert_eq!(mock.entries("pl1"), ["t2", "t1"]);
+    assert_eq!(local_ids(&b, "pl1"), ["t2", "t1"]);
+
+    // duplicate: new id, "<name> (copy)", same tracks in order
+    let dup = b.playlists_duplicate("pl1").unwrap();
+    let reqs = mock.take();
+    assert_eq!(dup.id, "pl2");
+    assert!(has(&reqs, "createPlaylist", &[("name", "New (copy)")]));
+    let add = find(&reqs, "updatePlaylist");
+    assert_eq!(add[0].all("playlistId"), ["pl2"]);
+    assert_eq!(add[0].all("songIdToAdd"), ["t2", "t1"]);
+    assert_eq!(mock.entries("pl2"), ["t2", "t1"]);
+    assert_eq!(local_ids(&b, "pl2"), ["t2", "t1"]);
+    assert_eq!(b.playlists_get("pl2").unwrap().playlist.name, "New (copy)");
+
+    // create with tracks where only the add step fails: the playlist exists on the server, so the mirror has it
+    // and the UI is told, although the call errors
+    events(&rx);
+    mock.fail(Some("updatePlaylist"));
+    assert!(b.playlists_create(CreatePlaylistRequest { name: "Half".into(), track_ids: vec!["t1".into()] }).is_err());
+    mock.fail(None);
+    assert!(has(&mock.take(), "createPlaylist", &[("name", "Half")]));
+    assert_eq!(b.playlists_get("pl3").unwrap().playlist.name, "Half");
+    assert!(changed(&events(&rx)));
 
     b.playlists_delete(DeletePlaylistRequest { id: "mine".into() }).unwrap();
-    assert!(has(&mock.take(), "deletePlaylist", &["id=mine"]));
+    assert!(has(&mock.take(), "deletePlaylist", &[("id", "mine")]));
     assert!(b.playlists_get("mine").is_err());
 
     // --- access flags and the read-only guard
     let lists = b.playlists_list().unwrap();
-    let find = |id: &str| lists.iter().find(|p| p.id == id).unwrap().clone();
-    assert!(find("ro").smart && find("ro").read_only);
-    assert!(!find("theirs").smart && find("theirs").read_only);
-    assert!(!find("pl9").read_only);
+    let get = |id: &str| lists.iter().find(|p| p.id == id).unwrap().clone();
+    assert!(get("ro").smart && get("ro").read_only);
+    assert!(!get("theirs").smart && get("theirs").read_only);
+    assert!(!get("pl1").read_only);
     mock.take();
     for e in [
         b.playlists_rename(RenamePlaylistRequest { id: "ro".into(), name: "x".into() }),
@@ -192,7 +363,55 @@ fn writes_hit_the_mock_server_and_mirror_locally() {
     assert!(b.smart_list().unwrap().is_empty());
     assert!(mock.take().is_empty(), "smart playlists never touch the server");
 
-    // the definition file lives in the config dir
-    assert!(tmp.join("roaming").join(crate::IDENTIFIER).join("smart_playlists.json").exists());
-    let _ = std::fs::remove_dir_all(&tmp);
+    // the definition file lives in the config dir passed to `open_in`
+    assert!(tmp.0.join("config").join("smart_playlists.json").exists());
+}
+
+/// Playlists whose server entries have no local track row (the UI list is shorter than the server's).
+#[test]
+fn hidden_and_stale_entries_never_edit_the_wrong_row() {
+    let tmp = TmpDir::new("hidden");
+    let b = RealBackend::open_in(tmp.0.join("config"), tmp.0.join("data"));
+    let rx = b.subscribe();
+    let mock = Mock::start();
+    connect(&b, &mock);
+    // t1 = A, t2 = B are mirrored; "x" (X) has no local track row, so the UI list is [A, B] while the server has [A, X, B].
+    exec(
+        &b,
+        "INSERT INTO tracks (id,title,artist,suffix,duration) VALUES ('t1','A','A','flac',10),('t2','B','A','flac',10),('t3','C','A','flac',10);
+         INSERT INTO playlists (id,name,owner,readonly) VALUES ('h1','H1','me',0),('h2','H2','me',0),('st','Stale','me',0);
+         INSERT INTO playlist_tracks (playlist_id,position,track_id) VALUES ('h1',0,'t1'),('h1',1,'x'),('h1',2,'t2'),
+            ('h2',0,'t1'),('h2',1,'x'),('h2',2,'t2'),('st',0,'t1'),('st',1,'t3');",
+    );
+    mock.seed("h1", "H1", &["t1", "x", "t2"]);
+    mock.seed("h2", "H2", &["t1", "x", "t2"]);
+    mock.seed("st", "Stale", &["t1", "t2"]);
+    assert_eq!(local_ids(&b, "h1"), ["t1", "t2"]);
+    events(&rx);
+
+    // remove UI row 1 (B): server position 2, not 1 (X)
+    b.playlists_remove_tracks(RemovePlaylistTracksRequest { id: "h1".into(), indices: vec![1] }).unwrap();
+    let reqs = mock.take();
+    assert_eq!(find(&reqs, "updatePlaylist")[0].all("songIndexToRemove"), ["2"]);
+    assert_eq!(mock.entries("h1"), ["t1", "x"]);
+    assert_eq!(local_ids(&b, "h1"), ["t1"]);
+    assert!(changed(&events(&rx)));
+
+    // reorder from the shortened UI list would drop X: refused, nothing edited, mirror refreshed, UI told
+    let e = b.playlists_reorder(ReorderPlaylistRequest { id: "h2".into(), track_ids: vec!["t2".into(), "t1".into()] }).unwrap_err();
+    assert_eq!(e.code, ErrorCode::InvalidRequest);
+    let reqs = mock.take();
+    assert!(find(&reqs, "updatePlaylist").is_empty(), "refused reorder must not edit");
+    assert!(has(&reqs, "getPlaylist", &[("id", "h2")]), "refusal refreshes the mirror");
+    assert_eq!(mock.entries("h2"), ["t1", "x", "t2"]);
+    assert!(changed(&events(&rx)));
+
+    // stale mirror (local [t1,t3], server [t1,t2]): remove is refused, mirror re-synced
+    let e = b.playlists_remove_tracks(RemovePlaylistTracksRequest { id: "st".into(), indices: vec![1] }).unwrap_err();
+    assert_eq!(e.code, ErrorCode::InvalidRequest);
+    let reqs = mock.take();
+    assert!(find(&reqs, "updatePlaylist").is_empty());
+    assert_eq!(mock.entries("st"), ["t1", "t2"]);
+    assert_eq!(local_ids(&b, "st"), ["t1", "t2"]);
+    assert!(changed(&events(&rx)));
 }

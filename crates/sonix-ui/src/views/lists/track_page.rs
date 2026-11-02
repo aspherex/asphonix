@@ -101,7 +101,7 @@ fn initial_seed() -> u32 {
     }
     #[cfg(not(feature = "parity"))]
     {
-        std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| (d.as_nanos() % 1_000_000) as u32).unwrap_or(1)
+        std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| (d.as_nanos() % 999_999) as u32 + 1).unwrap_or(1)
     }
 }
 
@@ -465,9 +465,19 @@ impl TrackPage {
         let ids: Vec<String> = d.tracks.iter().map(|t| t.id.clone()).collect();
         let rows: Vec<RowItem> = d.tracks.iter().cloned().map(|t| RowItem::Track { t: Box::new(t), label: None }).collect();
         self.table.update(cx, |t, cx| t.set_local_keep_scroll(rows, cx));
-        app::call(cx, move |b| {
-            let _ = b.playlists_reorder(ReorderPlaylistRequest { id, track_ids: ids });
-        });
+        // The web app has no toast here; on failure (e.g. the backend refused a stale/hidden-entry list) tell the user
+        // and reload so the rows match the server.
+        let b = self.backend.clone();
+        cx.spawn(async move |this, cx| {
+            let r = cx.background_executor().spawn(async move { b.playlists_reorder(ReorderPlaylistRequest { id, track_ids: ids }) }).await;
+            if r.is_err() {
+                let _ = this.update(cx, |t, cx| {
+                    crate::overlays::show_toast(cx, "Could not reorder playlist");
+                    t.reload(cx);
+                });
+            }
+        })
+        .detach();
     }
 
     fn rename(&mut self, cx: &mut Context<Self>) {
@@ -701,7 +711,7 @@ impl Render for TrackPage {
                 let mut names = ["pl.btn.rename", "pl.btn.delete", "pl.btn.more", "pl.btn.x"].into_iter();
                 if random {
                     actions = actions.child(pid(names.next().unwrap(), icon_btn40("pg-reroll", &th, "sync", false).on_click(cx.listener(|this, _, _, cx| {
-                        this.seed = (this.seed.wrapping_mul(1_103_515_245).wrapping_add(12_345)) % 1_000_000;
+                        this.seed = (this.seed.wrapping_mul(1_103_515_245).wrapping_add(12_345)) % 999_999 + 1;
                         this.reload(cx);
                     }))));
                 }
