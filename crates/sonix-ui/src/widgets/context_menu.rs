@@ -8,9 +8,10 @@ use crate::text::txt;
 use crate::tracking::{BODY_SM, MONO_CODE};
 use crate::theme::Theme;
 use gpui::{
-    AnchoredPositionMode, AnyElement, App, Context, FocusHandle, Focusable, IntoElement, KeyDownEvent, MouseButton, ParentElement, Pixels,
-    Point, Render, SharedString, Window, anchored, deferred, div, point, prelude::*, px,
+    AnyElement, App, Bounds, Context, FocusHandle, Focusable, IntoElement, KeyDownEvent, MouseButton, MouseDownEvent, ParentElement, Pixels,
+    Point, Render, SharedString, Window, anchored, canvas, deferred, div, point, prelude::*, px,
 };
+use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 
 pub type Action = Rc<dyn Fn(&mut Window, &mut App)>;
@@ -96,6 +97,11 @@ pub struct ContextMenu {
     th: Theme,
     open: Option<Open>,
     focus: FocusHandle,
+    /// Window bounds of each top-level row last frame (only submenu rows are recorded) and of the open
+    /// submenu panel. GPUI panics on a `deferred` inside a `deferred`, so the submenu is not a child of
+    /// its row: it is a sibling layer inside the menu's one `deferred`, placed from the row's bounds.
+    row_bounds: Rc<RefCell<Vec<Option<Bounds<Pixels>>>>>,
+    sub_bounds: Rc<Cell<Option<Bounds<Pixels>>>>,
 }
 
 /// `ContextMenu.svelte:.menu { min-width: 200px; max-width: 280px }` (the width is the content width in between).
@@ -122,7 +128,7 @@ fn panel_width(window: &Window, th: &Theme, items: &[MenuItem]) -> f32 {
 
 impl ContextMenu {
     pub fn new(th: Theme, cx: &mut Context<Self>) -> Self {
-        Self { th, open: None, focus: cx.focus_handle() }
+        Self { th, open: None, focus: cx.focus_handle(), row_bounds: Rc::default(), sub_bounds: Rc::default() }
     }
     pub fn set_theme(&mut self, th: Theme) {
         self.th = th;
@@ -253,9 +259,7 @@ impl ContextMenu {
         cx.stop_propagation();
     }
 
-    // one argument per piece of per-panel state (items/active/sub/parent/width) plus the window and context
-    #[allow(clippy::too_many_arguments)]
-    fn panel(&self, items: &[MenuItem], active: Option<usize>, sub: Option<usize>, parent: Option<usize>, width: f32, window: &Window, cx: &mut Context<Self>) -> gpui::Div {
+    fn panel(&self, items: &[MenuItem], active: Option<usize>, parent: Option<usize>, width: f32, cx: &mut Context<Self>) -> gpui::Div {
         let th = self.th;
         let mut col = div()
             .occlude()
@@ -289,14 +293,24 @@ impl ContextMenu {
                 th.text
             };
             let is_sub = matches!(it.kind, Kind::Submenu(_));
-            let submenu = match (&it.kind, is_active && self.open.as_ref().map(|o| o.sub_open).unwrap_or(false)) {
-                (Kind::Submenu(v), true) => {
-                    let sw = panel_width(window, &th, v);
-                    let p = self.panel(v, sub, None, Some(i), sw, window, cx);
-                    Some(deferred(anchored().position_mode(AnchoredPositionMode::Local).position(point(px(width - 4.), px(-5.))).child(p)).with_priority(2))
-                }
-                _ => None,
-            };
+            // a submenu row records its window bounds; `render` places the submenu panel from them
+            let bounds_probe = (is_sub && parent.is_none()).then(|| {
+                let rb = self.row_bounds.clone();
+                canvas(
+                    move |b, _, _| {
+                        let mut v = rb.borrow_mut();
+                        if v.len() <= i {
+                            v.resize(i + 1, None);
+                        }
+                        v[i] = Some(b);
+                    },
+                    |_, _, _, _| {},
+                )
+                .absolute()
+                .top_0()
+                .left_0()
+                .size_full()
+            });
             let row = div()
                 .id(("mi", i))
                 .relative()
@@ -339,7 +353,7 @@ impl ContextMenu {
                 .children(it.icon.map(|n| icon(n, 14., th.muted).text_color(if it.danger { th.clip } else if is_active { th.accent_fg } else { th.muted })))
                 .child(div().flex_1().min_w_0().flex().child(txt(&th, BODY_SM, it.label.clone()).ellipsis()))
                 .children(is_sub.then(|| icon("chevron-right", 12., colr)))
-                .children(submenu);
+                .children(bounds_probe);
             col = col.child(pid(format!("menu.child.{}", this_dom + usize::from(parent.is_some()) * 100), row));
             if let Some(h) = &it.hint {
                 dom += 1;
@@ -362,15 +376,47 @@ impl Render for ContextMenu {
         let (items, pos, active, sub) = (o.items.clone(), o.pos, o.active, o.sub_active);
         let width = panel_width(window, &self.th, &items);
         let panel: AnyElement = pid("menu", self
-            .panel(&items, active, sub, None, width, window, cx)
+            .panel(&items, active, None, width, cx)
             .id("context-menu")
             .track_focus(&self.focus)
             .key_context("ContextMenu")
             .on_key_down(cx.listener(|this, ev: &KeyDownEvent, window, cx| this.on_key(ev, window, cx)))
-            .on_mouse_down_out(cx.listener(|this, _, window, cx| this.close(window, cx)))
+            .on_mouse_down_out(cx.listener(|this, ev: &MouseDownEvent, window, cx| {
+                // a press inside the open submenu is not "outside" (it used to be a child of the panel)
+                let in_sub = this.open.as_ref().is_some_and(|o| o.sub_open) && this.sub_bounds.get().is_some_and(|b| b.contains(&ev.position));
+                if !in_sub {
+                    this.close(window, cx);
+                }
+            }))
             .on_mouse_down(MouseButton::Right, cx.listener(|this, _, window, cx| this.close(window, cx))))
             .into_any_element();
-        deferred(anchored().position(pos).snap_to_window_with_margin(px(8.)).child(panel)).with_priority(1).into_any_element()
+        // The submenu: `ContextMenu.svelte` places it at the row's right edge - 4 px, top - 5 px.
+        let sub_open = self.open.as_ref().is_some_and(|o| o.sub_open);
+        let submenu = match active.map(|a| (a, &items[a].kind)) {
+            Some((a, Kind::Submenu(v))) if sub_open => match self.row_bounds.borrow().get(a).copied().flatten() {
+                Some(rb) => {
+                    let sw = panel_width(window, &self.th, v);
+                    let sb = self.sub_bounds.clone();
+                    let p = self.panel(v, sub, Some(a), sw, cx).relative().child(
+                        canvas(move |b, _, _| sb.set(Some(b)), |_, _, _, _| {}).absolute().top_0().left_0().size_full(),
+                    );
+                    Some(anchored().position(point(rb.origin.x + px(width - 4.), rb.origin.y - px(5.))).child(p))
+                }
+                None => {
+                    // the row has not been laid out yet (opened by keyboard before a frame): place it next frame
+                    cx.notify();
+                    None
+                }
+            },
+            _ => None,
+        };
+        if !sub_open {
+            self.sub_bounds.set(None);
+        }
+        // one `deferred` for the whole menu: the submenu is painted after (above) the main panel
+        deferred(div().child(anchored().position(pos).snap_to_window_with_margin(px(8.)).child(panel)).children(submenu))
+            .with_priority(1)
+            .into_any_element()
     }
 }
 
