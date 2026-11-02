@@ -3,7 +3,7 @@
 //! (BGRA) and kept in a byte-capped LRU. Nothing is ever held at full resolution;
 //! on minimize everything is dropped (`drain_all`) and `window.drop_image`d so the
 //! GPU atlas tiles go too.
-use gpui::{AnyElement, Context, Hsla, ImageSource, ObjectFit, RenderImage, SharedString, StyledImage, Window, div, hsla, img, prelude::*, px};
+use gpui::{AnyElement, Context, ImageSource, ObjectFit, RenderImage, SharedString, StyledImage, Window, div, hsla, img, prelude::*, px};
 use image::{Frame, RgbaImage};
 use sonix_api::{ArtPixels, Backend, bucket_for};
 use std::cell::RefCell;
