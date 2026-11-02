@@ -519,6 +519,7 @@ impl Shell {
     fn suspend(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         crate::log("suspend: releasing caches");
         self.suspended = true;
+        self.backend.set_suspended(true); // pauses background cover prefetch
         self.spectrum_on = false;
         crate::widgets::smooth::clear();
         crate::anim::clear(); // no transition may keep requesting frames while minimized
@@ -547,6 +548,7 @@ impl Shell {
     fn resume(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         crate::log("resume: restore");
         self.suspended = false;
+        self.backend.set_suspended(false);
         self.resumed_at = Some(Instant::now());
         self.load_backdrop();
         let st = self.backend.player_get_state();

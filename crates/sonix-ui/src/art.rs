@@ -93,11 +93,14 @@ impl ArtCache {
     /// that is still waiting in the queue is re-stamped with the current render batch, so what is on screen now is
     /// served before what was requested for an earlier (scrolled-away) frame.
     pub fn want(&mut self, id: &SharedString, size: u32) -> bool {
+        self.want_at(id, size, Instant::now())
+    }
+    /// [`want`](Self::want) with an explicit clock (render batches are separated by [`BATCH_GAP`]).
+    pub fn want_at(&mut self, id: &SharedString, size: u32, now: Instant) -> bool {
         let k = (id.clone(), size);
         if self.map.contains_key(&k) || self.failed.contains(&k) {
             return false;
         }
-        let now = Instant::now();
         if self.last_want.is_none_or(|l| now.duration_since(l) > BATCH_GAP) {
             self.batch += 1;
         }
@@ -116,7 +119,7 @@ impl ArtCache {
         self.seq += 1;
         self.queue.push(Queued { key: k, batch: self.batch, seq: self.seq });
         if self.queue.len() > MAX_QUEUED {
-            // drop the stalest (oldest batch, then oldest request) so the queue only holds recent demand
+            // drop the stalest: oldest render batch first, and within a batch the last requested (furthest down the page)
             self.queue.sort_by_key(|q| std::cmp::Reverse((q.batch, std::cmp::Reverse(q.seq))));
             for q in self.queue.split_off(MAX_QUEUED) {
                 self.pending.remove(&q.key);
@@ -147,7 +150,10 @@ impl ArtCache {
     /// Arrival bookkeeping: `Ok(views)` = notify these now, `Err(delay)` = a flush must be scheduled after `delay`
     /// (None = one is already scheduled). Coalesces bursts of arrivals into at most one re-render per `FLUSH_EVERY`.
     pub fn flush_plan(&mut self) -> Result<Vec<EntityId>, Option<Duration>> {
-        let since = self.last_flush.map(|t| t.elapsed());
+        self.flush_plan_at(Instant::now())
+    }
+    pub fn flush_plan_at(&mut self, now: Instant) -> Result<Vec<EntityId>, Option<Duration>> {
+        let since = self.last_flush.map(|t| now.saturating_duration_since(t));
         match since {
             Some(s) if s < FLUSH_EVERY => {
                 if self.flush_scheduled {
@@ -157,12 +163,15 @@ impl ArtCache {
                     Err(Some(FLUSH_EVERY - s))
                 }
             }
-            _ => Ok(self.take_flush()),
+            _ => Ok(self.take_flush_at(now)),
         }
     }
     pub fn take_flush(&mut self) -> Vec<EntityId> {
+        self.take_flush_at(Instant::now())
+    }
+    fn take_flush_at(&mut self, now: Instant) -> Vec<EntityId> {
         self.flush_scheduled = false;
-        self.last_flush = Some(Instant::now());
+        self.last_flush = Some(now);
         self.waiters.drain().collect()
     }
     /// Insert (or record a failure) and return the evicted images the caller must drop from the GPU.
@@ -346,25 +355,39 @@ mod tests {
     }
 
 
+    fn s(n: impl ToString) -> SharedString {
+        SharedString::from(n.to_string())
+    }
+
     #[test]
     fn newest_render_batch_is_served_first_and_rerequests_bump() {
         let mut c = ArtCache::new(1 << 20);
-        let s = |n: &str| SharedString::from(n.to_string());
-        let gap = BATCH_GAP + Duration::from_millis(3);
+        let t0 = Instant::now();
+        let next_frame = BATCH_GAP + Duration::from_millis(1);
         // old frame: a, b; then the user scrolled and a new frame asks for c, d (and a again)
-        assert!(c.want(&s("a"), 160) && c.want(&s("b"), 160));
-        std::thread::sleep(gap);
-        assert!(c.want(&s("c"), 160) && c.want(&s("d"), 160));
-        assert!(!c.want(&s("a"), 160), "already queued: no second entry, but it is re-stamped");
+        assert!(c.want_at(&s("a"), 160, t0) && c.want_at(&s("b"), 160, t0));
+        assert!(c.want_at(&s("c"), 160, t0 + next_frame) && c.want_at(&s("d"), 160, t0 + next_frame));
+        assert!(!c.want_at(&s("a"), 160, t0 + next_frame), "already queued: no second entry, but it is re-stamped");
         let order: Vec<_> = std::iter::from_fn(|| c.pop()).map(|k| k.0.to_string()).collect();
         assert_eq!(order, ["c", "d", "a", "b"]);
+    }
+
+    #[test]
+    fn requests_within_the_gap_share_a_batch_in_request_order() {
+        let mut c = ArtCache::new(1 << 20);
+        let t0 = Instant::now();
+        for (i, id) in ["a", "b", "c"].iter().enumerate() {
+            c.want_at(&s(id), 64, t0 + Duration::from_millis(i as u64)); // each within BATCH_GAP of the previous
+        }
+        let order: Vec<_> = std::iter::from_fn(|| c.pop()).map(|k| k.0.to_string()).collect();
+        assert_eq!(order, ["a", "b", "c"]);
     }
 
     #[test]
     fn loader_slots_are_capped_and_queue_is_bounded() {
         let mut c = ArtCache::new(1 << 20);
         for i in 0..200 {
-            c.want(&SharedString::from(format!("x{i}")), 64);
+            c.want(&s(format!("x{i}")), 64);
         }
         assert!(c.queue.len() <= MAX_QUEUED);
         assert_eq!(c.pending.len(), c.queue.len(), "dropped requests are no longer pending");
@@ -378,14 +401,38 @@ mod tests {
     }
 
     #[test]
+    fn dropped_backlog_is_oldest_batch_first_and_can_be_requested_again() {
+        let mut c = ArtCache::new(1 << 20);
+        let t0 = Instant::now();
+        let frame = |n: u64| t0 + (BATCH_GAP + Duration::from_millis(1)) * n as u32;
+        for i in 0..MAX_QUEUED {
+            c.want_at(&s(format!("old{i}")), 64, frame(0));
+        }
+        // a newer frame adds 10 more: the 10 dropped are the last of the OLD batch, the new frame survives
+        for i in 0..10 {
+            assert!(c.want_at(&s(format!("new{i}")), 64, frame(1)));
+        }
+        assert_eq!(c.queue.len(), MAX_QUEUED);
+        assert!((0..10).all(|i| c.queue.iter().any(|q| q.key.0 == format!("new{i}"))));
+        let dropped = format!("old{}", MAX_QUEUED - 1);
+        assert!(!c.queue.iter().any(|q| q.key.0 == dropped.as_str()));
+        // the dropped key is no longer pending: rendering it again queues it again
+        assert!(c.want_at(&s(&dropped), 64, frame(2)));
+        assert_eq!(c.pop().unwrap().0.to_string(), dropped, "and it is now the newest demand");
+    }
+
+    #[test]
     fn arrivals_coalesce_into_one_flush() {
         let mut c = ArtCache::new(1 << 20);
-        assert!(c.flush_plan().is_ok(), "first arrival notifies at once");
-        assert!(matches!(c.flush_plan(), Err(Some(_))), "next one schedules a flush");
-        assert!(matches!(c.flush_plan(), Err(None)), "and the rest ride on it");
-        assert!(c.take_flush().is_empty());
-        assert!(matches!(c.flush_plan(), Err(Some(_))));
+        let t0 = Instant::now();
+        assert!(c.flush_plan_at(t0).is_ok(), "first arrival notifies at once");
+        assert!(matches!(c.flush_plan_at(t0 + Duration::from_millis(5)), Err(Some(d)) if d == FLUSH_EVERY - Duration::from_millis(5)), "next one schedules a flush");
+        assert!(matches!(c.flush_plan_at(t0 + Duration::from_millis(9)), Err(None)), "and the rest ride on it");
+        assert!(c.take_flush_at(t0 + FLUSH_EVERY).is_empty());
+        assert!(matches!(c.flush_plan_at(t0 + FLUSH_EVERY + Duration::from_millis(1)), Err(Some(_))), "the next burst starts a new window");
+        assert!(c.flush_plan_at(t0 + FLUSH_EVERY * 4).is_ok(), "an arrival after a quiet spell is immediate");
     }
+
     #[test]
     fn rgba_is_swapped_to_bgra() {
         let i = render_image(ArtPixels { width: 1, height: 1, rgba: vec![1, 2, 3, 4] }).unwrap();

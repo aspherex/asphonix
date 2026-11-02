@@ -37,6 +37,10 @@ fn jpeg(size: u32, seed: u32) -> Vec<u8> {
 impl Server {
     /// `slots` = concurrent resizes the "server" can do; `delay_ms` = (min, max) per request, by id hash.
     fn start(slots: usize, delay_ms: (u64, u64)) -> Server {
+        Server::start_opts(slots, delay_ms, false)
+    }
+    /// `garbage_master`: the 640 request returns a webp-looking payload no decoder can read.
+    fn start_opts(slots: usize, delay_ms: (u64, u64), garbage_master: bool) -> Server {
         let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
         let url = format!("http://{}", listener.local_addr().unwrap());
         let s = Server {
@@ -89,7 +93,11 @@ impl Server {
                         let seed: u32 = id.bytes().fold(7u32, |h, b| h.wrapping_mul(31).wrapping_add(u32::from(b)));
                         let span = delay_ms.1 - delay_ms.0 + 1;
                         std::thread::sleep(Duration::from_millis(delay_ms.0 + u64::from(seed) % span));
-                        let body = images.lock().unwrap().entry((seed, size)).or_insert_with(|| Arc::new(jpeg(size, seed))).clone();
+                        let body = if garbage_master && size == 640 {
+                            Arc::new(b"RIFF\x20\0\0\0WEBPVP8 not-a-real-image-payload".to_vec())
+                        } else {
+                            images.lock().unwrap().entry((seed, size)).or_insert_with(|| Arc::new(jpeg(size, seed))).clone()
+                        };
                         active.fetch_sub(1, Ordering::SeqCst);
                         {
                             let (m, cv) = &*gate;
@@ -115,7 +123,8 @@ struct Tmp(PathBuf);
 
 impl Tmp {
     fn new(tag: &str) -> Tmp {
-        let p = PathBuf::from("<build-dir>/tmp").join(format!("art-perf-{tag}-{}", std::process::id()));
+        let base = PathBuf::from(std::env::var("SONIX_TEST_TMP").unwrap_or_else(|_| "<build-dir>/tmp".into()));
+        let p = base.join(format!("art-perf-{tag}-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&p);
         std::fs::create_dir_all(&p).unwrap();
         Tmp(p)
@@ -225,6 +234,187 @@ fn prefetch_fetches_only_missing_masters() {
         b.art_pixels(id, 240).unwrap();
     }
     assert_eq!(srv.requests.load(Ordering::SeqCst), before, "grid after prefetch is served from disk");
+}
+
+fn reqs(s: &Server) -> usize {
+    s.requests.load(Ordering::SeqCst)
+}
+
+fn epoch(b: &RealBackend) -> u64 {
+    b.0.epoch.load(Ordering::SeqCst)
+}
+
+fn wait_until(what: &str, mut cond: impl FnMut() -> bool) {
+    let t = Instant::now();
+    while !cond() {
+        assert!(t.elapsed() < Duration::from_secs(10), "timed out waiting for {what}");
+        std::thread::sleep(Duration::from_millis(5));
+    }
+}
+
+#[test]
+fn decode_and_fetch_limits_hold() {
+    let srv = Server::start(32, (30, 30));
+    let tmp = Tmp::new("limits");
+    let b = backend(&tmp, &srv);
+    all_at_once(&b, &ids(24), 240);
+    assert!(b.0.art.fetch_gate.peak.load(Ordering::Relaxed) <= MAX_CONCURRENT_FETCHES);
+    assert!(b.0.art.decode_gate.peak.load(Ordering::Relaxed) <= MAX_CONCURRENT_DECODES);
+}
+
+#[test]
+fn prefetch_runs_two_at_a_time() {
+    let srv = Server::start(32, (40, 40));
+    let tmp = Tmp::new("pre2");
+    let b = backend(&tmp, &srv);
+    assert_eq!(b.art_prefetch_pass(&ids(12), epoch(&b)), 12);
+    assert_eq!(srv.max_active.load(Ordering::SeqCst), PREFETCH_CONCURRENCY);
+    assert_eq!(b.0.art.bg_gate.peak.load(Ordering::Relaxed), PREFETCH_CONCURRENCY);
+}
+
+#[test]
+fn prefetch_stops_when_the_epoch_moves_and_frees_the_slot() {
+    let srv = Server::start(32, (40, 40));
+    let tmp = Tmp::new("epoch");
+    let b = backend(&tmp, &srv);
+    let list = ids(30);
+    let e0 = epoch(&b);
+    std::thread::scope(|s| {
+        let h = s.spawn(|| b.art_prefetch_pass(&list, e0));
+        wait_until("first prefetch requests", || reqs(&srv) >= 2);
+        b.0.epoch.fetch_add(1, Ordering::SeqCst); // logout / re-login
+        let done = h.join().unwrap();
+        assert!(done < 10, "the old pass stopped early (fetched {done})");
+    });
+    assert!(b.0.art.prefetch_run.lock().unwrap().is_none(), "the slot was released");
+    // the new session's pass runs at once and only fetches what is still missing
+    let before = reqs(&srv);
+    let n = b.art_prefetch_pass(&list, epoch(&b));
+    assert_eq!(reqs(&srv) - before, n);
+    assert!(list.iter().all(|id| cache_path(&b.art_dir(), id, MASTER_SIZE).exists()));
+    // a pass that is stale from the start fetches nothing
+    assert_eq!(b.art_prefetch_pass(&ids(3), e0), 0);
+}
+
+#[test]
+fn prefetch_yields_to_foreground_requests() {
+    let srv = Server::start(8, (5, 5));
+    let tmp = Tmp::new("fg");
+    let b = backend(&tmp, &srv);
+    let list = ids(6);
+    let guard = ForegroundGuard::new(&b.0.art.foreground);
+    std::thread::scope(|s| {
+        let h = s.spawn(|| b.art_prefetch_pass(&list, epoch(&b)));
+        std::thread::sleep(Duration::from_millis(300));
+        assert_eq!(reqs(&srv), 0, "paused while a foreground request is running");
+        drop(guard);
+        assert_eq!(h.join().unwrap(), 6);
+    });
+}
+
+#[test]
+fn prefetch_pauses_while_suspended_and_cancels_there() {
+    let srv = Server::start(8, (5, 5));
+    let tmp = Tmp::new("susp");
+    let b = backend(&tmp, &srv);
+    let list = ids(6);
+    b.0.art.suspended.store(true, Ordering::SeqCst);
+    std::thread::scope(|s| {
+        let h = s.spawn(|| b.art_prefetch_pass(&list, epoch(&b)));
+        std::thread::sleep(Duration::from_millis(300));
+        assert_eq!(reqs(&srv), 0, "no network while minimized");
+        b.0.art.suspended.store(false, Ordering::SeqCst);
+        assert_eq!(h.join().unwrap(), 6, "resumes on restore");
+    });
+    // a pass paused by minimize ends when the session changes
+    b.0.art.suspended.store(true, Ordering::SeqCst);
+    let list2: Vec<String> = (0..4).map(|i| format!("other-{i}")).collect();
+    let e = epoch(&b);
+    std::thread::scope(|s| {
+        let h = s.spawn(|| b.art_prefetch_pass(&list2, e));
+        std::thread::sleep(Duration::from_millis(100));
+        b.0.epoch.fetch_add(1, Ordering::SeqCst);
+        assert_eq!(h.join().unwrap(), 0);
+    });
+    assert_eq!(reqs(&srv), 6);
+}
+
+#[test]
+fn prefetch_gives_up_on_an_unreachable_server() {
+    let srv = Server::start(4, (1, 1));
+    let tmp = Tmp::new("down");
+    let b = backend(&tmp, &srv);
+    let dead = {
+        let l = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        format!("http://{}", l.local_addr().unwrap())
+    };
+    *b.0.client.write().unwrap() = Some(Client::new(&dead, "me", "pw").unwrap());
+    assert_eq!(b.art_prefetch_pass(&ids(60), epoch(&b)), 0);
+    let attempts = b.0.art.bg_attempts.load(Ordering::Relaxed);
+    assert!((PREFETCH_MAX_NET_ERRORS..PREFETCH_MAX_NET_ERRORS + PREFETCH_CONCURRENCY).contains(&attempts), "attempts {attempts}");
+}
+
+#[test]
+fn undecodable_master_falls_back_to_a_sized_request_once() {
+    let srv = Server::start_opts(4, (5, 5), true);
+    let tmp = Tmp::new("bad");
+    let b = backend(&tmp, &srv);
+    let p = b.art_pixels("odd-1", 240).unwrap();
+    assert_eq!((p.width, p.height), (240, 240));
+    assert_eq!(srv.hits_for("odd-1"), 2, "master (kept) + the direct 240 request");
+    assert_eq!(b.art_pixels("odd-1", 240).unwrap().width, 240);
+    assert_eq!(reqs(&srv), 2, "second read is the bucket file");
+    b.art_pixels("odd-1", 160).unwrap();
+    assert_eq!(reqs(&srv), 3, "known-undecodable: straight to the sized request, the master is not decoded again");
+    assert_eq!(b.art_pixels("odd-1", 640).unwrap_err().code, ErrorCode::Decode);
+    assert_eq!(reqs(&srv), 3);
+    // the stored master is a cache hit for later syncs: not re-requested
+    assert_eq!(b.art_prefetch_pass(&["odd-1".to_string()], epoch(&b)), 0);
+    assert_eq!(reqs(&srv), 3);
+}
+
+#[test]
+fn sniffing_accepts_the_reference_formats() {
+    assert!(looks_like_image(&[0xFF, 0xD8, 0xFF, 0xE0, 0]));
+    assert!(looks_like_image(&[0x89, b'P', b'N', b'G', 0, 0]));
+    assert!(looks_like_image(b"GIF89a......"));
+    assert!(looks_like_image(b"RIFF\x20\0\0\0WEBPVP8 xx"));
+    assert!(looks_like_image(b"\0\0\0\x1cftypavif\0\0\0\0"));
+    assert!(!looks_like_image(b"{\"subsonic-response\":{}}"));
+}
+
+#[test]
+fn single_flight_survives_a_panicking_leader() {
+    let flight: SingleFlight<u32> = SingleFlight::new();
+    let key = PathBuf::from("k");
+    let runs = AtomicUsize::new(0);
+    let (started_tx, started_rx) = std::sync::mpsc::channel();
+    std::thread::scope(|s| {
+        let leader = s.spawn(|| {
+            flight.run(&key, || {
+                started_tx.send(()).unwrap();
+                std::thread::sleep(Duration::from_millis(150));
+                panic!("leader dies");
+            })
+        });
+        started_rx.recv().unwrap();
+        let waiters: Vec<_> = (0..3)
+            .map(|_| {
+                s.spawn(|| {
+                    flight.run(&key, || {
+                        runs.fetch_add(1, Ordering::SeqCst);
+                        std::thread::sleep(Duration::from_millis(30));
+                        7
+                    })
+                })
+            })
+            .collect();
+        assert!(leader.join().is_err());
+        for w in waiters {
+            assert_eq!(w.join().unwrap(), 7);
+        }
+        assert_eq!(runs.load(Ordering::SeqCst), 1, "one waiter took over, the others shared its result");
+    });
 }
 
 #[test]

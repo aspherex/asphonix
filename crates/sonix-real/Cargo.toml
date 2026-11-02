@@ -10,7 +10,7 @@ sonix-core = { path = "../sonix-core" }
 tokio = { version = "1", features = ["rt-multi-thread", "time", "sync"] }
 serde.workspace = true
 serde_json.workspace = true
-image = { version = "0.25", default-features = false, features = ["jpeg", "png"] }
+image = { version = "0.25", default-features = false, features = ["jpeg", "png", "webp", "gif"] }
 chrono = "0.4"
 rand = "0.8"
 log = "0.4"

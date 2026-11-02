@@ -67,6 +67,8 @@ struct Inner {
     subs: Mutex<Vec<Sender<Event>>>,
     /// OS integration + background services (listen flush, SMTC, MCP bridge, updater).
     svc: services::Services,
+    /// Cover fetch state (gates, single-flight, prefetch control): `art.rs`.
+    art: art::ArtState,
     /// Local smart-playlist definitions (`smart_playlists.json` in the config dir).
     smart: sonix_core::smartlists::SmartStore,
     /// Persisted settings (`settings.json` in the config dir), the source of truth for `settings_get`.
@@ -163,6 +165,7 @@ impl RealBackend {
             }),
             subs: Mutex::new(Vec::new()),
             svc: Default::default(),
+            art: Default::default(),
             settings: Mutex::new(settings),
             scrobbling,
             store,
@@ -422,6 +425,9 @@ impl Backend for RealBackend {
     }
     fn shutdown(&self) {
         RealBackend::shutdown(self)
+    }
+    fn set_suspended(&self, suspended: bool) {
+        self.0.art.suspended.store(suspended, std::sync::atomic::Ordering::SeqCst);
     }
     fn attach_window(&self, hwnd: isize) {
         self.attach_media_window(hwnd)
