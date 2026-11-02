@@ -386,4 +386,8 @@ pub trait Backend:
     fn mock_label(&self) -> Option<&'static str> {
         None
     }
+    /// App exit (quit): final session write, listen `quit` row, service teardown. Bounded; default no-op.
+    fn shutdown(&self) {}
+    /// The main window's native handle (Win32 HWND), once it exists: lets the backend register OS media controls.
+    fn attach_window(&self, _hwnd: isize) {}
 }

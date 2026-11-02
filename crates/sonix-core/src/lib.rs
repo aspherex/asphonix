@@ -8,3 +8,7 @@ pub mod overlay;
 pub mod listen;
 pub mod rt;
 pub mod scrobble;
+pub mod smartlists;
+pub mod updates;
+pub mod media;
+pub mod mcp_bridge;

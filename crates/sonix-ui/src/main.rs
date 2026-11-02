@@ -131,6 +131,15 @@ fn main() {
         widgets::text_input::bind_keys(cx);
         bind_keys(cx);
         open_main(cx);
+        {
+            // Exit hook: final session write + listen `quit` row (bounded), service teardown.
+            let b = cx.global::<app::Services>().backend.clone();
+            cx.on_app_quit(move |_| {
+                let b = b.clone();
+                async move { b.shutdown() }
+            })
+            .detach();
+        }
         cx.on_window_closed(|cx| {
             if cx.windows().is_empty() {
                 cx.quit();
@@ -193,6 +202,10 @@ fn open_main(cx: &mut App) {
         },
         |window, cx| {
             log("window_created");
+            #[cfg(windows)]
+            if let Some(hwnd) = winffi::hwnd_of(window) {
+                cx.global::<app::Services>().backend.attach_window(hwnd); // OS media controls (SMTC)
+            }
             cx.new(|cx| Shell::new(window, cx))
         },
     )

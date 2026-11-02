@@ -14,3 +14,4 @@ image = { version = "0.25", default-features = false, features = ["jpeg", "png"]
 
 [dev-dependencies]
 log = "0.4"
+sonix-mcp = { path = "../sonix-mcp" }
