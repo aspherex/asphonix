@@ -37,6 +37,7 @@ impl<T> Pager<T> {
         self.pages.get_mut(&(ix / PAGE))?.get_mut(ix % PAGE)
     }
 
+    #[allow(dead_code)]
     pub fn has_page(&self, p: usize) -> bool {
         self.pages.contains_key(&p)
     }

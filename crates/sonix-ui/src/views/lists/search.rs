@@ -50,6 +50,8 @@ pub struct SearchView {
     tab: Tab,
     results: Option<SearchResults>,
     loading: bool,
+    /// the answer for the current query arrived (before that an empty result is "Searching…", never "No matches")
+    settled: bool,
     selected: usize,
     seq: u64,
     scroll: ScrollHandle,
@@ -75,6 +77,7 @@ impl SearchView {
             tab: Tab::All,
             results: None,
             loading: false,
+            settled: false,
             selected: 0,
             seq: 0,
             scroll: ScrollHandle::new(),
@@ -88,6 +91,7 @@ impl SearchView {
         self.query = q.clone();
         self.selected = 0;
         self.seq += 1;
+        self.settled = false;
         let seq = self.seq;
         let b = self.backend.clone();
         cx.spawn(async move |this, cx| {
@@ -112,6 +116,7 @@ impl SearchView {
                 if t.seq == seq {
                     t.results = r.ok();
                     t.loading = false;
+                    t.settled = true;
                     cx.notify();
                 }
             });
@@ -364,7 +369,7 @@ impl Render for SearchView {
             let hint = |s: String| txt(&th, BODY_SM, s).color(th.muted);
             if self.query.is_empty() {
                 page = page.child(hint("Start typing to search tracks, albums, artists and playlists.".into()));
-            } else if self.loading && self.results.is_none() {
+            } else if (self.loading || !self.settled) && self.results.is_none() {
                 page = page.child(hint("Searching…".into()));
             } else if flat.is_empty() {
                 page = page.child(hint(format!("No matches for \"{}\".", self.query)));

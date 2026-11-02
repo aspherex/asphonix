@@ -67,7 +67,7 @@ impl Render for QueueGhost {
 impl QueueRail {
     pub fn new(backend: Arc<dyn Backend>, art: ArtHandle, player: &Entity<PlayerModel>, menu: &Entity<ContextMenu>, cx: &mut Context<Self>) -> Self {
         let sub = cx.subscribe(player, |this: &mut Self, _, _: &PlayerEvent, cx| this.refresh(cx));
-        let mut s = Self { backend, art, player: player.clone(), state: None, scroll: gpui::ScrollHandle::new(), menu: menu.clone(), focus: cx.focus_handle(), drag_dy: 0.0, sel: Selection::default(), _sub: sub };
+        let mut s = Self { backend, art, player: player.clone(), state: None, scroll: gpui::ScrollHandle::new(), menu: menu.clone(), focus: cx.focus_handle().tab_stop(true), drag_dy: 0.0, sel: Selection::default(), _sub: sub };
         s.refresh(cx);
         s
     }

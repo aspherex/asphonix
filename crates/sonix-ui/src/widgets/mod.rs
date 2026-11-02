@@ -29,3 +29,17 @@ pub fn icon_g(name: &str, size: f32, color: Hsla, hover: Hsla) -> Svg {
 pub fn hard_shadow(th: &Theme, off: f32) -> Vec<BoxShadow> {
     vec![BoxShadow { color: th.shadow, offset: point(px(off), px(off)), blur_radius: px(0.), spread_radius: px(0.) }]
 }
+
+thread_local! {
+    static KEY_NAV: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+}
+
+/// `:focus-visible` stand-in: true after a Tab / Shift+Tab until the next mouse press, so focus styles of buttons only
+/// show for keyboard navigation (GPUI has no `:focus-visible`).
+pub fn key_nav() -> bool {
+    KEY_NAV.with(|k| k.get())
+}
+
+pub fn set_key_nav(on: bool) {
+    KEY_NAV.with(|k| k.set(on));
+}

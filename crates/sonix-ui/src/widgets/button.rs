@@ -60,7 +60,8 @@ pub fn button(id: impl Into<ElementId>, th: Theme, variant: Variant, label: &str
     if disabled {
         b = b.opacity(0.5).cursor(CursorStyle::OperationNotAllowed);
     } else {
-        b = b.cursor(CursorStyle::PointingHand).on_hover(move |h, window, _| {
+        // `<button>` is a tab stop (document order = paint order); keyboard focus shows the hover border
+        b = b.tab_index(0).focus(move |s| if super::key_nav() { s.border_color(th.focus) } else { s }).cursor(CursorStyle::PointingHand).on_hover(move |h, window, _| {
             anim::set_hovered(key, *h);
             window.refresh();
         });
@@ -88,7 +89,7 @@ pub fn ghost_icon_with(id: impl Into<ElementId>, th: Theme, name: &str, icon_siz
     if disabled {
         d = d.opacity(0.5).cursor(CursorStyle::OperationNotAllowed);
     } else {
-        d = d.cursor(CursorStyle::PointingHand).hover(move |s| s.text_color(th.accent_fg));
+        d = d.tab_index(0).focus(move |s| if super::key_nav() { s.bg(th.high) } else { s }).cursor(CursorStyle::PointingHand).hover(move |s| s.text_color(th.accent_fg));
     }
     d
 }

@@ -170,6 +170,9 @@ pub struct TextInput {
     pub mask: bool,
     last_bounds: Option<Bounds<Pixels>>,
     is_selecting: bool,
+    /// Chromium selects the whole value when an input is focused by keyboard (Tab, Shift+Tab) or script, not by a click.
+    focus_seen: bool,
+    mouse_focus: bool,
 }
 
 impl TextInput {
@@ -264,6 +267,7 @@ impl TextInput {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        self.mouse_focus = true;
         window.focus(&self.focus_handle);
         // a focusable ancestor (the shell root) would otherwise take the focus back on the same mouse-down
         cx.stop_propagation();
@@ -443,7 +447,8 @@ impl TextInput {
 
     pub fn new(cx: &mut Context<Self>, placeholder: &str, th: &Theme, font_family: &'static str, font_size: f32, line_height: f32, font_weight: f32) -> Self {
         Self {
-            focus_handle: cx.focus_handle(),
+            // `<input>` is a tab stop (document order = paint order)
+            focus_handle: cx.focus_handle().tab_stop(true),
             content: "".into(),
             placeholder: placeholder.to_string().into(),
             font_family,
@@ -461,6 +466,8 @@ impl TextInput {
             mask: false,
             last_bounds: None,
             is_selecting: false,
+            focus_seen: false,
+            mouse_focus: false,
         }
     }
 
@@ -788,7 +795,17 @@ impl Element for TextElement {
             window.paint_quad(cursor);
         }
 
-        self.input.update(cx, |input, _cx| {
+        let focused = focus_handle.is_focused(window);
+        self.input.update(cx, |input, cx| {
+            if focused && !input.focus_seen && !input.mouse_focus && tab_nav_recent() && !input.content.is_empty() {
+                input.selected_range = 0..input.content.len();
+                input.selection_reversed = false;
+                cx.notify();
+            }
+            if !focused {
+                input.mouse_focus = false;
+            }
+            input.focus_seen = focused;
             input.last_layout = Some(line);
             input.last_bounds = Some(bounds);
         });
@@ -882,4 +899,18 @@ mod tests {
         assert_eq!(&s[word_range_at(s, s.len())], "beta");
         assert_eq!(word_range_at("", 0), 0..0);
     }
+}
+
+thread_local! {
+    static TAB_NAV: std::cell::Cell<Option<std::time::Instant>> = const { std::cell::Cell::new(None) };
+}
+
+/// The shell calls this right before `focus_next`/`focus_prev`: an input that receives focus within the next moments
+/// selects its whole value, as Chromium does for Tab navigation (script `focus()` leaves the caret alone).
+pub fn note_tab_nav() {
+    TAB_NAV.with(|t| t.set(Some(std::time::Instant::now())));
+}
+
+fn tab_nav_recent() -> bool {
+    TAB_NAV.with(|t| t.get().is_some_and(|i| i.elapsed() < std::time::Duration::from_millis(250)))
 }

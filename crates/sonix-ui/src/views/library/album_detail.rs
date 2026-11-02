@@ -126,7 +126,7 @@ impl AlbumDetailView {
             page: PageScroll::new(),
             panel_w: Rc::new(Cell::new(1000.0)),
             row_anchor: anchor_cell(),
-            focus: cx.focus_handle(),
+            focus: cx.focus_handle().tab_stop(true),
             current,
             playing,
             vis: 0..0,

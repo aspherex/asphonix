@@ -640,11 +640,12 @@ impl Render for Shell {
 
         let root = div()
             .id("root")
+            .capture_any_mouse_down(cx.listener(|_, _, _, _| crate::widgets::set_key_nav(false)))
             .key_context("Root")
             .track_focus(&self.focus)
             .on_key_down(cx.listener(|this, ev: &gpui::KeyDownEvent, window, cx| {
                 let m = ev.keystroke.modifiers;
-                if *this.router.current() == Route::NowPlaying && this.focus.is_focused(window) && !m.control && !m.alt && !m.platform && !m.shift {
+                if *this.router.current() == Route::NowPlaying && this.focus.contains_focused(window, cx) && !this.search.read(cx).focus_handle.is_focused(window) && !m.control && !m.alt && !m.platform && !m.shift {
                     let key = ev.keystroke.key.clone();
                     if this.np.update(cx, |n, cx| n.key(&key, cx)) {
                         cx.stop_propagation();
@@ -661,8 +662,16 @@ impl Render for Shell {
             .on_action(cx.listener(|this, _: &ToggleTheme, _, cx| this.toggle_theme(cx)))
             .on_action(cx.listener(|this, _: &NavBack, _, cx| this.go_back(cx)))
             .on_action(cx.listener(|this, _: &NavForward, _, cx| this.go_forward(cx)))
-            .on_action(cx.listener(|_, _: &library::TabNext, window, _| window.focus_next()))
-            .on_action(cx.listener(|_, _: &library::TabPrev, window, _| window.focus_prev()))
+            .on_action(cx.listener(|_, _: &library::TabNext, window, _| {
+                crate::widgets::text_input::note_tab_nav();
+                crate::widgets::set_key_nav(true);
+                window.focus_next()
+            }))
+            .on_action(cx.listener(|_, _: &library::TabPrev, window, _| {
+                crate::widgets::text_input::note_tab_nav();
+                crate::widgets::set_key_nav(true);
+                window.focus_prev()
+            }))
             .on_action(cx.listener(|this, _: &FocusSearch, window, cx| {
                 let f = this.search.read(cx).focus_handle.clone();
                 window.focus(&f);

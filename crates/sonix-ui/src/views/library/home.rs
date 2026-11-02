@@ -25,7 +25,7 @@ use sonix_api::*;
 use std::cell::Cell;
 use std::ops::Range;
 use std::rc::Rc;
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 
 /// A declined "Resume from server" offer stays declined for this app run (`dismissedOfferKey`).
 static DISMISSED: Mutex<Option<String>> = Mutex::new(None);
@@ -39,6 +39,8 @@ pub struct HomeView {
     status: Option<SessionStatus>,
     sections: Option<HomeSections>,
     sections_unavailable: bool,
+    /// `pager.unavailable` of the Recently Ingested list
+    list_unavailable: bool,
     lists: Vec<Playlist>,
     recent: Vec<HistoryEntry>,
     offer: Option<ServerQueueOffer>,
@@ -63,6 +65,7 @@ impl HomeView {
             status: None,
             sections: None,
             sections_unavailable: false,
+            list_unavailable: false,
             lists: Vec::new(),
             recent: Vec::new(),
             offer: None,
@@ -79,35 +82,33 @@ impl HomeView {
         this
     }
 
+    /// `Home.svelte: load()` / `loadRecent()`: each piece fills in as its own answer arrives (the web awaits them one
+    /// after the other and renders after each; native runs them side by side), nothing waits for the slowest call.
     fn load(&mut self, cx: &mut Context<Self>) {
-        let b = self.ctx.backend.clone();
-        cx.spawn(async move |this, cx| {
-            let r = cx
-                .background_executor()
-                .spawn(async move {
-                    (
-                        b.auth_session_status(),
-                        b.browse_get_home_sections(),
-                        b.playlists_list(),
-                        b.history_recent(HistoryRecentRequest { limit: 8 }),
-                        b.session_check_server_queue(),
-                    )
+        macro_rules! piece {
+            ($call:expr, $apply:expr) => {{
+                let b = self.ctx.backend.clone();
+                cx.spawn(async move |this, cx| {
+                    let r = cx.background_executor().spawn(async move { $call(b) }).await;
+                    let _ = this.update(cx, |t, cx| {
+                        $apply(t, r);
+                        cx.notify();
+                    });
                 })
-                .await;
-            let _ = this.update(cx, |t, cx| {
-                t.status = r.0.ok();
-                match r.1 {
-                    Ok(s) => t.sections = Some(s),
-                    Err(_) => t.sections_unavailable = true,
-                }
-                t.lists = r.2.map(|l| l.into_iter().take(6).collect()).unwrap_or_default();
-                t.recent = r.3.map(|p| p.items).unwrap_or_default();
-                let dismissed = DISMISSED.lock().ok().and_then(|d| d.clone());
-                t.offer = r.4.ok().flatten().filter(|o| Some(offer_key(o)) != dismissed);
-                cx.notify();
-            });
-        })
-        .detach();
+                .detach();
+            }};
+        }
+        piece!(|b: Arc<dyn Backend>| b.auth_session_status(), |t: &mut Self, r: ApiResult<SessionStatus>| t.status = r.ok());
+        piece!(|b: Arc<dyn Backend>| b.browse_get_home_sections(), |t: &mut Self, r: ApiResult<HomeSections>| match r {
+            Ok(s) => t.sections = Some(s),
+            Err(_) => t.sections_unavailable = true,
+        });
+        piece!(|b: Arc<dyn Backend>| b.playlists_list(), |t: &mut Self, r: ApiResult<Vec<Playlist>>| t.lists = r.map(|l| l.into_iter().take(6).collect()).unwrap_or_default());
+        piece!(|b: Arc<dyn Backend>| b.history_recent(HistoryRecentRequest { limit: 8 }), |t: &mut Self, r: ApiResult<Paged<HistoryEntry>>| t.recent = r.map(|p| p.items).unwrap_or_default());
+        piece!(|b: Arc<dyn Backend>| b.session_check_server_queue(), |t: &mut Self, r: ApiResult<Option<ServerQueueOffer>>| {
+            let dismissed = DISMISSED.lock().ok().and_then(|d| d.clone());
+            t.offer = r.ok().flatten().filter(|o| Some(offer_key(o)) != dismissed);
+        });
     }
 
     fn fetch(&mut self, page: usize, cx: &mut Context<Self>) {
@@ -115,12 +116,15 @@ impl HomeView {
         cx.spawn(async move |this, cx| {
             let r = cx.background_executor().spawn(async move { b.browse_get_albums(GetAlbumsRequest { offset: page * PAGE, limit: PAGE, sort: AlbumSort::Newest, filter: None }) }).await;
             let _ = this.update(cx, |t, cx| {
-                if let Ok(p) = r
-                    && t.pager.insert(epoch, page, p.items, 0)
-                {
-                    t.pager.total = p.total;
-                    cx.notify();
+                match r {
+                    Ok(p) => {
+                        if t.pager.insert(epoch, page, p.items, 0) {
+                            t.pager.total = p.total;
+                        }
+                    }
+                    Err(_) => t.list_unavailable = true,
                 }
+                cx.notify();
             });
         })
         .detach();
@@ -363,7 +367,7 @@ impl HomeView {
             .h(px(m::HOME_LIST_H))
             .flex_none()
             .child(Self::block_title(&th, "Recently Ingested // Server Pipeline"))
-            .child(pid("home.list", wrap))
+            .child(if self.list_unavailable { div().flex().child(txt(&th, BODY_SM, "Unavailable until a server is connected.").color(th.muted)).into_any_element() } else { pid("home.list", wrap).into_any_element() })
             .into_any_element()
     }
 }

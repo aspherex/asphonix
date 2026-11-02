@@ -210,6 +210,7 @@ impl Shell {
         let fg = if active { th.accent_text } else { th.muted };
         div()
             .id(id)
+            .tab_index(0)
             .group("hv")
             .flex()
             .flex_row()
@@ -253,6 +254,7 @@ impl Shell {
             let fg = if active { th.accent_text } else { th.muted };
             div()
                 .id(id)
+                .tab_index(0)
                 .group("hv")
                 .flex()
                 .flex_row()
@@ -292,14 +294,14 @@ impl Shell {
                 .px(px(sb::TITLE_PAD_X))
                 .pt(px(sb::TITLE_PAD_TOP))
                 .pb(px(sb::TITLE_PAD_BOTTOM))
-                .child(div().id("pl-title").flex().cursor(CursorStyle::PointingHand).child(txt(&th, LABEL_CAPS, "Playlists").color(if *route == Route::Playlists { th.accent_fg } else { th.muted })).on_click(cx.listener(|this, _, _, cx| this.navigate(Route::Playlists, cx))))
+                .child(div().id("pl-title").tab_index(0).flex().cursor(CursorStyle::PointingHand).child(txt(&th, LABEL_CAPS, "Playlists").color(if *route == Route::Playlists { th.accent_fg } else { th.muted })).on_click(cx.listener(|this, _, _, cx| this.navigate(Route::Playlists, cx))))
                 .child(
                     div()
                         .flex()
                         .flex_row()
                         .gap(px(sb::ADD_GAP))
-                        .child(div().id("pl-add-smart").flex().cursor(CursorStyle::PointingHand).child(icon("bolt", sb::ADD_ICON, th.muted)).on_click(cx.listener(|this, _, _, cx| this.lists_new_smart(cx))))
-                        .child(div().id("pl-add").flex().cursor(CursorStyle::PointingHand).child(icon("add", sb::ADD_ICON, th.muted)).on_click(cx.listener(|this, _, _, cx| this.lists_new_playlist(cx)))),
+                        .child(div().id("pl-add-smart").tab_index(0).flex().cursor(CursorStyle::PointingHand).child(icon("bolt", sb::ADD_ICON, th.muted)).on_click(cx.listener(|this, _, _, cx| this.lists_new_smart(cx))))
+                        .child(div().id("pl-add").tab_index(0).flex().cursor(CursorStyle::PointingHand).child(icon("add", sb::ADD_ICON, th.muted)).on_click(cx.listener(|this, _, _, cx| this.lists_new_playlist(cx)))),
                 ),
         ));
         let liked = self.counts.liked.map(|n| fmt::fmt_int(n as u64)).unwrap_or_else(|| "—".into());
@@ -353,6 +355,7 @@ impl Shell {
         let server = self.status.as_ref().and_then(|s| s.server_url.clone()).map(|u| host(&u)).unwrap_or_default();
         let profile = div()
             .id("profile")
+            .tab_index(0)
             .group("hv")
             .flex()
             .flex_row()
