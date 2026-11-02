@@ -31,6 +31,8 @@ pub struct QueueRail {
     player: Entity<PlayerModel>,
     state: Option<QueueState>,
     scroll: gpui::ScrollHandle,
+    /// `(queue length, current track id, shuffle)` the list was last scrolled for (`scrolledForTrack`).
+    scroll_key: Option<(usize, String, bool)>,
     focus: FocusHandle,
     /// edge auto-scroll while dragging a row (px per frame, + = down), `startAutoScroll`
     drag_dy: f32,
@@ -67,7 +69,7 @@ impl Render for QueueGhost {
 impl QueueRail {
     pub fn new(backend: Arc<dyn Backend>, art: ArtHandle, player: &Entity<PlayerModel>, menu: &Entity<ContextMenu>, cx: &mut Context<Self>) -> Self {
         let sub = cx.subscribe(player, |this: &mut Self, _, _: &PlayerEvent, cx| this.refresh(cx));
-        let mut s = Self { backend, art, player: player.clone(), state: None, scroll: gpui::ScrollHandle::new(), menu: menu.clone(), focus: cx.focus_handle().tab_stop(true), drag_dy: 0.0, sel: Selection::default(), _sub: sub };
+        let mut s = Self { backend, art, player: player.clone(), state: None, scroll: gpui::ScrollHandle::new(), scroll_key: None, menu: menu.clone(), focus: cx.focus_handle().tab_stop(true), drag_dy: 0.0, sel: Selection::default(), _sub: sub };
         s.refresh(cx);
         s
     }
@@ -78,14 +80,40 @@ impl QueueRail {
             let q = cx.background_executor().spawn(async move { b.player_get_queue(PageRequest { offset: 0, limit: 100 }) }).await;
             let _ = this.update(cx, |t, cx| {
                 t.state = q.ok();
+                t.scroll_current_to_top(cx);
                 cx.notify();
             });
         })
         .detach();
     }
 
+    /// `QueueRail.svelte` (the `scrolledForTrack` effect): with a rolling source the queue keeps played history
+    /// above the current track, so once per queue change (`pager.reset()` key: length, current track, shuffle)
+    /// and only after the fetched page carries the current track, the current row goes to the top of the list
+    /// (`scrollIndexToTop`). The current index is before any user run, so its list position is the index itself.
+    fn scroll_current_to_top(&mut self, cx: &mut Context<Self>) {
+        let (cur_id, shuffle) = {
+            let m = self.player.read(cx);
+            (m.current_id().map(str::to_owned), m.state.shuffle)
+        };
+        let (Some(q), Some(id)) = (self.state.as_ref(), cur_id) else { return };
+        if q.current_index < 0 {
+            return;
+        }
+        let ci = q.current_index as usize;
+        if q.items.get(ci).map(|it| it.track.id.as_str()) != Some(id.as_str()) {
+            return; // stale index from before the refetch
+        }
+        let key = (q.total, id, shuffle);
+        if self.scroll_key.as_ref() != Some(&key) {
+            self.scroll_key = Some(key);
+            self.scroll.scroll_to_top_of_item(ci);
+        }
+    }
+
     pub fn release(&mut self) {
         self.state = None;
+        self.scroll_key = None;
     }
 }
 
@@ -216,10 +244,9 @@ impl Render for QueueRail {
             let mut user_rows = Vec::new();
             if let Some(q) = &q {
                 for (i, it) in q.items.iter().enumerate() {
-                    if (i as i64) < cur {
-                        continue;
-                    }
-                    let n = i - cur.max(0) as usize;
+                    // `QueueRail.svelte`: the main list renders every index (played history above the current
+                    // row included); `rail.row.$i` is `data-qabs`, the absolute queue index.
+                    let n = i;
                     if is_user(i, it) {
                         user_rows.push(self.queue_row(&th, it, i, RowFlags { n, active: false, flow_rows }, window, cx));
                     } else {
@@ -570,7 +597,7 @@ impl QueueRail {
     fn main_indices(&self) -> Vec<usize> {
         let Some(q) = &self.state else { return Vec::new() };
         let cur = q.current_index;
-        q.items.iter().enumerate().filter(|(i, it)| (*i as i64) >= cur && !((*i as i64) > cur && it.origin == QueueItemOrigin::User)).map(|(i, _)| i).collect()
+        q.items.iter().enumerate().filter(|(i, it)| !((*i as i64) > cur && it.origin == QueueItemOrigin::User)).map(|(i, _)| i).collect()
     }
 
     /// `trackListKeydown`: Up/Down move a single selection (clamped), scrolling it into view.

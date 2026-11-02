@@ -465,3 +465,83 @@ fn plays_are_recorded_locally_but_scrobbled_only_when_enabled() {
     wait_until("second history row", || history_rows(&b).0 == 2);
     assert_eq!(history_rows(&b), (2, 1));
 }
+
+// ---------------------------------------------------------------------------------------------------------------
+// "play from row N": what the queue holds afterwards (reference `queue.rs set_source_inner` / `set_queue`).
+// A rolling source (playlist/liked/smart/artist/genre/all tracks, `startTrackId`) starts AT the clicked row: in order
+// the pool continues from it (`pool[idx..]`, `queue.rs:323`), shuffle swaps it to the front of a fresh permutation.
+// A static queue (`playQueue`: album, artist top tracks, search, home) keeps the whole list with `current = N`.
+// ---------------------------------------------------------------------------------------------------------------
+
+fn seed_five(b: &RealBackend) {
+    b.0.db
+        .with_tx(|tx| {
+            tx.execute("INSERT INTO artists (id, name, album_count) VALUES ('ar1','Alpha',1)", [])?;
+            for i in 1..=5 {
+                tx.execute(&format!(
+                    "INSERT INTO tracks (id, title, artist, artist_id, album, album_id, genre, duration, suffix, sampling_rate, channel_count, starred)
+                     VALUES ('t{i}', 'Song {i}', 'Alpha', 'ar1', 'A1', 'al1', 'Rock', 200, 'flac', 44100, 2, '2026-01-01T00:00:00Z')"
+                ), [])?;
+            }
+            tx.execute("INSERT INTO playlists (id,name,owner,readonly) VALUES ('pl1','Mix','me',0)", [])?;
+            for i in 1..=5 {
+                tx.execute(&format!("INSERT INTO playlist_tracks (playlist_id,position,track_id) VALUES ('pl1',{},'t{i}')", i - 1), [])?;
+            }
+            Ok(())
+        })
+        .unwrap();
+}
+
+/// The queue once the engine has taken `want` entries (silent: volume 0, nothing decodable behind the mock).
+fn queue_after(b: &RealBackend, want: usize) -> QueueState {
+    let page = PageRequest { offset: 0, limit: 50 };
+    wait_until("queue", || b.player_get_queue(page).map(|q| q.total == want).unwrap_or(false));
+    b.player_get_queue(page).unwrap()
+}
+
+#[test]
+fn rolling_sources_start_at_the_clicked_row_and_static_queues_keep_the_earlier_rows() {
+    let e = Env::new("playfrom");
+    let b = e.open();
+    seed_five(&b);
+    let mock = Mock::start(empty_server);
+    *b.0.client.write().unwrap() = Some(mock.client());
+    b.player_set_volume(SetVolumeRequest { volume: 0.0 }).unwrap();
+    let ids = |q: &QueueState| q.items.iter().map(|i| i.track.id.as_str().to_owned()).collect::<Vec<_>>();
+
+    // playlist, in order, from row 3: the pool continues from t3 (no earlier rows), the clicked row is current
+    b.player_play_playlist(PlaySourceRequest { id: "pl1".into(), start_track_id: Some("t3".into()), ..Default::default() }).unwrap();
+    let q = queue_after(&b, 3);
+    assert_eq!(ids(&q), ["t3", "t4", "t5"]);
+    assert_eq!(q.current_index, 0);
+    let s = q.source.unwrap();
+    assert_eq!((s.kind, s.id.as_deref(), s.mode), (SourceKind::Playlist, Some("pl1"), SourceMode::InOrder));
+
+    // liked songs: same
+    b.player_play_liked(PlaySourceRequest { start_track_id: Some("t2".into()), ..Default::default() }).unwrap();
+    let q = queue_after(&b, 4);
+    assert_eq!(ids(&q), ["t2", "t3", "t4", "t5"]);
+    assert_eq!(q.current_index, 0);
+    assert_eq!(q.source.unwrap().kind, SourceKind::Liked);
+
+    // playlist, shuffle, from row 4: every row once, the clicked one first
+    b.player_play_playlist(PlaySourceRequest { id: "pl1".into(), shuffle: true, start_track_id: Some("t4".into()), ..Default::default() }).unwrap();
+    let q = queue_after(&b, 5);
+    let got = ids(&q);
+    assert_eq!(got[0], "t4");
+    let mut sorted = got.clone();
+    sorted.sort();
+    assert_eq!(sorted, ["t1", "t2", "t3", "t4", "t5"]);
+    assert_eq!(q.source.unwrap().mode, SourceMode::Shuffle);
+
+    // (shuffle is a player setting that outlives the source: a static queue honours it, so switch it off first)
+    b.player_set_shuffle(false).unwrap();
+    wait_until("shuffle off", || !b.player_get_state().unwrap().shuffle);
+    // a static queue (album detail row, artist top tracks, search, home): the whole list, current = N
+    let all: Vec<String> = (1..=5).map(|i| format!("t{i}")).collect();
+    b.player_play_queue(PlayQueueRequest { track_ids: all.clone(), start_index: 2 }).unwrap();
+    let q = queue_after(&b, 5);
+    assert_eq!(ids(&q), all);
+    assert_eq!(q.current_index, 2);
+    assert!(q.source.is_none());
+}
