@@ -465,3 +465,131 @@ fn plays_are_recorded_locally_but_scrobbled_only_when_enabled() {
     wait_until("second history row", || history_rows(&b).0 == 2);
     assert_eq!(history_rows(&b), (2, 1));
 }
+
+// ---------------------------------------------------------------------------------------------------------------
+// "play from row N": what the queue holds afterwards (reference `queue.rs set_source_inner` / `set_queue`).
+// A rolling source (playlist/liked/smart/artist/genre/all tracks, `startTrackId`) starts AT the clicked row: in order
+// the pool continues from it (`pool[idx..]`, `queue.rs:323`), shuffle swaps it to the front of a fresh permutation.
+// A static queue (`playQueue`: album, artist top tracks, search, home) keeps the whole list with `current = N`.
+// ---------------------------------------------------------------------------------------------------------------
+
+fn seed_five(b: &RealBackend) {
+    b.0.db
+        .with_tx(|tx| {
+            tx.execute("INSERT INTO artists (id, name, album_count) VALUES ('ar1','Alpha',1)", [])?;
+            for i in 1..=5 {
+                tx.execute(&format!(
+                    "INSERT INTO tracks (id, title, artist, artist_id, album, album_id, genre, duration, suffix, sampling_rate, channel_count, starred)
+                     VALUES ('t{i}', 'Song {i}', 'Alpha', 'ar1', 'A1', 'al1', 'Rock', 200, 'flac', 44100, 2, '2026-01-01T00:00:00Z')"
+                ), [])?;
+            }
+            tx.execute("INSERT INTO playlists (id,name,owner,readonly) VALUES ('pl1','Mix','me',0)", [])?;
+            for i in 1..=5 {
+                tx.execute(&format!("INSERT INTO playlist_tracks (playlist_id,position,track_id) VALUES ('pl1',{},'t{i}')", i - 1), [])?;
+            }
+            Ok(())
+        })
+        .unwrap();
+}
+
+/// 20 s of 16-bit mono 8 kHz silence (a decodable stream, so the engine does not skip through the queue on failed opens).
+fn silent_wav() -> Vec<u8> {
+    let data = 8000u32 * 2 * 20;
+    let mut v = Vec::with_capacity(44 + data as usize);
+    v.extend_from_slice(b"RIFF");
+    v.extend_from_slice(&(36 + data).to_le_bytes());
+    v.extend_from_slice(b"WAVEfmt ");
+    for x in [16u32.to_le_bytes().as_slice(), &1u16.to_le_bytes(), &1u16.to_le_bytes(), &8000u32.to_le_bytes(), &16000u32.to_le_bytes(), &2u16.to_le_bytes(), &16u16.to_le_bytes()] {
+        v.extend_from_slice(x);
+    }
+    v.extend_from_slice(b"data");
+    v.extend_from_slice(&data.to_le_bytes());
+    v.resize(44 + data as usize, 0);
+    v
+}
+
+/// 127.0.0.1 server: `/rest/stream` = the silent WAV, everything else the empty OK envelope.
+fn wav_server() -> String {
+    let l = TcpListener::bind("127.0.0.1:0").unwrap();
+    let url = format!("http://{}", l.local_addr().unwrap());
+    std::thread::spawn(move || {
+        for s in l.incoming() {
+            let Ok(mut s) = s else { continue };
+            std::thread::spawn(move || {
+                let mut buf = Vec::new();
+                let mut chunk = [0u8; 1024];
+                while !buf.windows(4).any(|w| w == b"\r\n\r\n") {
+                    match s.read(&mut chunk) {
+                        Ok(0) | Err(_) => return,
+                        Ok(n) => buf.extend_from_slice(&chunk[..n]),
+                    }
+                }
+                let line = String::from_utf8_lossy(&buf).lines().next().unwrap_or("").to_string();
+                let (ty, body) = if line.contains("/rest/stream") { ("audio/wav", silent_wav()) } else { ("application/json", OK.as_bytes().to_vec()) };
+                let _ = write!(s, "HTTP/1.1 200 OK\r\nContent-Type: {ty}\r\nContent-Length: {}\r\nConnection: close\r\n\r\n", body.len());
+                let _ = s.write_all(&body);
+            });
+        }
+    });
+    url
+}
+
+/// The queue once `ready` holds for it. Each wait names a property only the NEW queue has (source kind / mode, no source),
+/// so it can never be satisfied by the previous step's queue.
+fn queue_when(b: &RealBackend, what: &str, ready: impl Fn(&QueueState) -> bool) -> QueueState {
+    let page = PageRequest { offset: 0, limit: 50 };
+    wait_until(what, || b.player_get_queue(page).map(|q| ready(&q)).unwrap_or(false));
+    b.player_get_queue(page).unwrap()
+}
+
+#[test]
+fn rolling_sources_start_at_the_clicked_row_and_static_queues_keep_the_earlier_rows() {
+    let e = Env::new("playfrom");
+    let b = e.open();
+    seed_five(&b);
+    let url = wav_server();
+    *b.0.client.write().unwrap() = Some(Client::new(&url, "u", "p").unwrap());
+    b.player_set_volume(SetVolumeRequest { volume: 0.0 }).unwrap();
+    let ids = |q: &QueueState| q.items.iter().map(|i| i.track.id.as_str().to_owned()).collect::<Vec<_>>();
+    // the engine may start (silent) playback and advance; the rows it holds, history included, do not change.
+    let playing = |b: &RealBackend| b.player_get_state().map(|s| s.status == PlaybackStatus::Playing).unwrap_or(false);
+    let rx = b.subscribe();
+    let queue_events = || std::iter::from_fn(|| rx.try_recv().ok()).filter(|e| matches!(e, Event::QueueChanged)).count();
+
+    // playlist, in order, from row 3: the pool continues from t3 (no earlier rows)
+    b.player_play_playlist(PlaySourceRequest { id: "pl1".into(), start_track_id: Some("t3".into()), ..Default::default() }).unwrap();
+    let q = queue_when(&b, "playlist source", |q| q.source.as_ref().is_some_and(|s| s.kind == SourceKind::Playlist));
+    assert_eq!(ids(&q), ["t3", "t4", "t5"]);
+    let s = q.source.clone().unwrap();
+    assert_eq!((s.id.as_deref(), s.mode), (Some("pl1"), SourceMode::InOrder));
+    if playing(&b) {
+        assert_eq!(q.current_index, 0, "the clicked row is current");
+    }
+    assert!(queue_events() >= 1, "a source change tells the UI (QueueChanged)");
+
+    // liked songs: same
+    b.player_play_liked(PlaySourceRequest { start_track_id: Some("t2".into()), ..Default::default() }).unwrap();
+    let q = queue_when(&b, "liked source", |q| q.source.as_ref().is_some_and(|s| s.kind == SourceKind::Liked));
+    assert_eq!(ids(&q), ["t2", "t3", "t4", "t5"]);
+
+    // playlist, shuffle, from row 4: every row once, the clicked one first
+    b.player_play_playlist(PlaySourceRequest { id: "pl1".into(), shuffle: true, start_track_id: Some("t4".into()), ..Default::default() }).unwrap();
+    let q = queue_when(&b, "shuffle source", |q| q.source.as_ref().is_some_and(|s| s.mode == SourceMode::Shuffle));
+    let got = ids(&q);
+    assert_eq!(got[0], "t4");
+    let mut sorted = got.clone();
+    sorted.sort();
+    assert_eq!(sorted, ["t1", "t2", "t3", "t4", "t5"]);
+
+    // (shuffle is a player setting that outlives the source: a static queue honours it, so switch it off first)
+    b.player_set_shuffle(false).unwrap();
+    wait_until("shuffle off", || !b.player_get_state().unwrap().shuffle);
+    // a static queue (album detail row, artist top tracks, search, home): the whole list, current = N
+    let all: Vec<String> = (1..=5).map(|i| format!("t{i}")).collect();
+    b.player_play_queue(PlayQueueRequest { track_ids: all.clone(), start_index: 2 }).unwrap();
+    let q = queue_when(&b, "static queue", |q| q.source.is_none() && q.total == 5);
+    assert_eq!(ids(&q), all);
+    if playing(&b) {
+        assert_eq!(q.current_index, 2);
+    }
+}

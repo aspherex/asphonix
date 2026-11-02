@@ -10,8 +10,11 @@ use crate::widgets::text_input::TextInput;
 use gpui::{AnyElement, App, CursorStyle, Div, ElementId, Entity, IntoElement, SharedString, Stateful, Window, div, prelude::*, px};
 
 /// `.play-btn type-headline-sm`: accent fill, hard shadow, 40 px high, "PLAY" in the display face.
-pub fn play_btn(id: impl Into<ElementId>, th: &Theme, label: &str, disabled: bool) -> Stateful<Div> {
+/// Native-only: when this page's source is the loaded one (`pst.active()`) the button is an outline with a pause icon.
+pub fn play_btn(id: impl Into<ElementId>, th: &Theme, label: &str, disabled: bool, pst: crate::app::PlayState) -> Stateful<Div> {
     let th = *th;
+    let act = pst.active();
+    let fg = if act { th.accent_fg } else { th.accent_text };
     let mut b = div()
         .id(id)
         .flex()
@@ -21,12 +24,13 @@ pub fn play_btn(id: impl Into<ElementId>, th: &Theme, label: &str, disabled: boo
         .h(px(lm::BTN_H))
         .px(px(lm::PLAY_PAD_X))
         .flex_none()
-        .bg(th.accent)
-        .text_color(th.accent_text)
+        .bg(if act { th.mid } else { th.accent })
+        .when(act, |d| d.border_1().border_color(th.accent))
+        .text_color(fg)
         .shadow(hard_shadow(&th, ctl::BTN_SHADOW))
-        .child(icon("play", lm::ICON_PLAY, th.accent_text))
-        .child(txt(&th, HEADLINE_SM, label.to_string()).color(th.accent_text));
-    b = if disabled { b.opacity(0.5).cursor(CursorStyle::OperationNotAllowed) } else { b.tab_index(0).cursor(CursorStyle::PointingHand).hover(move |s| s.bg(th.accent_hover)) };
+        .child(icon(pst.icon(), lm::ICON_PLAY, fg))
+        .child(txt(&th, HEADLINE_SM, label.to_string()).color(fg));
+    b = if disabled { b.opacity(0.5).cursor(CursorStyle::OperationNotAllowed) } else { b.tab_index(0).cursor(CursorStyle::PointingHand).hover(move |s| s.bg(if act { th.high } else { th.accent_hover })) };
     b
 }
 

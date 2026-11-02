@@ -44,3 +44,10 @@ pub fn radio(cx: &gpui::App, kind: RadioSeedKind, id: String) {
         let _ = b.radio_start(RadioStartRequest { seed: RadioSeed { kind, id } });
     });
 }
+
+/// Click on the play button of the source that is already loaded: pause / resume it (`player_play_pause`, the dock's toggle).
+pub fn toggle(cx: &gpui::App) {
+    app::call(cx, |b| {
+        let _ = b.player_play_pause();
+    });
+}

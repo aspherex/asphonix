@@ -129,7 +129,11 @@ pub fn card<V: 'static>(
     if starred {
         art = art.child(div().absolute().top(px(m::CARD_STAR_INSET)).right(px(m::CARD_STAR_INSET)).child(icon("star-filled", m::CARD_STAR_ICON, th.accent_fg)));
     }
-    let sh = m::CARD_OVERLAY_SHIFT * (1.0 - t);
+    // native-only (not in the web): the play overlay of the source that is loaded shows the active state (outline, pause icon, always visible)
+    let target = if let CardItem::Album(a) = &item { crate::app::PlayTarget::Album { id: id.clone(), tracks: a.song_count } } else { crate::app::PlayTarget::Artist(id.clone()) };
+    let pst = ctx.player.read(cx).play_state(&target);
+    let t_play = if pst.active() { 1.0 } else { t };
+    let sh = m::CARD_OVERLAY_SHIFT * (1.0 - t_play);
     let play_id = id.clone();
     art = art.child(
         div()
@@ -141,14 +145,17 @@ pub fn card<V: 'static>(
             .flex()
             .items_center()
             .justify_center()
-            .bg(th.accent)
+            .bg(if pst.active() { th.mid } else { th.accent })
+            .when(pst.active(), |d| d.border_1().border_color(th.accent))
             .shadow(hard_shadow(&th, 2.0))
-            .opacity(t)
+            .opacity(t_play)
             .cursor(CursorStyle::PointingHand)
-            .child(icon("play", m::CARD_PLAY_ICON, th.accent_text))
+            .child(icon(pst.icon(), m::CARD_PLAY_ICON, if pst.active() { th.accent_fg } else { th.accent_text }))
             .on_click(move |_, _, cx| {
                 cx.stop_propagation();
-                if is_album {
+                if pst.active() {
+                    crate::playback::toggle(cx);
+                } else if is_album {
                     menus::play_album(cx, play_id.clone(), false);
                 } else {
                     menus::play_artist(cx, play_id.clone(), false);
@@ -303,6 +310,9 @@ pub fn tile<V: 'static>(ctx: &Ctx, th: &Theme, t: Tile<'_>, width: f32, window: 
     };
     if let Some(o) = &t.overlays {
         let play = o.play.clone();
+        // native-only: the loaded playlist's tile overlay shows the active state
+        let pst = ctx.player.read(cx).play_state(&crate::app::PlayTarget::Playlist(t.id.to_string()));
+        let ov = if pst.active() { 1.0 } else { ov };
         slot = slot.child(
             div()
                 .id(("tile-play", key))
@@ -313,14 +323,19 @@ pub fn tile<V: 'static>(ctx: &Ctx, th: &Theme, t: Tile<'_>, width: f32, window: 
                 .flex()
                 .items_center()
                 .justify_center()
-                .bg(th.accent)
+                .bg(if pst.active() { th.mid } else { th.accent })
+                .when(pst.active(), |d| d.border_1().border_color(th.accent))
                 .shadow(hard_shadow(&th, 2.0))
                 .opacity(ov)
                 .cursor(CursorStyle::PointingHand)
-                .child(icon("play", 12.0, th.accent_text))
+                .child(icon(pst.icon(), 12.0, if pst.active() { th.accent_fg } else { th.accent_text }))
                 .on_click(move |_, _, cx| {
                     cx.stop_propagation();
-                    play(cx);
+                    if pst.active() {
+                        crate::playback::toggle(cx);
+                    } else {
+                        play(cx);
+                    }
                 }),
         );
     }

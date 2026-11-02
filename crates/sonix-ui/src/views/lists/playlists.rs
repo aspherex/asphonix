@@ -32,11 +32,14 @@ pub struct PlaylistsView {
     loaded: bool,
     hover: Option<(bool, usize)>,
     scroll: ScrollHandle,
+    player: Entity<crate::app::PlayerModel>,
 }
 
 impl PlaylistsView {
-    pub fn new(backend: Arc<dyn Backend>, art: ArtHandle, menu: &Entity<ContextMenu>, cx: &mut Context<Self>) -> Self {
-        let mut this = Self { backend, art, menu: menu.clone(), lists: Vec::new(), smart: Vec::new(), loaded: false, hover: None, scroll: ScrollHandle::new() };
+    pub fn new(backend: Arc<dyn Backend>, art: ArtHandle, menu: &Entity<ContextMenu>, player: &Entity<crate::app::PlayerModel>, cx: &mut Context<Self>) -> Self {
+        // native-only play-button state: repaint when the loaded track / status / source changes
+        cx.subscribe(player, |_, _, _: &crate::app::PlayerEvent, cx| cx.notify()).detach();
+        let mut this = Self { backend, art, menu: menu.clone(), lists: Vec::new(), smart: Vec::new(), loaded: false, hover: None, scroll: ScrollHandle::new(), player: player.clone() };
         this.reload(cx);
         this
     }
@@ -126,6 +129,9 @@ impl PlaylistsView {
         }
         let overlay = {
             let (id2, sm) = (id.clone(), smart);
+            let target = if smart { crate::app::PlayTarget::Smart(id.clone()) } else { crate::app::PlayTarget::Playlist(id.clone()) };
+            let pst = self.player.read(cx).play_state(&target);
+            let (t, th_fg) = (if pst.active() { 1.0 } else { t }, if pst.active() { th.accent_fg } else { th.accent_text });
             div()
                 .id(("pl-play", key))
                 .absolute()
@@ -135,12 +141,17 @@ impl PlaylistsView {
                 .flex()
                 .items_center()
                 .justify_center()
-                .bg(th.accent)
+                .bg(if pst.active() { th.mid } else { th.accent })
+                .when(pst.active(), |d| d.border_1().border_color(th.accent))
                 .shadow(hard_shadow(&th, 2.0))
                 .opacity(t)
-                .child(icon("play", lm::OVERLAY_ICON, th.accent_text))
+                .child(icon(pst.icon(), lm::OVERLAY_ICON, th_fg))
                 .on_click(move |_, _, cx| {
                     cx.stop_propagation();
+                    if pst.active() {
+                        crate::playback::toggle(cx);
+                        return;
+                    }
                     let id = id2.clone();
                     app::call(cx, move |b| {
                         let req = PlaySourceRequest { id, ..Default::default() };
