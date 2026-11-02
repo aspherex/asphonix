@@ -193,6 +193,7 @@ impl Shell {
         this.load_backdrop();
         this.start_event_pump(cx);
         this.load_static(cx);
+        this.startup_login_check(cx);
         this.install_minimize_hook(window, cx);
         if let Some(r) = std::env::var("SONIX_ROUTE").ok().and_then(|r| Route::parse(&r)) {
             this.router.navigate(r);
@@ -356,6 +357,24 @@ impl Shell {
             Event::UpdateProgress(p) => crate::overlays::update_progress(cx, p),
             Event::SyncProgress(_) | Event::Connection(_) => {}
         }
+    }
+
+    /// `App.svelte` onMount: only a session without stored credentials (`disconnected`), or a failing
+    /// status call, opens the login screen; `connecting`/`error` keep browsing the local library.
+    fn startup_login_check(&mut self, cx: &mut Context<Self>) {
+        let b = self.backend.clone();
+        cx.spawn(async move |this, cx| {
+            let st = cx.background_executor().spawn(async move { b.auth_session_status() }).await;
+            let to_login = st.map(|s| s.state == sonix_api::ConnectionState::Disconnected).unwrap_or(true);
+            crate::log(&format!("startup_login_check to_login={to_login}"));
+            let r = this.update(cx, |sh, cx| {
+                if to_login && *sh.router.current() != Route::Login {
+                    sh.navigate(Route::Login, cx);
+                }
+            });
+            crate::log(&format!("startup_login_check applied={}", r.is_ok()));
+        })
+        .detach();
     }
 
     pub(crate) fn load_static(&mut self, cx: &mut Context<Self>) {
