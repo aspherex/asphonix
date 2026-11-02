@@ -1,6 +1,6 @@
 //! `Genres.svelte`: every genre with real album/track counts in one plain CSS grid (`minmax(220px, 1fr)`), sortable by
 //! track count or A-Z, each card with a relative-size bar.
-use super::parts::{PageScroll, auto_fill, measure, segmented};
+use super::parts::{PageScroll, auto_fill, segmented};
 use super::{Ctx, navigate};
 use crate::app;
 use crate::metrics::library as m;
