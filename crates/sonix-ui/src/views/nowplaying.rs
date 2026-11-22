@@ -1,4 +1,4 @@
-//! Now Playing (`NowPlaying.svelte`, "artwork dominant" layout): header strip with the real
+//! Now Playing ("artwork dominant" layout): header strip with the real
 //! source/output line, dominant cover with the source-format tag, title block, a 28-band FFT
 //! with peak hold, stereo peak meters, a 240-bucket waveform seek bar and the full transport.
 //! The FFT bars and meters are painted by the live layer (`crate::live`, `fft_step`) every `MIN_DRAW_MS` while
@@ -22,7 +22,6 @@ use std::cell::Cell;
 use std::rc::Rc;
 use std::sync::Arc;
 use crate::metrics::spectrum as sp;
-use crate::probe::pid;
 
 
 pub struct NowPlayingView {
@@ -116,7 +115,7 @@ impl NowPlayingView {
         self.visible && !self.suspended
     }
 
-    /// The live layer's FFT frame (`FftPanel.frame`): take a new engine frame, run the release step, and say whether
+    /// The live layer's FFT frame: take a new engine frame, run the release step, and say whether
     /// the panel still moves (playing, or caps / meters falling) so the layer draws again after `MIN_DRAW_MS`.
     pub(crate) fn fft_step(&mut self, cx: &mut Context<Self>) -> crate::live::FftDraw {
         let (status, has_track, frame, seq) = {
@@ -184,7 +183,7 @@ impl NowPlayingView {
             let m = self.player.read(cx);
             (m.current_id().map(str::to_string), matches!(m.state.status, PlaybackStatus::Playing | PlaybackStatus::Paused))
         };
-        // `Waveform.svelte`: the scan reads playback's own download, so a track asked about before it was live may have
+        // the waveform scan reads playback's own download, so a track asked about before it was live may have
         // answered "no waveform" (done, nothing filled): ask once more when it turns live while the bar is still empty.
         let became_live = live && !self.wave_live;
         self.wave_live = live;
@@ -205,7 +204,7 @@ impl NowPlayingView {
     }
 }
 
-/// Port of `np/FftPanel.svelte`'s dynamics (constants in `metrics::spectrum`, copied from the web source):
+/// Spectrum panel dynamics (constants in `metrics::spectrum`):
 /// the bars show the latest frame, a cap holds each band's peak and falls at 0.45 of full scale per second, the
 /// stereo meters fall at 30 dB/s with a 1.2 s peak hold, and a stalled stream (> 120 ms without a frame) lets the
 /// bars fall at 2.2 x full scale per second. Time is the shared clock; draws are at most 20 ms apart.
@@ -231,12 +230,12 @@ impl Fft {
         self.last_draw = None;
     }
 
-    /// `clearAll()`: nothing audible.
+    /// Nothing audible: reset everything.
     fn clear(&mut self) {
         *self = Self { seen_seq: self.seen_seq, ..Self::default() };
     }
 
-    /// `onFrame`: copy the bands, raise the meters, restart the peak hold.
+    /// A new frame: copy the bands, raise the meters, restart the peak hold.
     fn on_frame(&mut self, f: &SpectrumFrame, now: f64) {
         if self.bands.len() != f.bands.len() {
             self.bands = vec![0.0; f.bands.len()];
@@ -258,7 +257,7 @@ impl Fft {
         }
     }
 
-    /// `frame(now)`: release step; returns whether anything is still moving (keep requesting frames).
+    /// Release step; returns whether anything is still moving (keep requesting frames).
     fn frame(&mut self, now: f64) -> bool {
         if let Some(last) = self.last_draw
             && (now - last) * 1000.0 < sp::MIN_DRAW_MS as f64
@@ -296,7 +295,7 @@ impl Fft {
     }
 }
 
-/// `FftPanel.drawSpectrum` on a canvas of the element's device-pixel size: bar gap `max(1, round(dpr))` device px,
+/// Draws the spectrum on a canvas of the element's device-pixel size: bar gap `max(1, round(dpr))` device px,
 /// bar edges rounded to whole device px, cap line `round(2 * dpr)` px thick.
 pub(crate) fn paint_spectrum(window: &mut Window, b: Bounds<gpui::Pixels>, th: Theme, bands: &[f32], caps: &[f32]) {
     let s = window.scale_factor();
@@ -321,7 +320,7 @@ pub(crate) fn paint_spectrum(window: &mut Window, b: Bounds<gpui::Pixels>, th: T
     }
 }
 
-// ===================================================================== Now Playing layout (web `NowPlaying.svelte`)
+// ===================================================================== Now Playing layout
 
 const LOSSLESS_FMT: [&str; 10] = ["flac", "alac", "wav", "aiff", "aif", "ape", "wv", "dsf", "dff", "tta"];
 
@@ -329,12 +328,12 @@ fn with_size(base: TypeSpec, size: f32, line: f32) -> TypeSpec {
     TypeSpec { size, line, ..base }
 }
 
-/// `spectrum.ts bandRangeHz`
+/// Frequency range (Hz) covered by a band.
 pub fn band_range_hz(rate: f64) -> (f64, f64) {
     let nyq = rate / 2.0;
     ((40.0f64).min(nyq * 0.9), nyq * 0.98)
 }
-/// `spectrum.ts formatHz`: "50 HZ" / "1 KHZ" / "21.6 KHZ".
+/// Axis label of a frequency: "50 HZ" / "1 KHZ" / "21.6 KHZ".
 pub fn format_hz(hz: f64) -> String {
     if hz < 1000.0 {
         return format!("{} HZ", hz.round() as i64);
@@ -343,7 +342,7 @@ pub fn format_hz(hz: f64) -> String {
     if k.fract() == 0.0 { format!("{} KHZ", k as i64) } else { format!("{:.1} KHZ", k) }
 }
 
-/// Text on a canvas (CSS px geometry): one shaped line painted at `x`, vertically centred on `mid_y`.
+/// Text on a canvas (logical px geometry): one shaped line painted at `x`, vertically centred on `mid_y`.
 #[allow(clippy::too_many_arguments)]
 fn canvas_text(window: &mut Window, cx: &mut gpui::App, s: &str, size: f32, weight: f32, color: Hsla, x: f32, mid_y: f32, right_align: bool) {
     let mut f = gpui::font(crate::theme::MONO);
@@ -355,7 +354,7 @@ fn canvas_text(window: &mut Window, cx: &mut gpui::App, s: &str, size: f32, weig
     let _ = line.paint(point(px(ox), px(mid_y - size * 0.6)), px(size * 1.2), window, cx);
 }
 
-/// `FftPanel.drawMeters` on the canvas' device-pixel box: `L`/`R` labels, 20 segments, held-peak value.
+/// Draws the stereo meters on the canvas' device-pixel box: `L`/`R` labels, 20 segments, held-peak value.
 pub(crate) fn paint_meters(window: &mut Window, cx: &mut gpui::App, b: Bounds<gpui::Pixels>, th: Theme, level: [f32; 2], hold: [f32; 2]) {
     let s = window.scale_factor();
     let (ox, oy) = (f32::from(b.origin.x) * s, f32::from(b.origin.y) * s);
@@ -393,7 +392,7 @@ pub(crate) fn paint_meters(window: &mut Window, cx: &mut gpui::App, b: Bounds<gp
     }
 }
 
-/// Everything `Waveform.svelte draw()` needs, in one value so the canvas closure owns it.
+/// Everything the waveform draw needs, in one value so the canvas closure owns it.
 #[derive(Clone)]
 struct WaveDraw {
     buckets: Vec<u8>,
@@ -405,13 +404,13 @@ struct WaveDraw {
     loop_b: Option<f32>,
 }
 
-/// `Waveform.svelte draw()`, line for line, in device pixels of the canvas box.
+/// Draws the waveform seek bar in device pixels of the canvas box.
 fn wave_canvas(th: Theme, d: WaveDraw) -> impl IntoElement {
     canvas(
         |_, _, _| (),
         move |b, _, window, cx| {
             let s = window.scale_factor();
-            // Chromium snaps the canvas to whole device pixels (277 css px * 1.5 = 415.5 -> 416); fractional quads blur
+            // snap the canvas to whole device pixels (277 px * 1.5 = 415.5 -> 416); fractional quads blur
             let (ox, oy) = ((f32::from(b.origin.x) * s).round(), (f32::from(b.origin.y) * s).round());
             let (w, h) = ((f32::from(b.size.width) * s).round(), (f32::from(b.size.height) * s).round());
             let dev = |x: f32, y: f32, ww: f32, hh: f32| Bounds::new(point(px((ox + x) / s), px((oy + y) / s)), size(px(ww / s), px(hh / s)));
@@ -467,7 +466,7 @@ fn wave_canvas(th: Theme, d: WaveDraw) -> impl IntoElement {
     .size_full()
 }
 
-/// A bordered chip button (`.hbtn`, `.abtn`, `.t`): hover or `on` = accent text + border (instant, like the CSS).
+/// A bordered chip button: hover or `on` = accent text + border (instant, no transition).
 fn chip(id: impl Into<ElementId>, th: Theme, h: f32, pad_x: f32, bg: Hsla, on: bool) -> Stateful<Div> {
     div()
         .id(id)
@@ -492,7 +491,7 @@ fn chip_icon(th: Theme, name: &str, size: f32, on: bool) -> gpui::Svg {
 }
 
 impl NowPlayingView {
-    /// `refreshQueue()`: source label + the next ten rows, only when the identity key changed.
+    /// Refreshes the source label + the next ten rows, only when the identity key changed.
     fn refresh_queue(&mut self, key: (usize, String, bool), cx: &mut Context<Self>) {
         if key == self.queue_key {
             return;
@@ -531,8 +530,8 @@ impl NowPlayingView {
         self.poll_waveform_gen(id, self.wave_gen, 0, cx);
     }
 
-    /// `Waveform.svelte`'s `poll`: again in 400 ms while not done; a failed request is retried at 1.5 s, at most
-    /// 3 tries per ask (`failures` counts them for this generation and, like the web, is never reset).
+    /// Polls the waveform: again in 400 ms while not done; a failed request is retried at 1.5 s, at most
+    /// 3 tries per ask (`failures` counts them for this generation and is never reset).
     fn poll_waveform_gen(&mut self, id: String, gen_: u64, failures: u32, cx: &mut Context<Self>) {
         let b = self.backend.clone();
         cx.spawn(async move |this, cx| {
@@ -568,7 +567,7 @@ impl NowPlayingView {
         .detach();
     }
 
-    /// Plain-key shortcuts of the view (`playerKeys.ts`, scope "nowplaying"). True when consumed.
+    /// Plain-key shortcuts of the view. True when consumed.
     pub fn key(&mut self, key: &str, cx: &mut Context<Self>) -> bool {
         let ps = self.player.read(cx).state.clone();
         match key {
@@ -650,7 +649,7 @@ pub enum NpEvent {
     Navigate(Route),
     AddToPlaylist { id: String, at: gpui::Point<gpui::Pixels> },
     TrackInfo(Box<Track>),
-    Rate { id: String, title: SharedString, rating: u8 },
+    Rate { id: String, rating: u8 },
 }
 impl gpui::EventEmitter<NpEvent> for NowPlayingView {}
 
@@ -668,16 +667,16 @@ impl Render for NowPlayingView {
 
         let vw = f32::from(window.viewport_size().width);
         let vh = f32::from(window.viewport_size().height);
-        let narrow = vw < 1440.0; // @media (max-width: 1439px)
-        let compact = vw < 1280.0; // @media (max-width: 1279px)
-        let short = vh <= 820.0; // @media (max-height: 820px)
+        let narrow = vw < 1440.0;
+        let compact = vw < 1280.0;
+        let short = vh <= 820.0;
         let strip_h = if vh <= 900.0 { 40.0 } else { 44.0 };
         let Some(t) = ps.track.clone() else {
             return div()
                 .size_full()
                 .flex()
                 .flex_col()
-                .child(pid("np.strip", self.strip(th, strip_h, None, &ps, compact, cx)))
+                .child(self.strip(th, strip_h, None, &ps, compact, cx))
                 .child(
                     div().flex_1().m(px(16.)).border_1().border_color(th.border).flex().flex_col().items_center().justify_center().gap(px(8.)).child(icon("equalizer", 32., th.muted)).child(txt(&th, HEADLINE_SM, "Nothing playing").color(th.text)).child(txt(&th, BODY_SM, "Pick an album, playlist or track to start the signal chain.").color(th.muted)),
                 )
@@ -685,7 +684,7 @@ impl Render for NowPlayingView {
         };
         self.refresh_queue((ps.queue_length, t.id.clone(), ps.shuffle), cx);
 
-        let strip = pid("np.strip", self.strip(th, strip_h, Some(&t), &ps, compact, cx));
+        let strip = self.strip(th, strip_h, Some(&t), &ps, compact, cx);
 
         // ---- cover (square, the whole height of the 1fr row; measured, one-frame lag) [+ lyrics column]
         let area_h = self.cover_area_h.get();
@@ -700,9 +699,7 @@ impl Render for NowPlayingView {
         let cover = art::cover(&self.art, &backend, t.cover_art.as_deref(), cover_px, window, cx);
         let cell = self.cover_area_h.clone();
         let tag = tag_text(&t);
-        let cover_el = pid(
-            "np.cover",
-            div()
+        let cover_el = div()
                 .relative()
                 .size(px(cover_px))
                 .flex_none()
@@ -713,9 +710,8 @@ impl Render for NowPlayingView {
                 .overflow_hidden()
                 .child(cover)
                 .children((!tag.is_empty()).then(|| {
-                    pid("np.cover.tag", div().absolute().top_0().left_0().px(px(8.)).py(px(2.)).bg(th.accent).child(txt(&th, MONO_DATA, tag).weight(700.0).color(th.accent_text)))
-                })),
-        );
+                    div().absolute().top_0().left_0().px(px(8.)).py(px(2.)).bg(th.accent).child(txt(&th, MONO_DATA, tag).weight(700.0).color(th.accent_text))
+                }));
         if lyrics_on {
             self.lyrics_ensure(&t.id, cx);
         }
@@ -754,18 +750,15 @@ impl Render for NowPlayingView {
             .children(lyrics_el.map(|l| div().flex_1().min_w_0().min_h_0().flex().flex_col().child(l)));
 
         // ---- title block
-        let title_row = pid(
-            "np.title",
-            div()
+        let title_row = div()
                 .flex()
                 .flex_row()
                 .items_end()
                 .gap(px(12.))
                 .max_w_full()
                 .min_w_0()
-                .child(pid("np.title.text", div().id("np-title").tip(t.title.clone(), th).flex().min_w_0().child(txt(&th, HEADLINE_LG, t.title.clone()).color(th.text).ellipsis())))
-                .child(div().flex_none().pb(px(3.)).child(pid("np.title.dur", div().child(txt(&th, MONO_METRIC, fmt::format_duration(Some(ps.duration_sec))).color(th.accent_fg))))),
-        );
+                .child(div().id("np-title").tip(t.title.clone(), th).flex().min_w_0().child(txt(&th, HEADLINE_LG, t.title.clone()).color(th.text).ellipsis()))
+                .child(div().flex_none().pb(px(3.)).child(div().child(txt(&th, MONO_METRIC, fmt::format_duration(Some(ps.duration_sec))).color(th.accent_fg))));
         let link = |id: &'static str, label: String, strong: bool, nav: Option<Route>| {
             let mut d = div().id(id).flex_none().child({
                 let x = txt(&th, BODY_LG, label).no_tracking();
@@ -776,9 +769,7 @@ impl Render for NowPlayingView {
             }
             d
         };
-        let artline = pid(
-            "np.artline",
-            div()
+        let artline = div()
                 .flex()
                 .flex_row()
                 .flex_wrap()
@@ -795,8 +786,7 @@ impl Render for NowPlayingView {
                         .child(txt(&th, BODY_LG, "·").color(th.muted.opacity(0.6)))
                         .child(link("np-album", a, false, t.album_id.clone().map(Route::Album)))
                 }))
-                .children(t.year.map(|y| txt(&th, BODY_LG, format!("({y})")).color(th.muted))),
-        );
+                .children(t.year.map(|y| txt(&th, BODY_LG, format!("({y})")).color(th.muted)));
         let key_lbl = |k: &str| PLAYER_KEYS.iter().find(|p| p.keys[0] == k).map(|p| p.legend).unwrap_or("");
         let tid = t.id.clone();
         let add_cell = self.add_btn.clone();
@@ -804,9 +794,7 @@ impl Render for NowPlayingView {
         let t_for_info = t.clone();
         let rating = t.rating.unwrap_or(0);
         let lyr_on = self.lyrics_open;
-        let actions = pid(
-            "np.actions",
-            div()
+        let actions = div()
                 .flex()
                 .flex_row()
                 .flex_wrap()
@@ -814,41 +802,28 @@ impl Render for NowPlayingView {
                 .items_center()
                 .gap(px(8.))
                 .mt(px(if short { 0.0 } else { 4.0 }))
-                .child(pid(
-                    "np.abtn.add",
-                    chip("np-add", th, 30.0, 12.0, th.low, false)
+                .child(chip("np-add", th, 30.0, 12.0, th.low, false)
                         .child(chip_icon(th, "add", 14., false))
                         .child(txt(&th, MONO_DATA, "ADD TO PLAYLIST"))
                         .child(canvas(move |b, _, _| add_cell.set(b), |_, _, _, _| ()).absolute().size_full())
                         .relative()
-                        .on_click(cx.listener(move |_, _: &gpui::ClickEvent, _, cx| cx.emit(NpEvent::AddToPlaylist { id: tid.clone(), at: add_cell2.get().bottom_right() }))),
-                ))
-                .child(pid(
-                    "np.abtn.lyrics",
-                    chip("np-lyrics2", th, 30.0, 12.0, th.low, lyr_on)
+                        .on_click(cx.listener(move |_, _: &gpui::ClickEvent, _, cx| cx.emit(NpEvent::AddToPlaylist { id: tid.clone(), at: add_cell2.get().bottom_right() }))))
+                .child(chip("np-lyrics2", th, 30.0, 12.0, th.low, lyr_on)
                         .child(chip_icon(th, "lyrics", 14., lyr_on))
                         .child(txt(&th, MONO_DATA, format!("[{}] LYRICS", key_lbl("t"))))
                         .on_click(cx.listener(|this, _, _, cx| {
                             this.lyrics_open = !this.lyrics_open;
                             cx.notify();
-                        })),
-                ))
-                .child(pid(
-                    "np.abtn.info",
-                    chip("np-info", th, 30.0, 12.0, th.low, false)
+                        })))
+                .child(chip("np-info", th, 30.0, 12.0, th.low, false)
                         .child(txt(&th, MONO_DATA, "TRACK INFO"))
-                        .on_click(cx.listener(move |_, _, _, cx| cx.emit(NpEvent::TrackInfo(Box::new(t_for_info.clone()))))),
-                ))
-                .child(pid(
-                    "np.stars",
-                    div().flex().flex_row().ml(px(8.)).children((1..=5u8).map(|n| {
+                        .on_click(cx.listener(move |_, _, _, cx| cx.emit(NpEvent::TrackInfo(Box::new(t_for_info.clone()))))))
+                .child(div().flex().flex_row().ml(px(8.)).children((1..=5u8).map(|n| {
                         let on = rating >= n;
-                        let hover = if n == 1 { th.clip } else { th.text };
                         let id = t.id.clone();
-                        let title: SharedString = t.title.clone().into();
-                        pid(format!("np.star.{n}"), div()
+                        div()
                             .id(("np-rate", n as usize))
-                            .tip(if n == 1 { "1 star: purged from the library nightly".to_string() } else { format!("{n} stars") }, th)
+                            .tip(if n == 1 { "1 star".to_string() } else { format!("{n} stars") }, th)
                             .group("hv")
                             .w(px(22.))
                             .h(px(30.))
@@ -856,15 +831,13 @@ impl Render for NowPlayingView {
                             .items_center()
                             .justify_center()
                             .cursor(CursorStyle::PointingHand)
-                            .child(icon_g(if on { "star-filled" } else { "star" }, 14., if on { th.accent_fg } else { th.muted }, hover))
+                            .child(icon_g(if on { "star-filled" } else { "star" }, 14., if on { th.accent_fg } else { th.muted }, th.text))
                             .on_click(cx.listener(move |_, _, _, cx| {
                                 let next = if rating == n { 0 } else { n };
-                                cx.emit(NpEvent::Rate { id: id.clone(), title: title.clone(), rating: next });
-                            })))
-                    })),
-                )),
-        );
-        let title_block = div().px(px(16.)).flex_none().min_w_0().child(pid("np.titleblock", div().flex().flex_col().items_center().gap(px(4.)).min_w_0().child(title_row).child(artline).child(actions)));
+                                cx.emit(NpEvent::Rate { id: id.clone(), rating: next });
+                            }))
+                    })));
+        let title_block = div().px(px(16.)).flex_none().min_w_0().child(div().flex().flex_col().items_center().gap(px(4.)).min_w_0().child(title_row).child(artline).child(actions));
 
         // ---- FFT panel
         let (lo, hi) = band_range_hz(ps.sample_rate.map(|r| r as f64).unwrap_or(44100.0));
@@ -874,18 +847,13 @@ impl Render for NowPlayingView {
             .map(|f| (f, ((f / lo).ln() / (hi / lo).ln() * 100.0) as f32))
             .collect();
         let fft_h = (vh * 0.085).clamp(68.0, 84.0);
-        let axis = pid(
-            "np.fft.axis",
-            div().relative().h(px(13.)).flex_none().children(ticks.into_iter().map(|(f, left)| {
-                // `span { position: absolute; transform: translateX(-50%) }` at `left: N%`
+        let axis = div().relative().h(px(13.)).flex_none().children(ticks.into_iter().map(|(f, left)| {
+                // each label is centred on its frequency's x position
                 let label = format_hz(f);
                 let w = crate::text::natural_width(window, &label, crate::theme::MONO, 11.0, 400.0, MONO_CODE.tracking_px());
                 div().absolute().top_0().left(gpui::relative(left / 100.0)).ml(px(-w / 2.0)).child(txt(&th, MONO_CODE, label).color(th.muted))
-            })),
-        );
-        let fft = pid(
-            "np.fft",
-            div()
+            }));
+        let fft = div()
                 .flex()
                 .flex_col()
                 .w_full()
@@ -895,9 +863,7 @@ impl Render for NowPlayingView {
                 .border_1()
                 .border_color(th.border)
                 .bg(th.low)
-                .child(pid(
-                    "np.fft.head",
-                    div()
+                .child(div()
                         .flex()
                         .flex_row()
                         .items_center()
@@ -910,8 +876,7 @@ impl Render for NowPlayingView {
                         .border_b_1()
                         .border_color(th.border)
                         .child(txt(&th, LABEL_CAPS, format!("FAST FOURIER TRANSFORM // {}-BAND FFT", sp::BANDS)).color(th.accent_fg))
-                        .child(txt(&th, MONO_CODE, format!("{}-PT · {}\u{2013}{} · PEAK HOLD", sp::FFT_SIZE, format_hz(lo), format_hz(hi))).color(th.muted)),
-                ))
+                        .child(txt(&th, MONO_CODE, format!("{}-PT · {}\u{2013}{} · PEAK HOLD", sp::FFT_SIZE, format_hz(lo), format_hz(hi))).color(th.muted)))
                 .child(
                     div()
                         .flex_1()
@@ -923,14 +888,9 @@ impl Render for NowPlayingView {
                         .px(px(12.))
                         .pb(px(8.))
                         .child(
-                            div().flex_1().min_w_0().flex().flex_col().child(axis).child(pid(
-                                "np.fft.spec",
-                                div().flex_1().min_h_0().w_full().bg(th.base).border_1().border_color(th.border).child(crate::live::slot(crate::live::Kind::NpSpectrum).size_full()),
-                            )),
+                            div().flex_1().min_w_0().flex().flex_col().child(axis).child(div().flex_1().min_h_0().w_full().bg(th.base).border_1().border_color(th.border).child(crate::live::slot(crate::live::Kind::NpSpectrum).size_full())),
                         )
-                        .child(pid(
-                            "np.fft.meters",
-                            div()
+                        .child(div()
                                 .w(px(176.))
                                 .flex_none()
                                 .flex()
@@ -948,10 +908,8 @@ impl Render for NowPlayingView {
                                         .child(txt(&th, LABEL_CAPS, "STEREO").color(th.muted))
                                         .child(txt(&th, LABEL_CAPS, "PEAK").color(th.accent_fg))
                                 }))
-                                .child(div().flex_1().min_h_0().w_full().child(crate::live::slot(crate::live::Kind::NpMeters).size_full())),
-                        )),
-                ),
-        );
+                                .child(div().flex_1().min_h_0().w_full().child(crate::live::slot(crate::live::Kind::NpMeters).size_full()))),
+                );
         let fft_row = div().w_full().px(px(16.)).flex_none().flex().justify_center().child(fft);
 
         // ---- deck: times + waveform seek, transport
@@ -1023,9 +981,7 @@ impl Render for NowPlayingView {
                 }
             })
             .child(div().absolute().size_full().child(wave_canvas(th, wd)));
-        let wavebox = div().h(px(wavebox_h)).w_full().child(pid(
-            "np.wavebox",
-            div()
+        let wavebox = div().h(px(wavebox_h)).w_full().child(div()
                 .relative()
                 .h_full()
                 .min_h(px(40.))
@@ -1035,14 +991,11 @@ impl Render for NowPlayingView {
                 .border_color(th.border)
                 .child(wave_inner)
                 .children(hover_label.map(|l| {
-                    // `.tip { left: x%; transform: translateX(-50%) }`: a zero-width centring box (flex centre overflows both ways)
+                    // tooltip centred on the pointer x: a zero-width centring box (flex centre overflows both ways)
                     div().absolute().bottom(gpui::relative(1.0)).mb(px(2.)).left(gpui::relative(hover_x)).w(px(0.)).flex().flex_row().justify_center().child(div().flex_none().bg(th.high).border_1().border_color(th.border).px(px(4.)).child(txt(&th, MONO_CODE, l).color(th.text)))
-                })),
-        ));
-        let shown_pos = ps.position_sec; // NowPlaying: POS never follows the drag preview
-        let times = pid(
-            "np.times",
-            div()
+                })));
+        let shown_pos = ps.position_sec; // POS never follows the drag preview
+        let times = div()
                 .flex()
                 .flex_row()
                 .justify_between()
@@ -1057,16 +1010,13 @@ impl Render for NowPlayingView {
                         .child(div().w(px(MONO_DATA_SPACE)))
                         .child(txt(&th, MONO_DATA, format!("/ {}", fmt::format_duration(Some(dur)))).color(th.muted)),
                 )
-                .child(txt(&th, MONO_DATA, remaining.map(|r| format!("-{} REMAINING", fmt::format_duration(Some(r)))).unwrap_or_default()).color(th.clip)),
-        );
-        let seek = pid("np.seek", div().flex().flex_col().gap(px(4.)).child(times).child(wavebox));
+                .child(txt(&th, MONO_DATA, remaining.map(|r| format!("-{} REMAINING", fmt::format_duration(Some(r)))).unwrap_or_default()).color(th.clip));
+        let seek = div().flex().flex_col().gap(px(4.)).child(times).child(wavebox);
 
         // transport
         let tbtn = |id: &'static str, on: bool| chip(id, th, 40.0, 8.0, th.low, on).min_w(px(40.)).relative();
         let hint = |k: &str| div().absolute().right(px(3.)).bottom(px(1.)).child(txt(&th, with_size(LABEL_CAPS, 8.0, 10.0), k.to_string()).color(th.muted));
-        let c1 = pid(
-            "np.cluster.0",
-            div()
+        let c1 = div()
                 .flex()
                 .flex_row()
                 
@@ -1101,8 +1051,7 @@ impl Render for NowPlayingView {
                         .on_click(cx.listener(|_, _, _, cx| app::call(cx, |b| drop(b.player_play_pause()))))
                 })
                 .child(tbtn("np-fwd", false).child(chip_icon(th, "skip-fwd", 18., false)).child(hint(key_lbl("k"))).on_click(cx.listener(|this, _, _, cx| this.skip_by(10.0, cx))))
-                .child(tbtn("np-next", false).child(chip_icon(th, "next", 16., false)).child(hint(key_lbl("b"))).on_click(cx.listener(|_, _, _, cx| app::call(cx, |b| drop(b.player_next()))))),
-        );
+                .child(tbtn("np-next", false).child(chip_icon(th, "next", 16., false)).child(hint(key_lbl("b"))).on_click(cx.listener(|_, _, _, cx| app::call(cx, |b| drop(b.player_next())))));
         let loop_label = if ps.loop_b.is_some() {
             "A↔B ACTIVE"
         } else if ps.loop_a.is_some() {
@@ -1110,9 +1059,7 @@ impl Render for NowPlayingView {
         } else {
             "A↔B LOOP"
         };
-        let c2 = pid(
-            "np.cluster.1",
-            div()
+        let c2 = div()
                 .flex()
                 .flex_row()
                 
@@ -1140,8 +1087,7 @@ impl Render for NowPlayingView {
                         .child(chip_icon(th, "loop-ab", 15., on))
                         .child(txt(&th, MONO_DATA, loop_label))
                         .on_click(cx.listener(|_, _, _, cx| app::call(cx, |b| drop(b.player_loop_cycle()))))
-                }),
-        );
+                });
         let vol_cb: OnChange = {
             let this = cx.entity().downgrade();
             Rc::new(move |f, _c, _w, cx| {
@@ -1152,9 +1098,7 @@ impl Render for NowPlayingView {
         };
         let muted = ps.volume <= 0.0;
         let fader_w = if narrow { (vw * 0.08).clamp(70.0, 150.0) } else { (vw * 0.10).clamp(90.0, 150.0) };
-        let c3 = pid(
-            "np.cluster.2",
-            div()
+        let c3 = div()
                 .flex()
                 .flex_row()
                 .items_center()
@@ -1187,17 +1131,14 @@ impl Render for NowPlayingView {
                         .child(slider("np-vol", th, &self.vol, ps.volume as f32, None, vol_cb)),
                 )
                 .child(div().min_w(px(56.)).flex().justify_end().child(txt(&th, MONO_CODE, fmt::volume_label(&ps)).color(if muted { th.muted } else { th.accent_fg })))
-                .child(chip("np-mute", th, 32.0, 12.0, th.low, muted).tip("Mute (M)", th).child(txt(&th, MONO_DATA, format!("MUTE [{}]", key_lbl("m")))).on_click(cx.listener(|this, _, _, cx| this.toggle_mute(cx)))),
-        );
+                .child(chip("np-mute", th, 32.0, 12.0, th.low, muted).tip("Mute (M)", th).child(txt(&th, MONO_DATA, format!("MUTE [{}]", key_lbl("m")))).on_click(cx.listener(|this, _, _, cx| this.toggle_mute(cx))));
         // up next
         let more = self.queue_total.saturating_sub(self.next_start);
         let un_title = self.upcoming.first().map(|u| format!("{} — {}", u.track.title, u.track.artist)).unwrap_or_else(|| "Nothing queued".into());
         let un_head = format!("UP NEXT{}", if more > 1 { format!(" · +{}", more - 1) } else { String::new() });
         let open = self.upnext_open;
         let un_w: f32 = if narrow { 180.0 } else { 360.0 };
-        let upnext = pid(
-            "np.upnext",
-            div()
+        let upnext = div()
                 .relative()
                 .flex_basis(px(un_w.min(220.0)))
                 .flex_grow()
@@ -1292,7 +1233,7 @@ impl Render for NowPlayingView {
                                         .child(artist)
                                         .child(div().w(px(44.)).flex_none().flex().justify_end().child(txt(&th, MONO_CODE, fmt::format_duration(Some(u.track.duration))).color(th.muted)))
                                 })
-                                // `.q-flow { margin-top: -6px; padding: 0 0 5px 32px }`
+                                // Flow line under the row: -6 px top margin, 32 px left / 5 px bottom padding
                                 .children({
                                     let line = fmt::flow_line(u.flow.as_ref());
                                     (!line.is_empty()).then(|| div().id(("np-qflow", k)).tip("Why this track is next", th).flex().min_w_0().mt(px(-6.)).pb(px(5.)).pl(px(32.)).child(txt(&th, MONO_CODE, line).color(th.accent_fg).ellipsis()))
@@ -1303,27 +1244,23 @@ impl Render for NowPlayingView {
                                     app::call(cx, move |b| drop(b.player_jump_to(idx)));
                                 }))
                         }))
-                })),
-        );
-        let transport = pid("np.transport", div().flex().flex_row().flex_wrap().gap(px(if narrow { 8.0 } else { 12.0 })).child(c1).child(c2).child(c3).child(upnext));
-        let deck = pid("np.deck", div().flex().flex_col().gap(px(8.)).w_full().flex_none().px(px(16.)).py(px(8.)).bg(th.low).border_t_1().border_b_1().border_color(th.border).child(seek).child(transport));
+                }));
+        let transport = div().flex().flex_row().flex_wrap().gap(px(if narrow { 8.0 } else { 12.0 })).child(c1).child(c2).child(c3).child(upnext);
+        let deck = div().flex().flex_col().gap(px(8.)).w_full().flex_none().px(px(16.)).py(px(8.)).bg(th.low).border_t_1().border_b_1().border_color(th.border).child(seek).child(transport);
 
-        let legend_wrap = |inner: AnyElement| div().px(px(16.)).flex_none().child(pid("np.legend", div().pb(px(8.)).child(inner)));
-        let legend = pid(
-            "np.legend.row",
-            div().flex().flex_row().flex_wrap().gap_x(px(16.)).gap_y(px(4.)).flex_none().children(PLAYER_KEYS.iter().filter(|k| k.in_legend).map(|k| {
+        let legend_wrap = |inner: AnyElement| div().px(px(16.)).flex_none().child(div().pb(px(8.)).child(inner));
+        let legend = div().flex().flex_row().flex_wrap().gap_x(px(16.)).gap_y(px(4.)).flex_none().children(PLAYER_KEYS.iter().filter(|k| k.in_legend).map(|k| {
                 div()
                     .flex()
                     .flex_row()
                     .child(txt(&th, MONO_CODE, format!("[{}]", k.legend)).weight(500.0).color(th.accent_fg))
                     .child(div().w(px(MONO_CODE_SPACE)))
                     .child(txt(&th, MONO_CODE, k.label).color(th.muted))
-            })),
-        );
+            }));
 
         let page = div().size_full().min_h(px(600.)).flex().flex_col().gap(px(8.)).child(strip).child(cover_area).child(title_block).child(fft_row).child(deck).when(!short, |d| d.child(legend_wrap(legend.into_any_element())))
             .when(short, |d| d.child(div().h(px(0.)).flex_none()));
-        // `.np { min-height: 600px }`: below that the stage scrolls (classic 10 px scrollbar eats the width, like the web)
+        // min height 600 px: below that the stage scrolls (the 10 px scrollbar takes its width from the page)
         let (sbar, overflow) = crate::widgets::scrollbar::passive(th, &self.np_scroll);
         div()
             .relative()
@@ -1336,7 +1273,7 @@ impl Render for NowPlayingView {
 }
 
 impl NowPlayingView {
-    /// The secondary header strip (`.strip`).
+    /// The secondary header strip.
     fn strip(&self, th: Theme, h: f32, t: Option<&Track>, ps: &PlayerState, compact: bool, cx: &mut Context<Self>) -> impl IntoElement + use<> {
         let loading = ps.status == PlaybackStatus::Loading;
         let mode = if ps.bit_perfect {
@@ -1404,7 +1341,7 @@ impl NowPlayingView {
                     .max_w(gpui::relative(0.22))
                     .flex_shrink()
                     .child(txt(&th, MONO_DATA, "// ").color(th.muted))
-                    .child(pid("np.strip.source", div().flex().min_w_0().child(txt(&th, MONO_DATA, src_text).weight(500.0).color(th.text).ellipsis())));
+                    .child(div().flex().min_w_0().child(txt(&th, MONO_DATA, src_text).weight(500.0).color(th.text).ellipsis()));
                 if let Some(r) = source_route {
                     d = d.cursor(CursorStyle::PointingHand).on_click(cx.listener(move |_, _, _, cx| cx.emit(NpEvent::Navigate(r.clone()))));
                 }
@@ -1420,40 +1357,31 @@ impl NowPlayingView {
                 } else {
                     txt(&th, MONO_DATA, line).color(th.muted).ellipsis().into_any_element()
                 };
-                pid("np.strip.fmt", div().id("np-fmt").tip(ft, th).flex().flex_1().min_w_0().child(inner))
+                div().id("np-fmt").tip(ft, th).flex().flex_1().min_w_0().child(inner)
             }))
             .child(div().when(t.is_none(), |d| d.flex_1().min_w_0()).when(t.is_some(), |d| d.flex_none().w(px(0.))))
-            .child(pid(
-                "np.hbtn.lyrics",
-                chip("np-lyrics", th, 28.0, 12.0, th.mid, lyr_on)
+            .child(chip("np-lyrics", th, 28.0, 12.0, th.mid, lyr_on)
                     .tip("Lyrics (T)", th)
                     .child(chip_icon(th, "lyrics", 14., lyr_on))
                     .children((!compact).then(|| txt(&th, MONO_DATA, format!("LYRICS [{key_t}]"))))
                     .on_click(cx.listener(|this, _, _, cx| {
                         this.lyrics_open = !this.lyrics_open;
                         cx.notify();
-                    })),
-            ))
+                    })))
             .children(track_id.map(|id| {
-                pid(
-                    "np.hbtn.like",
-                    chip("np-like", th, 28.0, 8.0, th.mid, starred).tip(if starred { "Liked - L to unlike" } else { "Like (L)" }, th).child(chip_icon(th, if starred { "heart-filled" } else { "heart" }, 15., starred)).on_click(cx.listener(move |_, _, _, cx| {
+                chip("np-like", th, 28.0, 8.0, th.mid, starred).tip(if starred { "Liked - L to unlike" } else { "Like (L)" }, th).child(chip_icon(th, if starred { "heart-filled" } else { "heart" }, 15., starred)).on_click(cx.listener(move |_, _, _, cx| {
                         let id = id.clone();
                         app::call(cx, move |b| {
                             let req = StarRequest { id, kind: StarTargetType::Track };
                             let _ = if starred { b.star_remove(req) } else { b.star_add(req) };
                         });
-                    })),
-                )
+                    }))
             }))
-            .child(pid(
-                "np.hbtn.min",
-                chip("np-close", th, 28.0, 12.0, th.mid, false)
+            .child(chip("np-close", th, 28.0, 12.0, th.mid, false)
                     .tip("Close (Esc)", th)
                     .child(chip_icon(th, "collapse", 14., false))
                     .children((!compact).then(|| txt(&th, MONO_DATA, "MINIMIZE [ESC]")))
-                    .on_click(cx.listener(|_, _, _, cx| cx.emit(NpEvent::Close))),
-            ))
+                    .on_click(cx.listener(|_, _, _, cx| cx.emit(NpEvent::Close))))
     }
 }
 
@@ -1465,9 +1393,9 @@ mod fft_tests {
         SpectrumFrame { bands: vec![v; sp::BANDS], peak_l: l, peak_r: r }
     }
 
-    /// `FftPanel.svelte`: meters fall 30 dB/s, the 1.2 s peak hold only starts falling after that, caps fall 0.45/s.
+    /// Meters fall 30 dB/s, the 1.2 s peak hold only starts falling after that, caps fall 0.45/s.
     #[test]
-    fn dynamics_follow_the_web_panel() {
+    fn spectrum_dynamics() {
         let mut f = Fft::default();
         f.on_frame(&frame(255, -3.0, -6.0), 0.0);
         assert_eq!((f.level, f.hold), ([-3.0, -6.0], [-3.0, -6.0]));

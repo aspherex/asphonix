@@ -1,7 +1,7 @@
 //! Settings, session continuity and the art-cache readout on `RealBackend`.
 //!
-//! * `settings_get`/`settings_set`: `secrets::Settings` persisted as `settings.json` in `%APPDATA%\dev.sonix.native`;
-//!   every change is applied live the way the reference's `settings_set_*` commands do (`Prefs`, engine commands,
+//! * `settings_get`/`settings_set`: `secrets::Settings` persisted as `settings.json` in `%APPDATA%\dev.sonix.app`;
+//!   every change is applied live (`Prefs`, engine commands,
 //!   the shared scrobbling flag), then the whole file is rewritten.
 //! * session resume: `SessionStore` (written by the engine) + a delayed `RestoreSession` at startup (local only).
 //! * `session_check_server_queue` / `session_resume_from_server`: `getPlayQueue` only (read-only), the check is
@@ -60,14 +60,14 @@ impl SettingsApi for RealBackend {
     }
 
     fn settings_set(&self, change: SettingChange) -> ApiResult<()> {
-        // Reference `settings_set_mcp_enabled`: start/stop first (no settings lock held: it blocks on the runtime);
+        // MCP enable/disable: start/stop first (no settings lock held: it blocks on the runtime);
         // a failed start returns the error and persists nothing.
         if let SettingChange::McpEnabled(on) = change {
             self.set_mcp_enabled(on)?;
         }
         let mut s = self.0.settings.lock().unwrap_or_else(|p| p.into_inner());
         apply_change(&mut s, &change)?;
-        // Live effects, like the reference's settings_set_* commands.
+        // Live effects.
         match change {
             SettingChange::Scrobbling(_) => self.0.scrobbling.store(s.scrobbling_enabled, Ordering::Relaxed),
             SettingChange::SpreadArtists(_) => self.0.engine.send(EngineCommand::SetSpreadArtists(s.spread_artists_in_shuffle)),
@@ -87,7 +87,7 @@ impl SettingsApi for RealBackend {
             }
             // Applied above, before the lock.
             SettingChange::McpEnabled(_) => {}
-            // Stored only: the overlay and background-mode services are not wired in the native app yet.
+            // Stored only: the overlay and background-mode services are not wired yet.
             SettingChange::TrackOverlay(_) | SettingChange::TrackOverlayCorner(_) | SettingChange::FreeMemoryWhenMinimized(_) => {}
         }
         secrets::save_settings(&self.0.dir, &s).map_err(err)
@@ -98,8 +98,8 @@ impl SettingsApi for RealBackend {
         self.mcp_status_impl()
     }
 
-    /// Like the reference ("cached / total covers - bytes"): `total` = distinct album and artist covers in the library
-    /// mirror, `cached` = how many of those have at least one size cached (the native cache stores one file per
+    /// Readout as "cached / total covers - bytes": `total` = distinct album and artist covers in the library
+    /// mirror, `cached` = how many of those have at least one size cached (the cache stores one file per
     /// size bucket, so files are not counted), `bytes` = size of the whole art dir. `cached <= total` always.
     fn art_cache_status(&self) -> ApiResult<ArtCacheStatus> {
         let mut keys = std::collections::HashSet::new();
@@ -158,8 +158,8 @@ impl RealBackend {
         }
     }
 
-    /// Native deviation from the reference (which restores only once, at 300 ms): the restore resolves ids against
-    /// the local library only, so a library that is behind the server (the session was saved by another client, or
+    /// The startup restore resolves ids against the local library only,
+    /// so a library that is behind the server (the session was saved by another client, or
     /// the app was not opened for a while) skips the whole session ("none of the saved tracks is in the local
     /// library") although the startup sync adds those tracks seconds later. The first successful sync of the run
     /// therefore offers the saved session once more, re-read from disk. The engine's own guard (nothing queued,

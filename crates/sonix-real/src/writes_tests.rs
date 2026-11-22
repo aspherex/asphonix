@@ -124,11 +124,11 @@ fn find<'a>(reqs: &'a [Req], endpoint: &str) -> Vec<&'a Req> {
     reqs.iter().filter(|r| r.endpoint == endpoint).collect()
 }
 
-/// Temp dir on D: (C: is nearly full), removed on drop even when the test panics.
+/// Temp dir under the system temp dir (override: `SONIX_TEST_TMP`), removed on drop even when the test panics.
 struct TmpDir(std::path::PathBuf);
 impl TmpDir {
     fn new(tag: &str) -> Self {
-        let base = if std::path::Path::new("<build-dir>").exists() { std::path::PathBuf::from("<build-dir>/tmp") } else { std::env::temp_dir() };
+        let base = std::env::var_os("SONIX_TEST_TMP").map(std::path::PathBuf::from).unwrap_or_else(std::env::temp_dir);
         static SEQ: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
         let seq = SEQ.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
         let d = base.join(format!("sonix-writes-{tag}-{}-{seq}", std::process::id()));
@@ -422,7 +422,7 @@ fn hidden_and_stale_entries_never_edit_the_wrong_row() {
     assert!(changed(&events(&rx)));
 }
 
-/// Reference `connect_account`: switching to another account (no keychain write: `save = false`) stops the engine and
+/// Switching to another account (no keychain write: `save = false`) stops the engine and
 /// wipes the library mirror and the art cache before the new client is installed; nothing of the old account is pushed.
 #[test]
 fn account_switch_stops_the_engine_and_wipes_mirror_and_art_cache() {
@@ -453,7 +453,7 @@ fn account_switch_stops_the_engine_and_wipes_mirror_and_art_cache() {
     assert!(find(&reqs, "savePlayQueue").is_empty() && find(&reqs, "scrobble").is_empty(), "{reqs:?}");
 }
 
-/// Reference `auth_logout`: stop + flush the listen writer first (ordering of the Stop row vs. the flush is covered by
+/// Logout: stop + flush the listen writer first (ordering of the Stop row vs. the flush is covered by
 /// `engine::tests::stop_goes_through_the_writer_and_flush_follows_it`), drop the client, cancel the old sync (epoch),
 /// then wipe the mirror (listen history included) and the art cache, so the next account inherits nothing.
 /// The keychain step only deletes (an entry this test never created).

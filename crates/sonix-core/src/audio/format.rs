@@ -1,7 +1,7 @@
 //! Sample containers and format negotiation types shared between the decode
 //! thread and the output backends.
 //!
-//! The negotiation rule (see `PLAN.md` / module docs): for a given source bit
+//! The negotiation rule: for a given source bit
 //! depth we only ever try *container* variants that can represent it exactly
 //! — never a smaller container that would truncate bits. Wider integer
 //! containers are fine and still bit-perfect: a 16-bit sample placed

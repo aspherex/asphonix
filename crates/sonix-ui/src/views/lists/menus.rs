@@ -1,4 +1,4 @@
-//! Context-menu item lists of the list routes (`menus.ts`): tracks (with "Remove from this playlist"),
+//! Context-menu item lists of the list routes: tracks (with "Remove from this playlist"),
 //! playlists, Liked Songs and smart playlists. Items talk to the page through [`ListsEvent`]s and fire-and-forget
 //! backend calls, like the Tracks route's menu.
 use super::ListsEvent;
@@ -25,7 +25,7 @@ fn nav<V: EventEmitter<ListsEvent> + 'static>(this: &WeakEntity<V>, cx: &mut App
     }
 }
 
-/// `trackMenuItems`: the shared builder (`crate::menus`) with this page's play / remove-from-playlist context.
+/// Track menu: the shared builder (`crate::menus`) with this page's play / remove-from-playlist context.
 pub fn track_menu_items<V: EventEmitter<ListsEvent> + 'static>(this: WeakEntity<V>, o: TrackMenu) -> Vec<MenuItem> {
     crate::menus::track_menu_items(crate::menus::TrackMenu {
         tracks: o.tracks,
@@ -42,7 +42,7 @@ fn play_pl(id: String, shuffle: bool) -> impl Fn(&mut gpui::Window, &mut App) {
     move |_, cx| crate::playback::play_playlist(cx, id.clone(), shuffle, None)
 }
 
-/// `playlistMenuItems`
+/// Playlist menu.
 pub fn playlist_menu_items<V: EventEmitter<ListsEvent> + 'static>(this: WeakEntity<V>, p: &Playlist, on_deleted_nav: bool) -> Vec<MenuItem> {
     let empty = p.song_count == 0;
     let ro_hint = "Read-only playlist.";
@@ -127,7 +127,7 @@ pub fn playlist_menu_items<V: EventEmitter<ListsEvent> + 'static>(this: WeakEnti
     ]
 }
 
-/// `likedMenuItems`
+/// Liked Songs menu.
 pub fn liked_menu_items(count: usize) -> Vec<MenuItem> {
     let play = |shuffle: bool| move |_: &mut gpui::Window, cx: &mut App| crate::playback::play_liked(cx, shuffle, None);
     vec![
@@ -137,7 +137,7 @@ pub fn liked_menu_items(count: usize) -> Vec<MenuItem> {
     ]
 }
 
-/// `smartMenuItems`
+/// Smart playlist menu.
 pub fn smart_menu_items<V: EventEmitter<ListsEvent> + 'static>(this: WeakEntity<V>, sp: &SmartSummary, seed: u32, delete_nav: bool) -> Vec<MenuItem> {
     let empty = sp.track_count == 0;
     let play = |id: String, shuffle: bool| move |_: &mut gpui::Window, cx: &mut App| crate::playback::play_smart(cx, id.clone(), shuffle, seed, None);
@@ -168,7 +168,7 @@ pub fn smart_menu_items<V: EventEmitter<ListsEvent> + 'static>(this: WeakEntity<
     let dup = MenuItem::action("Duplicate", move |_, cx| {
         let id = id_d.clone();
         let this = this_d.clone();
-        // the copy opens right away (SmartPlaylistDetail's `onChanged` navigates to it)
+        // the copy opens right away
         let b = app::backend(cx);
         cx.spawn(async move |cx| {
             let copy = cx.background_executor().spawn(async move { b.smart_duplicate(&id) }).await;

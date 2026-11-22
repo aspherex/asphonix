@@ -62,14 +62,14 @@ impl Mock {
 }
 
 
-/// Temp dir on D: (C: is nearly full), removed on drop even when an assertion fails.
+/// Temp dir under the system temp dir (override: `SONIX_TEST_TMP`), removed on drop even when an assertion fails.
 struct TmpDir(std::path::PathBuf);
 
 impl TmpDir {
     fn new() -> Self {
         static SEQ: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
         let seq = SEQ.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-        let p = std::path::PathBuf::from("<build-dir>/tmp").join(format!("sonix-extras-{}-{seq}", std::process::id()));
+        let p = std::env::var_os("SONIX_TEST_TMP").map(std::path::PathBuf::from).unwrap_or_else(std::env::temp_dir).join(format!("sonix-extras-{}-{seq}", std::process::id()));
         let _ = std::fs::remove_dir_all(&p);
         std::fs::create_dir_all(&p).unwrap();
         TmpDir(p)

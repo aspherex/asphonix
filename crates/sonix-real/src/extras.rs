@@ -1,5 +1,5 @@
 //! Read-only discovery and player extras on `RealBackend`: waveform, lyrics, A-B loop, artist top tracks/info, radio.
-//! Logic lives in `sonix_core::extras` (vendored from `fullplayer.rs` / `discovery.rs` / `ipc.rs`); these are thin adapters.
+//! Logic lives in `sonix_core::extras`; these are thin adapters.
 use crate::reads::conv;
 use crate::{err, RealBackend};
 use sonix_api::*;

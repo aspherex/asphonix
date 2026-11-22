@@ -12,7 +12,7 @@ use std::time::Instant;
 static ENV: Mutex<()> = Mutex::new(());
 static SEQ: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
 
-/// A fresh config (`roaming`) + data (`local`) dir pair under `<build-dir>/tmp` (override: `SONIX_TEST_TMP`);
+/// A fresh config (`roaming`) + data (`local`) dir pair under the system temp dir (override: `SONIX_TEST_TMP`);
 /// backends are opened with [`RealBackend::open_in`] on it, never on the process env (`APPDATA`/`LOCALAPPDATA` are
 /// not touched). Tests still run one at a time (shared engine timing). Declare it FIRST in a test so backends drop
 /// before it; the directory is removed on drop (also when the test panics), retrying while background threads
@@ -24,7 +24,7 @@ struct Env {
 impl Env {
     fn new(tag: &str) -> Self {
         let g = ENV.lock().unwrap_or_else(|p| p.into_inner());
-        let base = std::path::PathBuf::from(std::env::var("SONIX_TEST_TMP").unwrap_or_else(|_| "<build-dir>/tmp".into()));
+        let base = std::env::var_os("SONIX_TEST_TMP").map(std::path::PathBuf::from).unwrap_or_else(std::env::temp_dir);
         let seq = SEQ.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
         let root = base.join(format!("sonix-real-{tag}-{}-{seq}", std::process::id()));
         let _ = std::fs::remove_dir_all(&root);
@@ -211,7 +211,7 @@ fn defaults_are_off_and_every_field_roundtrips_and_persists() {
     assert!(b.0.scrobbling.load(Ordering::Relaxed) && b.0.prefs.autoplay() && b.0.prefs.sync_play_queue());
     assert_eq!(b.0.prefs.replay_gain(), sonix_core::audio::replaygain::ReplayGainMode::Album);
     assert_eq!(b.0.prefs.play_threshold_sec(), 120);
-    // out-of-range values are clamped like the reference
+    // out-of-range values are clamped
     b.settings_set(SettingChange::QueueWindowSize(5)).unwrap();
     b.settings_set(SettingChange::PlayThreshold(5)).unwrap();
     let s = b.settings_get().unwrap();
@@ -467,7 +467,7 @@ fn plays_are_recorded_locally_but_scrobbled_only_when_enabled() {
 }
 
 // ---------------------------------------------------------------------------------------------------------------
-// "play from row N": what the queue holds afterwards (reference `queue.rs set_source_inner` / `set_queue`).
+// "play from row N": what the queue holds afterwards (`queue.rs` `set_source_inner` / `set_queue`).
 // A rolling source (playlist/liked/smart/artist/genre/all tracks, `startTrackId`) starts AT the clicked row: in order
 // the pool continues from it (`pool[idx..]`, `queue.rs:323`), shuffle swaps it to the front of a fresh permutation.
 // A static queue (`playQueue`: album, artist top tracks, search, home) keeps the whole list with `current = N`.

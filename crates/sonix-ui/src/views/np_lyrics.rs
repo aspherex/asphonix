@@ -1,8 +1,7 @@
-//! `np/LyricsPanel.svelte`: synced lines highlight and auto-scroll with the playback position (centered, paused for 4 s
+//! The lyrics panel: synced lines highlight and auto-scroll with the playback position (centered, paused for 4 s
 //! after the user scrolls or presses), click a synced line to seek, plain lyrics just scroll, honest loading / none states.
 use super::nowplaying::NowPlayingView;
 use crate::anim::cubic_bezier;
-use crate::probe::pid;
 use crate::text::txt;
 use crate::theme::Theme;
 use crate::tracking::{BODY_LG, HEADLINE_SM, LABEL_CAPS, MONO_CODE, MONO_DATA};
@@ -18,9 +17,9 @@ pub enum Load {
     Ok(Rc<Lyrics>),
 }
 
-/// How long the user's own scrolling wins over the auto-scroll (`lastUserScroll`).
+/// How long the user's own scrolling wins over the auto-scroll.
 const USER_SCROLL_HOLD: f64 = 4.0;
-/// `scrollTo({ behavior: "smooth" })` is ~300 ms in Chromium for short distances.
+/// Duration of the smooth auto-scroll to the current line (s).
 const SMOOTH: f64 = 0.3;
 
 pub struct LyricsPanel {
@@ -41,7 +40,7 @@ impl Default for LyricsPanel {
 }
 
 impl NowPlayingView {
-    /// The `$effect` that fetches lyrics when the track changes (memoized, like the web's small map).
+    /// Fetches lyrics when the track changes (memoized in a small map).
     pub(super) fn lyrics_ensure(&mut self, id: &str, cx: &mut Context<Self>) {
         if self.ly.for_id.as_deref() == Some(id) {
             return;
@@ -117,18 +116,16 @@ impl NowPlayingView {
             self.ly.scroll.set_offset(point(px(0.), px(y)));
             if u >= 1.0 {
                 self.ly.anim = None;
-            } else if !crate::clock::frozen() {
+            } else {
                 window.request_animation_frame();
             }
         }
 
         let (sbar, overflow) = crate::widgets::scrollbar::passive(th, &self.ly.scroll);
         let content_w = (panel_w - 2.0 - 48.0 - if overflow { crate::metrics::tracks::SCROLLBAR_W } else { 0.0 }).max(0.0);
-        let pad_block = 0.3 * content_w; // `padding-block: 30% 30%` of the list width
+        let pad_block = 0.3 * content_w; // 30 % of the list width above the first and below the last line
         let head_right: Option<String> = lyrics.as_ref().map(|l| format!("{} · {}", if l.synced { "SYNCED" } else { "PLAIN" }, if l.source == LyricsSource::Opensubsonic { "OPENSUBSONIC" } else { "SUBSONIC" }));
-        let head = pid(
-            "np.lyrics.head",
-            div()
+        let head = div()
                 .flex()
                 .flex_row()
                 .items_center()
@@ -140,8 +137,7 @@ impl NowPlayingView {
                 .border_b_1()
                 .border_color(th.border)
                 .child(txt(&th, LABEL_CAPS, "LYRICS").color(th.accent_fg))
-                .children(head_right.map(|r| txt(&th, MONO_CODE, r).color(th.muted))),
-        );
+                .children(head_right.map(|r| txt(&th, MONO_CODE, r).color(th.muted)));
         let mut scroll = div()
             .id("np-lyrics-scroll")
             .track_scroll(&self.ly.scroll)
@@ -184,15 +180,12 @@ impl NowPlayingView {
                     } else {
                         row = row.child(crate::typo::ts(&th, BODY_LG).text_color(th.text).child(text));
                     }
-                    scroll = scroll.child(pid(format!("np.lyrics.line.{i}"), row));
+                    scroll = scroll.child(row);
                 }
                 scroll = scroll.child(div().h(px(pad_block)).flex_none());
             }
         }
-        pid(
-            "np.lyrics",
-            div().flex().flex_col().min_h_0().min_w_0().h_full().flex_1().border_1().border_color(th.border).bg(th.low).child(head).child(pid("np.lyrics.scroll", div().relative().flex_1().min_h_0().child(scroll).child(sbar).child(crate::widgets::smooth::drive(window, crate::widgets::smooth::Scrollable::div(key, &self.ly.scroll))))),
-        )
+        div().flex().flex_col().min_h_0().min_w_0().h_full().flex_1().border_1().border_color(th.border).bg(th.low).child(head).child(div().relative().flex_1().min_h_0().child(scroll).child(sbar).child(crate::widgets::smooth::drive(window, crate::widgets::smooth::Scrollable::div(key, &self.ly.scroll))))
         .into_any_element()
     }
 }

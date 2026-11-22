@@ -26,7 +26,7 @@ pub fn icon_g(name: &str, size: f32, color: Hsla, hover: Hsla) -> Svg {
 }
 
 
-/// `box-shadow: Npx Npx 0 <shadow>`: hard offset, no blur. Only for small static elements.
+/// Hard offset shadow, no blur. Only for small static elements.
 pub fn hard_shadow(th: &Theme, off: f32) -> Vec<BoxShadow> {
     vec![BoxShadow { color: th.shadow, offset: point(px(off), px(off)), blur_radius: px(0.), spread_radius: px(0.) }]
 }
@@ -35,8 +35,8 @@ thread_local! {
     static KEY_NAV: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
 }
 
-/// `:focus-visible` stand-in: true after a Tab / Shift+Tab until the next mouse press, so focus styles of buttons only
-/// show for keyboard navigation (GPUI has no `:focus-visible`).
+/// Keyboard-navigation flag: true after a Tab / Shift+Tab until the next mouse press, so focus styles of buttons only
+/// show for keyboard navigation (GPUI has no focus-visible state).
 pub fn key_nav() -> bool {
     KEY_NAV.with(|k| k.get())
 }

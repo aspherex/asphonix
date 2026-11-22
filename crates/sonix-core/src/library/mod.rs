@@ -2,8 +2,8 @@
 //! index of artists, albums, tracks, playlists and stars pulled from the
 //! Subsonic server.
 //!
-//! The frontend never holds the full library in memory or in the DOM: every
-//! browse/search IPC command pages results straight out of this store (see
+//! The UI never holds the full library in memory: every
+//! browse/search command pages results straight out of this store (see
 //! `queries.rs`). A background full sync populates it on first login (see
 //! `sync.rs`); incremental resyncs run afterwards. Every sync page is written
 //! in its own transaction so the UI thread is never blocked mid-sync and a
@@ -27,7 +27,7 @@ use crate::ipc::{Album, Artist, IpcError, IpcErrorCode, Playlist, Track};
 
 pub use sync::{run_full_sync, run_incremental_sync, scan_fingerprint, SyncProgressSink};
 pub(crate) use sync::META_LAST_SYNC_AT;
-#[allow(unused_imports)] // reference: read by the connection monitor in `lib.rs` (not vendored)
+#[allow(unused_imports)]
 pub(crate) use sync::META_SERVER_FINGERPRINT;
 
 pub use convert::playlist_from_raw;

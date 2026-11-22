@@ -1,26 +1,13 @@
-//! The SONIX IPC contract (Rust side).
+//! Wire types shared by the core modules: library rows, queue/player state,
+//! output status, settings, events.
 //!
-//! This file is the Rust mirror of `src/lib/ipc/types.ts` /
-//! `src/lib/ipc/commands.ts`. Every struct/enum here uses
-//! `#[serde(rename_all = "camelCase")]` so the wire format matches the
-//! TypeScript types exactly. See `docs/IPC.md` for the full contract
-//! description (what each command does, paging convention, event list).
-//!
-//! Optional fields: TS declares them as `field?: T` (absent = `undefined`),
-//! so every serialized `Option<T>` carries
-//! `#[serde(skip_serializing_if = "Option::is_none")]`. A bare `Option`
-//! would send `null`, which breaks `x !== undefined` checks in the UI. The
-//! one exception is a field TS types as `T | null` (`PlayerState.track`).
-//!
-//! All command functions are stubs for Phase 0: they return
-//! `Err(IpcError::unimplemented(..))`. Later phases implement them against
-//! `library::`, `audio::`, `subsonic::`, etc. — the signatures here are the
-//! contract other work should be built against and should not need to change
-//! shape, only body.
+//! Every struct/enum here uses `#[serde(rename_all = "camelCase")]`.
+//! Optional fields are serialized with
+//! `#[serde(skip_serializing_if = "Option::is_none")]`, so an absent value is
+//! omitted rather than sent as `null`; the one exception is
+//! `PlayerState.track`, which is always present (`null` when idle).
 
-// Phase 0: most of these structs/fields aren't constructed/read anywhere yet
-// because every command is a stub — they exist to pin down the wire contract
-// for later phases. Silence dead_code noise until real implementations land.
+// Not every type/field is constructed or read by every consumer.
 #![allow(dead_code)]
 
 use serde::{Deserialize, Serialize};
@@ -62,7 +49,7 @@ impl IpcError {
     pub fn unimplemented(what: &str) -> Self {
         Self {
             code: IpcErrorCode::Unimplemented,
-            message: format!("{what} is not implemented yet (Phase 0 scaffold)"),
+            message: format!("{what} is not implemented yet"),
         }
     }
 }
@@ -651,7 +638,7 @@ pub struct PlayQueueRequest {
 
 /// `player_play_all`'s order: either a real shuffle of the whole (filtered)
 /// library, or the Tracks route's current sort/direction. Resolved to an id
-/// list in `ipc::player_play_all` from local SQLite — the frontend never
+/// list from local SQLite, so the UI never
 /// builds or sends a 50k-id array.
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase", tag = "kind")]
@@ -1064,7 +1051,7 @@ pub struct OutputStatus {
 }
 
 // ---------------------------------------------------------------------------
-// Settings (Phase 4: scrobbling toggle)
+// Settings
 // ---------------------------------------------------------------------------
 
 #[derive(Debug, Clone, Serialize)]
@@ -1093,10 +1080,10 @@ pub struct Settings {
     /// after which a play enters the listening history and is scrobbled.
     pub play_threshold_sec: u32,
     /// "Show track preview" (default on): the always-on-top corner card on a
-    /// track change while SONIX isn't focused (`overlay::`).
+    /// track change while SONIX isn't focused.
     pub track_overlay: bool,
-    /// "Free memory when minimized" (default on): the main window's webview is
-    /// closed after 30 s minimized and rebuilt on restore (`bgmode::`).
+    /// "Free memory when minimized" (default on): release the main window's UI
+    /// resources after 30 s minimized and rebuild them on restore.
     pub free_memory_when_minimized: bool,
     /// Corner of the work area for that card (default top left).
     pub track_overlay_corner: crate::overlay::OverlayCorner,
@@ -1147,8 +1134,7 @@ pub struct ArtCacheStatus {
 }
 
 // ---------------------------------------------------------------------------
-// Events (emitted via `app.emit(name, payload)`), names must match
-// `IPC_EVENTS` in `src/lib/ipc/types.ts`.
+// Event names
 // ---------------------------------------------------------------------------
 
 pub const EVENT_PLAYER_STATE: &str = "player-state";
@@ -1165,12 +1151,3 @@ pub struct ConnectionStatusEvent {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub ping_ms: Option<u32>,
 }
-
-// ---------------------------------------------------------------------------
-// Commands
-// ---------------------------------------------------------------------------
-// Every command below is registered in `lib.rs`'s `generate_handler!` list.
-// All are stubs in Phase 0: they return `IpcError::unimplemented(..)`.
-
-// --- Auth --------------------------------------------------------------
-

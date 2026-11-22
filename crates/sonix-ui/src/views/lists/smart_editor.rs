@@ -1,11 +1,10 @@
-//! `SmartPlaylistEditor.svelte`: the modal rule builder for local smart playlists (preset chips, name, match mode,
+//! The smart-playlist editor: the modal rule builder for local smart playlists (preset chips, name, match mode,
 //! rule rows, sort + limit, live preview of the real match count and five sample tracks).
 use super::smart_rules::{self as sr, Kind};
 use super::ui::{field, panel, wrap_text};
 use super::ListsEvent;
 use crate::app;
 use crate::metrics::{controls as ctl, space};
-use crate::probe::pid;
 use crate::router::Route;
 use crate::text::txt;
 use crate::theme::{MONO, Theme};
@@ -51,7 +50,7 @@ pub struct SmartEditor {
     preview_error: String,
     preview_seq: u64,
     seed: u32,
-    /// `.body { overflow-y: auto; max-height: calc(100vh - 96px) }`
+    /// scroll handle of the body, which is capped at the window height minus 96 px
     body_scroll: gpui::ScrollHandle,
     _subs: Vec<Subscription>,
 }
@@ -102,10 +101,6 @@ impl SmartEditor {
         self.open.is_some()
     }
 
-    #[cfg(feature = "parity")]
-    pub(crate) fn parity_state(&self) -> serde_json::Value {
-        serde_json::json!({ "editorOpen": self.open.is_some(), "editorRules": self.open.as_ref().map(|o| o.rows.len()), "previewTotal": self.preview_total })
-    }
 
     /// Open for a new playlist (`None`) or to edit one.
     pub fn show(&mut self, editing: Option<SmartSummary>, window: &mut Window, cx: &mut Context<Self>) {
@@ -161,7 +156,7 @@ impl SmartEditor {
         }
     }
 
-    /// `draft`: the payload, or the first reason there is none.
+    /// The payload, or the first reason there is none.
     fn draft(&self, cx: &gpui::App) -> Result<SmartInput, String> {
         let o = self.open.as_ref().ok_or_else(String::new)?;
         let name = self.name.read(cx).content.trim().to_string();
@@ -289,7 +284,7 @@ impl SmartEditor {
         });
     }
 
-    /// `<select>` look: 32 px, mono-data text and a 20 px arrow slot.
+    /// Dropdown box look: 32 px, mono-data text and a 20 px arrow slot.
     fn select(&self, th: &Theme, id: impl Into<gpui::ElementId>, label: String, w: Option<f32>) -> gpui::Stateful<gpui::Div> {
         let th = *th;
         let d = div()
@@ -465,7 +460,7 @@ impl Render for SmartEditor {
 
         let mut body = div().flex().flex_col().gap(px(space::MD)).p(px(space::MD));
         let note = wrap_text(&th, window, "LOCAL ONLY — evaluated on this machine from your synced library; never sent to the server.", MONO_CODE, inner_w);
-        body = body.child(pid("ed.note", div().flex().flex_col().children(note.into_iter().map(|l| txt(&th, MONO_CODE, l).color(th.accent_fg)))));
+        body = body.child(div().flex().flex_col().children(note.into_iter().map(|l| txt(&th, MONO_CODE, l).color(th.accent_fg))));
         if !editing && !self.presets.is_empty() {
             let mut chips = div().flex().flex_row().flex_wrap().gap(px(space::XS)).mt(px(space::XS));
             for (i, p) in self.presets.iter().enumerate() {
@@ -486,13 +481,11 @@ impl Render for SmartEditor {
                         .on_click(cx.listener(move |t, _, _, cx| t.apply_preset(&pc, cx))),
                 );
             }
-            body = body.child(pid("ed.presets", div().flex().flex_col().child(div().flex().items_center().h(px(18.)).child(txt(&th, LABEL_CAPS, "Start from a preset").color(th.muted))).child(pid("ed.chips", chips))));
+            body = body.child(div().flex().flex_col().child(div().flex().items_center().h(px(18.)).child(txt(&th, LABEL_CAPS, "Start from a preset").color(th.muted))).child(chips));
         }
-        body = body.child(pid("ed.name", field(&th, &self.name, Some("//"), "Playlist name", window, cx)));
+        body = body.child(field(&th, &self.name, Some("//"), "Playlist name", window, cx));
         let t_m = this.clone();
-        body = body.child(pid(
-            "ed.match",
-            div().flex().flex_row().items_center().gap(px(space::MD)).child(txt(&th, LABEL_CAPS, "Match").color(th.muted)).child(segmented(
+        body = body.child(div().flex().flex_row().items_center().gap(px(space::MD)).child(txt(&th, LABEL_CAPS, "Match").color(th.muted)).child(segmented(
                 "ed-match",
                 &th,
                 &[("all", "All rules"), ("any", "Any rule")],
@@ -507,12 +500,11 @@ impl Render for SmartEditor {
                         });
                     }
                 },
-            )),
-        ));
+            )));
         let mut rules = div().flex().flex_col().gap(px(space::SM));
         for i in 0..n_rows {
             let r = self.rule_row(th, i, cx);
-            rules = rules.child(if i == 0 { pid("ed.rule.0", r).into_any_element() } else { r });
+            rules = rules.child(if i == 0 { r.into_any_element() } else { r });
         }
         let can_add = n_rows < 20;
         rules = rules.child(
@@ -552,7 +544,7 @@ impl Render for SmartEditor {
         if n_rows == 0 {
             rules = rules.child(txt(&th, BODY_SM, "No rules: every track in your library matches.").color(th.muted));
         }
-        body = body.child(pid("ed.rules", rules));
+        body = body.child(rules);
         // sort + limit
         let t_s = this.clone();
         let sort_sel = self.select(&th, "ed-sort", sr::sort_label(sort).to_string(), None).on_click(cx.listener(move |t, ev: &ClickEvent, _, cx| {
@@ -588,15 +580,12 @@ impl Render for SmartEditor {
             .border_color(th.border)
             .child(div().flex_1().min_w_0().child(self.limit.clone()))
             .when(lim_empty, |d| d.child(div().absolute().left(px(space::SM)).child(txt(&th, MONO_DATA, "no limit").color(th.muted))));
-        body = body.child(pid(
-            "ed.order",
-            div()
+        body = body.child(div()
                 .flex()
                 .flex_row()
                 .gap(px(space::LG))
                 .child(div().flex().flex_col().gap(px(space::XS)).child(txt(&th, LABEL_CAPS, "Sort").color(th.muted)).child(sort_sel))
-                .child(div().flex().flex_col().gap(px(space::XS)).child(txt(&th, LABEL_CAPS, "Limit (optional)").color(th.muted)).child(limit_box)),
-        ));
+                .child(div().flex().flex_col().gap(px(space::XS)).child(txt(&th, LABEL_CAPS, "Limit (optional)").color(th.muted)).child(limit_box)));
         // preview
         let mut prev = div().flex().flex_col().min_h(px(40.)).px(px(space::MD)).py(px(space::SM)).bg(th.low).border_1().border_color(th.border);
         match (&draft, &self.preview_error, self.preview_total) {
@@ -616,13 +605,13 @@ impl Render for SmartEditor {
                 }
             }
         }
-        body = body.child(pid("ed.preview", prev));
+        body = body.child(prev);
         if !self.save_error.is_empty() {
             body = body.child(txt(&th, MONO_CODE, self.save_error.clone()).color(th.clip));
         }
         let cancel = button("ed-cancel", th, Variant::Secondary, "Cancel", None, false, window).on_click(cx.listener(|t, _, window, cx| t.close(window, cx)));
-        let ok = pid("ed.ok", button("ed-ok", th, Variant::Primary, if editing { "Save" } else { "Create" }, None, draft.is_err() || self.saving, window).on_click(cx.listener(|t, _, _, cx| t.save(cx))));
-        body = body.child(pid("ed.actions", div().flex().flex_row().justify_end().gap(px(space::SM)).child(cancel).child(ok)));
+        let ok = button("ed-ok", th, Variant::Primary, if editing { "Save" } else { "Create" }, None, draft.is_err() || self.saving, window).on_click(cx.listener(|t, _, _, cx| t.save(cx)));
+        body = body.child(div().flex().flex_row().justify_end().gap(px(space::SM)).child(cancel).child(ok));
 
         let title: SharedString = if editing { "Edit smart playlist" } else { "New smart playlist" }.into();
         let _ = ctl::FIELD_H;
@@ -654,7 +643,7 @@ impl Render for SmartEditor {
                     .bg(th.mid)
                     .shadow(hard_shadow(&th, 4.0))
                     .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
-                    .child(pid("ed.box", panel(&th, &title, body))),
+                    .child(panel(&th, &title, body)),
             )
             .into_any_element()
     }

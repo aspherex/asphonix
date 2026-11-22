@@ -1,9 +1,9 @@
-//! The library routes of the Svelte app: Home, Albums, Artists, AlbumDetail, ArtistDetail, Genres, GenreDetail
-//! (`routes/*.svelte`) and the components they share (`AlbumCard`, `ArtistCard`, `VirtualGrid`, `EntityLink`,
-//! `SegmentedToggle`, `Checkbox`, the track rows of the detail pages).
+//! The library routes: Home, Albums, Artists, album detail, artist detail, Genres, genre detail and the
+//! components they share (cards, the virtual grid, entity links, the segmented toggle, the checkbox, the track rows
+//! of the detail pages).
 //!
 //! Integration with the shell is deliberately thin: [`stage_for`] builds the route's view entity when the route
-//! changes (the Svelte app also remounts a route on every navigation) and views reach back through the
+//! changes (a route is remounted on every navigation) and views reach back through the
 //! [`NavBus`] entity (navigation, "library changed" refresh) instead of knowing the shell.
 use super::shell::Shell;
 use crate::app::PlayerModel;
@@ -37,7 +37,7 @@ pub enum LibEvent {
     Refresh,
 }
 
-/// A tiny event hub entity: `EntityLink`s in rows, the dock and the queue rail navigate through it.
+/// A tiny event hub entity: entity links in rows, the dock and the queue rail navigate through it.
 pub struct NavBus;
 impl EventEmitter<LibEvent> for NavBus {}
 

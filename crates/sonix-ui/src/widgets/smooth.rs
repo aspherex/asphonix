@@ -1,13 +1,13 @@
-//! Chromium-style smooth wheel scrolling for every scroll container (GPUI applies a wheel notch as one jump).
+//! Smooth wheel scrolling for every scroll container (GPUI applies a wheel notch as one jump).
 //!
 //! * One notch = 100 px (3 GPUI lines x 100/3); precise deltas (touchpads: `ScrollDelta::Pixels`) are applied at once,
-//!   unanimated, exactly like Chromium.
+//!   unanimated.
 //! * A notch starts (or retargets) an animation of the container's offset on the frame clock (`crate::clock`): the
 //!   curve is `cc/animation/scroll_offset_animation_curve.cc` of Chromium: `DurationBehavior::kInverseDelta`
 //!   (duration = clamp(14 - delta / 60, 6, 12) frames / 60 = 100-200 ms, 200 ms up to 120 px), cubic-bezier
 //!   ease-in-out (0.42, 0, 0.58, 1). A notch that arrives mid-animation moves the target by another notch and
 //!   `UpdateTarget` retargets from the current position, keeping the current velocity (the bezier's first control
-//!   point y becomes `x1 * slope`, `slope = velocity * new_duration / new_delta`). Not ported: the velocity-based
+//!   point y becomes `x1 * slope`, `slope = velocity * new_duration / new_delta`). Not implemented: the velocity-based
 //!   upper bound of the retargeted duration.
 //! * Plumbing without a GPUI patch: each container renders [`drive`] (ticks its animation, returns an invisible overlay
 //!   that registers a hitbox), and [`host`] (last child of the root) installs one capture-phase wheel listener that
@@ -199,7 +199,7 @@ pub fn drive(window: &mut Window, sc: Scrollable) -> AnyElement {
     });
     if let Some((v, done)) = step {
         (sc.set)(v as f32);
-        if !done && !crate::clock::frozen() {
+        if !done {
             window.request_animation_frame();
         }
     }
@@ -219,8 +219,8 @@ pub fn drive(window: &mut Window, sc: Scrollable) -> AnyElement {
     .into_any_element()
 }
 
-/// `shortcuts.ts: scrollStage(delta)` (J/K outside Now Playing): scrolls the largest container on screen that can
-/// scroll, instantly (`behavior: "auto"`). The caller refreshes the window: cached pages (`crate::part`) do not
+/// J/K outside Now Playing: scrolls the largest container on screen that can
+/// scroll, instantly (no animation). The caller refreshes the window: cached pages (`crate::part`) do not
 /// register their containers on a reused frame, so the scroll is applied by [`host`] in the next, full frame, from
 /// exactly the containers it lays out (no stale one from a closed dialog or a hidden panel).
 pub fn scroll_largest(delta: f32) {
@@ -229,7 +229,7 @@ pub fn scroll_largest(delta: f32) {
 
 fn apply_scroll_largest(mut cands: Vec<(usize, f32)>, delta: f32) -> bool {
     cands.sort_by(|a, b| b.1.total_cmp(&a.1));
-    // the web only considers a viewport taller than half the stage (`clientHeight > target.clientHeight / 2`): never fall
+    // only containers at least half as tall as the largest one count: never fall
     // through to the narrow sidebar / queue rail when the page itself cannot scroll
     let biggest = cands.first().map(|c| c.1).unwrap_or(0.0);
     cands.retain(|c| c.1 >= biggest * 0.5);

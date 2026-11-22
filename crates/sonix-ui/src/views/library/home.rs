@@ -1,4 +1,4 @@
-//! `Home.svelte`: the telemetry panel, the "Resume from server" bar, Jump Back In, Recently Played Tracks, Heavy Rotation,
+//! The Home page: the telemetry panel, the "Resume from server" bar, Jump Back In, Recently Played Tracks, Heavy Rotation,
 //! Playlists // Vectors and the virtualized "Recently Ingested" list. A plain page inside the scrolling stage.
 use super::cards::{CardItem, CardMenu, CardOpen, Tile, TileArt, TileOverlays, anchor_cell, card, open_menu_at, tile};
 use super::entity_link::{Kind, set_current};
@@ -12,7 +12,6 @@ use crate::app;
 use crate::metrics::library as m;
 use crate::metrics::space as sp;
 use crate::pager::{PAGE, Pager};
-use crate::probe::pid;
 use crate::router::Route;
 use crate::text::txt;
 use crate::theme::Theme;
@@ -27,7 +26,7 @@ use std::ops::Range;
 use std::rc::Rc;
 use std::sync::{Arc, Mutex};
 
-/// A declined "Resume from server" offer stays declined for this app run (`dismissedOfferKey`).
+/// A declined "Resume from server" offer stays declined for this app run.
 static DISMISSED: Mutex<Option<String>> = Mutex::new(None);
 
 fn offer_key(o: &ServerQueueOffer) -> String {
@@ -39,7 +38,7 @@ pub struct HomeView {
     status: Option<SessionStatus>,
     sections: Option<HomeSections>,
     sections_unavailable: bool,
-    /// `pager.unavailable` of the Recently Ingested list
+    /// the Recently Ingested list could not be loaded
     list_unavailable: bool,
     lists: Vec<Playlist>,
     recent: Vec<HistoryEntry>,
@@ -63,7 +62,7 @@ impl HomeView {
                 this.load(cx);
             }
         });
-        // native-only play-button state: repaint when the loaded track / status / source changes
+        // play-button state: repaint when the loaded track / status / source changes
         cx.subscribe(&ctx.player.clone(), |_, _, _: &crate::app::PlayerEvent, cx| cx.notify()).detach();
         let mut this = Self {
             ctx,
@@ -88,8 +87,7 @@ impl HomeView {
         this
     }
 
-    /// `Home.svelte: load()` / `loadRecent()`: each piece fills in as its own answer arrives (the web awaits them one
-    /// after the other and renders after each; native runs them side by side), nothing waits for the slowest call.
+    /// Loads every section side by side: each piece fills in as its own answer arrives, nothing waits for the slowest call.
     fn load(&mut self, cx: &mut Context<Self>) {
         macro_rules! piece {
             ($call:expr, $apply:expr) => {{
@@ -197,7 +195,7 @@ impl HomeView {
             .pt(px(sp::SM))
             .border_t_1()
             .border_color(th.border)
-            .child(pid("home.hotkey.0", key("SPACE", "Play/Pause")))
+            .child(key("SPACE", "Play/Pause"))
             .child(key("J / K", "Scroll"))
             .child(div().flex().flex_row().child(txt(&th, MONO_CODE, "/").weight(700.0).color(th.text)).child(txt(&th, MONO_CODE, " or ").color(th.muted)).child(txt(&th, MONO_CODE, "CTRL+K").weight(700.0).color(th.text)).child(txt(&th, MONO_CODE, " Search").color(th.muted)))
             .child(key("ENTER", "Play"));
@@ -209,10 +207,10 @@ impl HomeView {
             .bg(th.low)
             .border_1()
             .border_color(th.border)
-            .child(pid("home.session", session))
-            .child(pid("home.title", div().flex().child(txt(&th, HEADLINE_LG, title).color(th.text))))
-            .child(pid("home.pills", pills))
-            .child(pid("home.hotkeys", hotkeys))
+            .child(session)
+            .child(div().flex().child(txt(&th, HEADLINE_LG, title).color(th.text)))
+            .child(pills)
+            .child(hotkeys)
             .into_any_element()
     }
 
@@ -296,12 +294,12 @@ impl HomeView {
             .border_color(th.border)
             .child(icon("queue", 16.0, th.text))
             .child(text)
-            .child(pid("home.offer.resume", hot))
-            .child(pid("home.offer.dismiss", dismiss))
+            .child(hot)
+            .child(dismiss)
             .into_any_element()
     }
 
-    /// Wraps `children` into a CSS-grid-like set of rows of `cols` items.
+    /// Wraps `children` into grid rows of `cols` items.
     fn grid(children: Vec<AnyElement>, gap: f32) -> AnyElement {
         let mut g = div().flex().flex_row().flex_wrap().items_start().gap(px(gap));
         for c in children {
@@ -351,7 +349,7 @@ impl HomeView {
                     move |_: &CardOpen, _, cx| navigate(cx, Route::Album(id.clone()))
                 })
                 .on_click(move |_, _, cx| navigate(cx, Route::Album(id.clone())));
-                        if ix < 8 { pid(format!("home.list.row.{ix}"), r).into_any_element() } else { r.into_any_element() }
+                        r.into_any_element()
                     })
                     .collect::<Vec<_>>()
             }),
@@ -374,7 +372,7 @@ impl HomeView {
             .h(px(m::HOME_LIST_H))
             .flex_none()
             .child(Self::block_title(&th, "Recently Ingested // Server Pipeline"))
-            .child(if self.list_unavailable { div().flex().child(txt(&th, BODY_SM, "Unavailable until a server is connected.").color(th.muted)).into_any_element() } else { pid("home.list", wrap).into_any_element() })
+            .child(if self.list_unavailable { div().flex().child(txt(&th, BODY_SM, "Unavailable until a server is connected.").color(th.muted)).into_any_element() } else { wrap.into_any_element() })
             .into_any_element()
     }
 }
@@ -393,7 +391,7 @@ impl Render for HomeView {
         let (_, card_w) = auto_fill(content_w, m::CARD_GRID_MIN, sp::MD);
 
         // Jump Back In // Sessions
-        // native-only: until the sections arrive, one row of placeholders per section keeps the page from jumping down
+        // until the sections arrive, one row of placeholders per section keeps the page from jumping down
         let loading_sections = self.sections.is_none() && !self.sections_unavailable;
         if loading_sections {
             let (cols_t, _) = auto_fill(content_w, m::TILE_GRID_MIN, sp::MD);
@@ -402,7 +400,7 @@ impl Render for HomeView {
         }
         if let Some(s) = self.sections.clone().filter(|s| !s.recently_played.is_empty()) {
             let mut tiles = Vec::new();
-            for (i, a) in s.recently_played.iter().enumerate() {
+            for a in &s.recently_played {
                 let id = a.id.clone();
                 let t = tile(
                     &ctx,
@@ -425,7 +423,7 @@ impl Render for HomeView {
                     move |_: &CardOpen, _, cx| navigate(cx, Route::Album(id.clone()))
                 })
                 .on_click(move |_, _, cx| navigate(cx, Route::Album(id.clone())));
-                tiles.push(pid(format!("home.tile.{i}"), t).into_any_element());
+                tiles.push(t.into_any_element());
             }
             children.push(
                 div()
@@ -464,7 +462,7 @@ impl Render for HomeView {
                     move |_: &CardOpen, _, cx| menus::play_tracks(cx, ids.clone(), i)
                 })
                 .on_click(move |_, _, cx| menus::play_tracks(cx, ids.clone(), i));
-                tiles.push(pid(format!("home.recent.{i}"), t).into_any_element());
+                tiles.push(t.into_any_element());
             }
             let view_all = div()
                 .id("view-history")
@@ -486,7 +484,7 @@ impl Render for HomeView {
 
         // Heavy Rotation
         if let Some(s) = self.sections.clone().filter(|s| !s.frequent.is_empty()) {
-            let cards: Vec<AnyElement> = s.frequent.iter().enumerate().map(|(i, a)| card(&ctx, &th, CardItem::Album(a), card_w, None, Some(format!("home.card.{i}")), window, cx)).collect();
+            let cards: Vec<AnyElement> = s.frequent.iter().map(|a| card(&ctx, &th, CardItem::Album(a), card_w, None, window, cx)).collect();
             children.push(div().flex().flex_col().child(Self::block_title(&th, "Heavy Rotation")).child(Self::grid(cards, sp::MD)).into_any_element());
         }
         if loading_sections {
@@ -501,7 +499,7 @@ impl Render for HomeView {
         // Playlists // Vectors
         if !self.lists.is_empty() {
             let mut tiles = Vec::new();
-            for (i, p) in self.lists.clone().iter().enumerate() {
+            for p in self.lists.clone().iter() {
                 let (id_open, id_play) = (p.id.clone(), p.id.clone());
                 let (mctx, pl) = (ctx.clone(), p.clone());
                 let overlays = TileOverlays {
@@ -530,7 +528,7 @@ impl Render for HomeView {
                 .on_action({
                     let (mctx3, pl3, a) = (ctx.clone(), p.clone(), card_anchor.clone());
                     move |_: &CardMenu, window, cx| {
-                        // `isContextMenuKey` on the card: `openContextMenuFor(card)` (left edge, 4 px below)
+                        // the context-menu key on the card opens the menu at its left edge, 4 px below
                         let b = a.get();
                         let pos = gpui::point(b.left(), b.bottom() + px(4.));
                         open_menu_at(&mctx3, playlist_menu(&pl3, cx), pos, window, cx);
@@ -541,7 +539,7 @@ impl Render for HomeView {
                     cx.stop_propagation();
                     open_menu_at(&mctx2, playlist_menu(&pl2, cx), ev.position, window, cx);
                 });
-                tiles.push(pid(format!("home.pl.{i}"), t).into_any_element());
+                tiles.push(t.into_any_element());
             }
             children.push(div().flex().flex_col().child(Self::block_title(&th, "Playlists // Vectors")).child(Self::grid(tiles, sp::MD)).into_any_element());
         }
@@ -549,10 +547,7 @@ impl Render for HomeView {
         // Recently Ingested // Server Pipeline
         children.push(self.list_block(&th, window, cx));
 
-        let mut home = div().relative().w_full().flex_none().flex().flex_col().gap(px(m::HOME_GAP)).p(px(m::HOME_PAD)).child(super::parts::measure_keyed("home", &self.w));
-        for (i, c) in children.into_iter().enumerate() {
-            home = home.child(pid(format!("home.child.{i}"), c));
-        }
+        let home = div().relative().w_full().flex_none().flex().flex_col().gap(px(m::HOME_GAP)).p(px(m::HOME_PAD)).child(super::parts::measure_keyed("home", &self.w)).children(children);
         let _ = (anchor_cell, anim::clear as fn());
         self.page.wrap(window, &th, "home-scroll", home)
     }

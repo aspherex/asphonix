@@ -1,5 +1,5 @@
-//! Conversions from Subsonic wire types (`subsonic::Raw*`) to the IPC types
-//! returned to the frontend (`ipc::Track`/`Album`/`Artist`/`Playlist`).
+//! Conversions from Subsonic wire types (`subsonic::Raw*`) to the wire types
+//! returned to the UI (`ipc::Track`/`Album`/`Artist`/`Playlist`).
 //! Centralized here so every query path (browse, search, album/artist
 //! detail, playlist detail) produces identically-shaped objects.
 //!

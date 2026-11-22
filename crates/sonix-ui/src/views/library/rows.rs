@@ -1,12 +1,11 @@
-//! `TrackRow.svelte` as used by the detail pages (Album: 36 px rows with Year/Added/Format/Time + star, add, "..."; the
+//! Track rows of the detail pages (Album: 36 px rows with Year/Added/Format/Time + star, add, "..."; the
 //! artist page's "Popular" list: 34 px rows without the artist column and without "add"). Header and rows share the same
-//! flex columns, and the Year/Added columns drop out by the `track-table` container query, like the Tracks route.
+//! flex columns, and the Year/Added columns drop out at narrow widths, like the Tracks route.
 use super::cards::anchor_cell;
 use super::entity_link::{Kind, entity_link};
 use crate::anim;
 use crate::columns::Columns;
 use crate::metrics::{anim as m_anim, tracks as tr};
-use crate::probe::pid;
 use crate::text::txt;
 use crate::theme::Theme;
 use crate::tracking::{BODY_MD, LABEL_CAPS, MONO_CODE, MONO_DATA};
@@ -34,8 +33,8 @@ fn right(w: f32) -> Div {
     div().w(px(w)).flex_none().flex().justify_end()
 }
 
-/// `<TrackRow head actionCount={n}/>`: plain (not sortable) caps labels.
-pub fn head(th: &Theme, o: RowOpts, prefix: &str) -> AnyElement {
+/// The header row: plain (not sortable) caps labels.
+pub fn head(th: &Theme, o: RowOpts) -> AnyElement {
     let label = |s: &'static str| txt(th, LABEL_CAPS, s).color(th.muted);
     let mut r = div()
         .flex()
@@ -63,7 +62,7 @@ pub fn head(th: &Theme, o: RowOpts, prefix: &str) -> AnyElement {
     for _ in 0..o.actions {
         r = r.child(spacer());
     }
-    pid(format!("{prefix}.head"), r).into_any_element()
+    r.into_any_element()
 }
 
 type WinCb = Rc<dyn Fn(&mut Window, &mut App)>;
@@ -74,7 +73,7 @@ pub struct RowCb {
     pub add: Option<PosCb>,
     /// Gets the menu position (under the "..." button).
     pub more: PosCb,
-    /// The row's index button (`.idx-play`): play from this row.
+    /// The row's index button: play from this row.
     pub play: WinCb,
 }
 
@@ -104,25 +103,16 @@ fn icon_button(th: &Theme, id: (&'static str, usize), name: &'static str, color:
     d.child(icon_g(name, tr::ROW_ICON, color, hover))
 }
 
-/// One track row. `ids` = parity id prefix for this row (`album.row.3`). The caller attaches click / right-click handlers.
-#[allow(clippy::too_many_arguments)]
-pub fn row(th: &Theme, t: &Track, st: &RowState, o: RowOpts, height: f32, ids: Option<String>, cb: RowCb, window: &mut Window) -> Stateful<Div> {
+/// One track row. The caller attaches click / right-click handlers.
+pub fn row(th: &Theme, t: &Track, st: &RowState, o: RowOpts, height: f32, cb: RowCb, window: &mut Window) -> Stateful<Div> {
     let th = *th;
     let ix = st.ix;
-    let key = key_of(ids.as_deref().unwrap_or("row"), ix);
+    let key = key_of("row", ix);
     let hovered = anim::hovered(key);
     let idx_opacity = 1.0 - anim::transition(window, ("idx-fade", key), if hovered { 1.0 } else { 0.0 }, m_anim::IDX_FADE);
     let starred = t.starred.is_some();
-    let p = |suffix: &str, el: AnyElement| -> AnyElement {
-        match &ids {
-            Some(i) => pid(format!("{i}.{suffix}"), el).into_any_element(),
-            None => el,
-        }
-    };
     let play_cb = cb.play.clone();
-    let idx_cell = p(
-        "idx",
-        div()
+    let idx_cell = div()
             .id(("didx", key))
             .relative()
             .w(px(tr::IDX_W))
@@ -133,7 +123,7 @@ pub fn row(th: &Theme, t: &Track, st: &RowState, o: RowOpts, height: f32, ids: O
             .gap(px(2.))
             .text_color(th.muted)
             .cursor(CursorStyle::PointingHand)
-            // `.idx-play:hover` (TrackRow.svelte): the number fades / the play glyph shows over the index cell only
+            // hovering the index cell: the number fades / the play glyph shows over the index cell only
             .on_hover(move |h, window, _| {
                 anim::set_hovered(key, *h);
                 window.refresh();
@@ -154,10 +144,9 @@ pub fn row(th: &Theme, t: &Track, st: &RowState, o: RowOpts, height: f32, ids: O
                     .when(hovered, |d| d.child(div().absolute().child(icon("play", tr::ROW_PLAY_ICON, th.muted))))
                     .into_any_element()
             })
-            .into_any_element(),
-    );
+            .into_any_element();
     let title_txt = txt(&th, BODY_MD, t.title.clone()).color(if st.active { th.accent_fg } else { th.text }).ellipsis();
-    let title = flex_cell(tr::TITLE_GROW).flex().child(p("title", div().flex().min_w_0().child(title_txt).into_any_element()));
+    let title = flex_cell(tr::TITLE_GROW).flex().child(div().flex().min_w_0().child(title_txt));
     let mut r = div()
         .id(("drow", key))
         .relative()
@@ -176,20 +165,17 @@ pub fn row(th: &Theme, t: &Track, st: &RowState, o: RowOpts, height: f32, ids: O
         .child(idx_cell)
         .child(title);
     if o.show_artist {
-        r = r.child(p(
-            "artist",
-            flex_cell(tr::ARTIST_GROW).flex().child(entity_link(&th, (Kind::Artist, t.artist_id.as_deref()), &t.artist, MONO_DATA, th.muted, &format!("row{ix}"), window)).into_any_element(),
-        ));
+        r = r.child(flex_cell(tr::ARTIST_GROW).flex().child(entity_link(&th, (Kind::Artist, t.artist_id.as_deref()), &t.artist, MONO_DATA, th.muted, &format!("row{ix}"), window)));
     }
     if o.cols.year {
-        r = r.child(p("year", right(tr::YEAR_W).child(txt(&th, MONO_DATA, fmt::track_year(t)).color(th.muted)).into_any_element()));
+        r = r.child(right(tr::YEAR_W).child(txt(&th, MONO_DATA, fmt::track_year(t)).color(th.muted)));
     }
     if o.cols.added {
-        r = r.child(p("added", right(tr::ADDED_W).child(txt(&th, MONO_DATA, t.date_added.as_deref().map(fmt::date_part).unwrap_or("—").to_string()).color(th.muted)).into_any_element()));
+        r = r.child(right(tr::ADDED_W).child(txt(&th, MONO_DATA, t.date_added.as_deref().map(fmt::date_part).unwrap_or("—").to_string()).color(th.muted)));
     }
     r = r
-        .child(p("format", right(tr::FORMAT_W).child(txt(&th, MONO_DATA, fmt::format_track_format(&t.format)).color(th.muted)).into_any_element()))
-        .child(p("time", right(tr::TIME_W).child(txt(&th, MONO_DATA, fmt::format_duration(Some(t.duration))).color(th.muted)).into_any_element()));
+        .child(right(tr::FORMAT_W).child(txt(&th, MONO_DATA, fmt::format_track_format(&t.format)).color(th.muted)))
+        .child(right(tr::TIME_W).child(txt(&th, MONO_DATA, fmt::format_duration(Some(t.duration))).color(th.muted)));
     let (star_col, star_hover) = if starred { (th.accent_fg, th.accent_fg) } else { (th.muted, th.text) };
     let star = icon_button(&th, ("dstar", key), if starred { "heart-filled" } else { "heart" }, star_col, star_hover, None).on_click({
         let f = cb.star.clone();
@@ -198,7 +184,7 @@ pub fn row(th: &Theme, t: &Track, st: &RowState, o: RowOpts, height: f32, ids: O
             f(window, cx);
         }
     });
-    r = r.child(p("star", star.into_any_element()));
+    r = r.child(star);
     if let Some(add) = cb.add.clone() {
         let a = anchor_cell();
         let a2 = a.clone();
@@ -213,16 +199,11 @@ pub fn row(th: &Theme, t: &Track, st: &RowState, o: RowOpts, height: f32, ids: O
     let a = anchor_cell();
     let a2 = a.clone();
     let more = cb.more.clone();
-    r = r.child(p(
-        "more",
-        icon_button(&th, ("dmore", key), "more", th.muted, th.text, Some(a))
-            .on_click(move |_, window, cx| {
-                cx.stop_propagation();
-                let b = a2.get();
-                more(point(b.origin.x, b.origin.y + b.size.height + px(4.)), window, cx);
-            })
-            .into_any_element(),
-    ));
+    r = r.child(icon_button(&th, ("dmore", key), "more", th.muted, th.text, Some(a)).on_click(move |_, window, cx| {
+        cx.stop_propagation();
+        let b = a2.get();
+        more(point(b.origin.x, b.origin.y + b.size.height + px(4.)), window, cx);
+    }));
     if let Some(a) = st.anchor.clone() {
         r = r.child(gpui::canvas(move |b, _, _| a.set(b), |_, _, _, _| {}).absolute().top_0().left_0().size_full());
     }

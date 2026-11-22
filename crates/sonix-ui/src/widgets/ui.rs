@@ -1,4 +1,4 @@
-//! Small shared components of the list routes: `Badge.svelte`, `SegmentedToggle.svelte`.
+//! Small shared components of the list routes: badges and the segmented toggle.
 use crate::metrics::lists as m;
 use crate::text::txt;
 use crate::theme::Theme;
@@ -11,7 +11,7 @@ pub enum Tone {
     Accent,
 }
 
-/// `Badge.svelte`: inline-flex, `padding: 0 4px`, 16 px line box, upper case, weight 700, mono-code.
+/// A badge: 4 px side padding, 16 px line box, upper case, weight 700, mono-code.
 pub fn badge(th: &Theme, tone: Tone, label: &str) -> Div {
     let (bg, fg): (Hsla, Hsla) = match tone {
         Tone::Default => (th.high, th.muted),
@@ -21,7 +21,7 @@ pub fn badge(th: &Theme, tone: Tone, label: &str) -> Div {
     div().flex().flex_row().items_center().flex_none().px(px(m::BADGE_PAD_X)).bg(bg).text_color(fg).child(txt(th, spec, label.to_string()).color(fg))
 }
 
-/// `SegmentedToggle.svelte`: inline-flex with a 1 px frame, one label-caps button per option, the active one on accent.
+/// A segmented toggle: a 1 px frame, one label-caps button per option, the active one on accent.
 /// `on_select(value)` is called with the option's value.
 pub fn segmented(id: &'static str, th: &Theme, options: &[(&str, &str)], value: &str, on_select: impl Fn(&str, &mut Window, &mut App) + Clone + 'static) -> Stateful<Div> {
     let th = *th;
@@ -32,7 +32,7 @@ pub fn segmented(id: &'static str, th: &Theme, options: &[(&str, &str)], value: 
         let (v, label) = (v.to_string(), label.to_string());
         let on = on_select.clone();
         let (bg, fg) = if active { (th.accent, th.accent_text) } else { (th.low, th.muted) };
-        // `.segment` is a <button>: letter-spacing is reset by the UA stylesheet
+        // segment labels are buttons: no letter-spacing
         let seg = div()
             .id((id, i))
             .tab_index(0)

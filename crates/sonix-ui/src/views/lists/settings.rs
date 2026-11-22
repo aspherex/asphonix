@@ -1,10 +1,9 @@
-//! `Settings.svelte`: Output, Scrobbling, Shuffle, Playback, Server, Updates, Claude (MCP), Log out.
-//! Every control talks to the backend like the web page (optimistic local state, then the setter).
+//! The settings page: Output, Scrobbling, Shuffle, Playback, Server, Updates, Claude (MCP), Log out.
+//! Every control updates its local state optimistically, then calls the backend setter.
 use super::ui::{scroll_page, wrap_text};
 use super::ListsEvent;
 use crate::app;
 use crate::metrics::space;
-use crate::probe::pid;
 use crate::text::txt;
 use crate::theme::{MONO, Theme};
 use crate::tracking::{BODY_SM, HEADLINE_MD, LABEL_CAPS, MONO_DATA};
@@ -35,13 +34,13 @@ pub struct SettingsView {
     copied: bool,
     threshold: Entity<TextInput>,
     window_size: Entity<TextInput>,
-    /// number inputs fire `change` on Enter or when they lose focus
+    /// number inputs commit on Enter or when they lose focus
     focused: [bool; 2],
     scroll: ScrollHandle,
     _subs: Vec<Subscription>,
 }
 
-/// `<input type=number>` accepts only digits (and a sign / dot, which these integer settings never use).
+/// Number fields accept only digits (these integer settings need no sign or dot).
 fn digits_only(i: &Entity<TextInput>, cx: &mut Context<SettingsView>) {
     let c = i.read(cx).content.to_string();
     let f: String = c.chars().filter(|ch| ch.is_ascii_digit()).collect();
@@ -146,10 +145,6 @@ impl SettingsView {
         .detach();
     }
 
-    #[cfg(feature = "parity")]
-    pub(crate) fn parity_state(&self) -> serde_json::Value {
-        serde_json::json!({ "settings": serde_json::to_value(&self.s).unwrap_or_default() })
-    }
 
     fn set(&mut self, ch: SettingChange, cx: &mut Context<Self>) {
         match &ch {
@@ -258,22 +253,19 @@ impl SettingsView {
             }
         })
     }
-    fn panel(th: &Theme, id: &'static str, title: &str, rows: Vec<AnyElement>) -> AnyElement {
+    fn panel(th: &Theme, title: &str, rows: Vec<AnyElement>) -> AnyElement {
         let th = *th;
-        pid(
-            id,
-            div()
+        div()
                 .flex()
                 .flex_col()
                 .bg(th.low)
                 .border_1()
                 .border_color(th.border)
                 .child(div().px(px(space::MD)).py(px(space::SM)).bg(th.mid).border_b_1().border_color(th.border).child(txt(&th, LABEL_CAPS, title.to_string()).color(th.muted)))
-                .child(div().flex().flex_col().gap(px(space::MD)).p(px(space::MD)).children(rows)),
-        )
+                .child(div().flex().flex_col().gap(px(space::MD)).p(px(space::MD)).children(rows))
         .into_any_element()
     }
-    /// `.select` button / `<select>` box: 220 px min, bg base, 1 px frame.
+    /// Select box: 220 px min, base fill, 1 px frame.
     fn select_box(th: &Theme, id: &'static str, content: AnyElement) -> gpui::Stateful<gpui::Div> {
         let th = *th;
         div().id(id).flex().flex_row().items_center().justify_center().min_w(px(220.)).px(px(space::SM)).py(px(space::XS)).bg(th.base).border_1().border_color(th.border).text_color(th.text).cursor(CursorStyle::PointingHand).child(content)
@@ -292,7 +284,7 @@ impl SettingsView {
 impl Render for SettingsView {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let th = app::theme(cx);
-        // blur commits (`onchange`)
+        // losing focus commits
         for (k, ent) in [self.threshold.clone(), self.window_size.clone()].into_iter().enumerate() {
             let f = ent.read(cx).focus_handle.is_focused(window);
             if self.focused[k] && !f {
@@ -316,11 +308,9 @@ impl Render for SettingsView {
             };
             let devs = self.devices.clone();
             let this_d = this.clone();
-            // `<select>`: intrinsic width = text + padding/border + the 20 px arrow, 28 px high
+            // dropdown box: intrinsic width = text + padding/border + the 20 px arrow, 28 px high
             let dev_w = crate::text::natural_width(window, &dev_label, MONO, MONO_DATA.size, MONO_DATA.weight, MONO_DATA.tracking_px()) + 2.0 * space::SM + 2.0 + 20.0;
-            let device_sel = pid(
-                "set.device",
-                Self::select_box(&th, "set-device", div().flex().flex_1().justify_start().child(txt(&th, MONO_DATA, dev_label).color(th.text)).child(super::ui::select_arrow(th.text)).into_any_element()).h(px(28.)).w(px(dev_w.max(220.))).on_click(cx.listener(move |t, ev: &ClickEvent, _, cx| {
+            let device_sel = Self::select_box(&th, "set-device", div().flex().flex_1().justify_start().child(txt(&th, MONO_DATA, dev_label).color(th.text)).child(super::ui::select_arrow(th.text)).into_any_element()).h(px(28.)).w(px(dev_w.max(220.))).on_click(cx.listener(move |t, ev: &ClickEvent, _, cx| {
                     let items: Vec<MenuItem> = devs
                         .iter()
                         .map(|d| {
@@ -341,8 +331,7 @@ impl Render for SettingsView {
                         let Some(w) = cx.active_window() else { return };
                         let _ = w.update(cx, |_, window, cx| menu.update(cx, |m, cx| m.show(items, gpui::point(p.x, p.y + px(8.)), window, cx)));
                     });
-                })),
-            );
+                }));
             let mode = self.out.as_ref().map(|o| if o.exclusive_error.is_some() { OutputMode::Exclusive } else { o.mode }).unwrap_or(OutputMode::Shared);
             let this_m = this.clone();
             let mode_tog = segmented("set-mode", &th, &[("exclusive", "Exclusive"), ("shared", "Shared")], if mode == OutputMode::Exclusive { "exclusive" } else { "shared" }, move |v, _, cx| {
@@ -365,7 +354,7 @@ impl Render for SettingsView {
                     .detach();
                 }
             });
-            let mut out_rows: Vec<AnyElement> = vec![Self::row(&th, "Device", device_sel).into_any_element(), Self::row(&th, "Mode", pid("set.mode", mode_tog)).into_any_element()];
+            let mut out_rows: Vec<AnyElement> = vec![Self::row(&th, "Device", device_sel).into_any_element(), Self::row(&th, "Mode", mode_tog).into_any_element()];
             if let Some(o) = &self.out {
                 if let Some(e) = &o.exclusive_error {
                     out_rows.push(Self::row(&th, "Exclusive unavailable", div().id("excl-err").tip(e.clone(), th).flex().child(txt(&th, MONO_DATA, e.clone()).color(th.clip))).into_any_element());
@@ -470,7 +459,7 @@ impl Render for SettingsView {
                 .when(self.checking, |d| d.opacity(0.5).cursor(CursorStyle::OperationNotAllowed))
                 .when(!self.checking, |d| d.on_click(cx.listener(|t, _, _, cx| t.check_now(cx))));
             let _ = this_u;
-            let mut upd_row = div().flex().flex_row().items_center().justify_between().gap(px(space::MD)).child(pid("set.check", check));
+            let mut upd_row = div().flex().flex_row().items_center().justify_between().gap(px(space::MD)).child(check);
             if let Some(m) = &self.update_msg {
                 upd_row = upd_row.child(txt(&th, BODY_SM, m.clone()).color(th.muted));
             }
@@ -487,7 +476,7 @@ impl Render for SettingsView {
                     "Lets Claude Code or Claude Desktop read your library, listening history and play queue through a local-only connection (no network port). Everything Claude reads is sent to Claude (Anthropic) as part of your conversation: track, album and artist names, playlists, play history, what is playing. It never sees your server address, password or file paths, and this version cannot change anything on the server (no playlist edits, likes or ratings).",
                     false,
                 ),
-                Self::row(&th, "Let Claude read my library", pid("set.mcp", self.toggle(&th, "set-mcp", self.mcp.as_ref().map(|m| m.enabled).unwrap_or(false), SettingChange::McpEnabled, cx))).into_any_element(),
+                Self::row(&th, "Let Claude read my library", self.toggle(&th, "set-mcp", self.mcp.as_ref().map(|m| m.enabled).unwrap_or(false), SettingChange::McpEnabled, cx)).into_any_element(),
             ];
             if let Some(m) = self.mcp.clone().filter(|m| m.enabled) {
                 mcp_rows.push(Self::row(&th, "Allow playback control (play, skip, queue, volume)", self.toggle(&th, "set-mcp-ctl", m.allow_control, SettingChange::McpAllowControl, cx)).into_any_element());
@@ -553,21 +542,21 @@ impl Render for SettingsView {
                     .detach();
                 }));
             let _ = hard_shadow;
-            pid("page", div()
+            div()
                 .flex()
                 .flex_col()
                 .gap(px(space::LG))
                 .p(px(space::LG))
                 .max_w(px(640.))
-                .child(pid("page.title", div().flex().child(txt(&th, HEADLINE_MD, "Settings").color(th.text))))
-                .child(Self::panel(&th, "set.panel.0", "Output", out_rows))
-                .child(Self::panel(&th, "set.panel.1", "Scrobbling", scrobble))
-                .child(Self::panel(&th, "set.panel.2", "Shuffle", shuffle))
-                .child(Self::panel(&th, "set.panel.3", "Playback", playback))
-                .child(Self::panel(&th, "set.panel.4", "Server", server))
-                .child(Self::panel(&th, "set.panel.5", "Updates", updates))
-                .child(Self::panel(&th, "set.panel.6", "Claude (MCP)", mcp_rows))
-                .child(div().flex().flex_row().child(pid("set.logout", logout))))
+                .child(div().flex().child(txt(&th, HEADLINE_MD, "Settings").color(th.text)))
+                .child(Self::panel(&th, "Output", out_rows))
+                .child(Self::panel(&th, "Scrobbling", scrobble))
+                .child(Self::panel(&th, "Shuffle", shuffle))
+                .child(Self::panel(&th, "Playback", playback))
+                .child(Self::panel(&th, "Server", server))
+                .child(Self::panel(&th, "Updates", updates))
+                .child(Self::panel(&th, "Claude (MCP)", mcp_rows))
+                .child(div().flex().flex_row().child(logout))
                 .into_any_element()
         })
     }

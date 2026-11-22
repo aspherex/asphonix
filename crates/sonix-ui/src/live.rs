@@ -10,8 +10,8 @@
 //! ([`begin_view`]: rows scrolled away disappear) and all of them when the stage changes ([`clear_all`]).
 //!
 //! Frame pacing: the bars and the FFT panel are time-based (shared clock), so the layer draws them at a capped
-//! rate instead of on every vsync: the FFT panel every `MIN_DRAW_MS` like `FftPanel.svelte`, the bars at
-//! [`BARS_FPS`]. The rail spectrum draws on each engine frame (`QueueRail.svelte` draws per `spectrum-frame`).
+//! rate instead of on every vsync: the FFT panel every `MIN_DRAW_MS`, the bars at
+//! [`BARS_FPS`]. The rail spectrum draws on each engine spectrum frame.
 //! Nothing is scheduled while nothing moves (paused, stopped, no slot on screen).
 use crate::app::PlayerModel;
 use crate::views::nowplaying::NowPlayingView;
@@ -23,19 +23,18 @@ use std::time::{Duration, Instant};
 /// What a slot shows.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum Kind {
-    /// `TrackRow.svelte .now-playing`: three bars, animated while playing, static `scaleY(.33)` when paused.
+    /// The now-playing bars of a track row: three bars, animated while playing, static at 1/3 height when paused.
     Bars { playing: bool },
-    /// `QueueRail.svelte` deck spectrum: the latest engine frame as plain bars.
+    /// The queue rail deck spectrum: the latest engine frame as plain bars.
     RailSpectrum,
-    /// `FftPanel.svelte`: spectrum bars with falling peak caps.
+    /// The Now Playing FFT panel: spectrum bars with falling peak caps.
     NpSpectrum,
-    /// `FftPanel.svelte`: L/R segment meters with peak hold.
+    /// The Now Playing FFT panel: L/R segment meters with peak hold.
     NpMeters,
 }
 
 /// Redraw rate of the now-playing bars. The keyframes move a bar 0.25..1 of 12 px in 0.45 s: 13.5 device px at 150 %,
 /// about 1 device px per frame at this rate (2 at the ease-in-out peak); every frame costs a whole-window GPUI draw.
-/// (The web animates them on the compositor at the display rate.)
 pub const BARS_FPS: f64 = 30.0;
 
 #[derive(Clone)]
@@ -152,18 +151,16 @@ impl Render for LiveLayer {
         let slots = snapshot(top);
         let th = crate::app::theme(cx);
         let now = crate::clock::now();
-        let frozen = crate::clock::frozen();
         // The data does not depend on which slots this render sees: a page that renders after this view in the same
-        // frame (uncached in parity builds, or re-rendered in prepaint) records its slots only later, before the paint.
+        // frame (re-rendered in prepaint) records its slots only later, before the paint.
         let mut next: Option<f64> = None;
-        if !frozen && (slots.iter().any(animating_bars) || self.saw_bars.get()) {
+        if slots.iter().any(animating_bars) || self.saw_bars.get() {
             next = Some(1.0 / BARS_FPS);
         }
         // `fft_step` animates only while Now Playing is shown (`spectrum_wanted`)
         let fft = if top { None } else { self.np.update(cx, |np, cx| np.fft_step(cx)).ok() };
         if let Some(f) = &fft
             && f.animate
-            && !frozen
         {
             let d = crate::metrics::spectrum::MIN_DRAW_MS as f64 / 1000.0;
             next = Some(next.map_or(d, |n: f64| n.min(d)));
@@ -189,7 +186,7 @@ impl Render for LiveLayer {
                 let slots = snapshot(top);
                 let bars = slots.iter().any(animating_bars);
                 saw_bars.set(bars);
-                if bars && !scheduled && !frozen {
+                if bars && !scheduled {
                     window.request_animation_frame();
                 }
                 for s in &slots {

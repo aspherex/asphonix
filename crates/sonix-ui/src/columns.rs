@@ -1,6 +1,5 @@
-//! Which optional Tracks columns fit. A container query in the Svelte app
-//! (`@container track-table (max-width: ...)`): the width is the table panel's
-//! *content* box (border excluded), `max-width` is inclusive, so Added is hidden at
+//! Which optional Tracks columns fit. The width is the table panel's *content* box
+//! (border excluded) and the thresholds are inclusive, so Added is hidden at
 //! <= 760 px and Year at <= 600 px. Header and rows read the same value.
 
 use crate::metrics::tracks::{HIDE_ADDED_BELOW as HIDE_ADDED_AT, HIDE_YEAR_BELOW as HIDE_YEAR_AT};

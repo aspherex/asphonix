@@ -173,12 +173,12 @@ pub struct TextInput {
     pub mask: bool,
     last_bounds: Option<Bounds<Pixels>>,
     is_selecting: bool,
-    /// Chromium selects the whole value when an input is focused by keyboard (Tab, Shift+Tab) or script, not by a click.
+    /// An input focused by keyboard (Tab, Shift+Tab) selects its whole value; one focused by a click does not.
     focus_seen: bool,
     mouse_focus: bool,
-    /// Ctrl+Z / Ctrl+Y (Chromium `<input>` undo): snapshots before each edit, typing runs coalesced
+    /// Ctrl+Z / Ctrl+Y undo: snapshots before each edit, typing runs coalesced
     history: History,
-    /// Right-click menu (Undo/Redo/Cut/Copy/Paste/Select all, the WebView2 input menu). Off for inputs inside modals:
+    /// Right-click menu (Undo/Redo/Cut/Copy/Paste/Select all). Off for inputs inside modals:
     /// the shell menu paints below dialogs and the smart editor.
     pub context_menu: bool,
 }
@@ -455,7 +455,7 @@ impl TextInput {
 
     pub fn new(cx: &mut Context<Self>, placeholder: &str, th: &Theme, font_family: &'static str, font_size: f32, line_height: f32, font_weight: f32) -> Self {
         Self {
-            // `<input>` is a tab stop (document order = paint order)
+            // a tab stop (tab order = paint order)
             focus_handle: cx.focus_handle().tab_stop(true),
             content: "".into(),
             placeholder: placeholder.to_string().into(),
@@ -932,7 +932,7 @@ thread_local! {
 }
 
 /// The shell calls this right before `focus_next`/`focus_prev`: an input that receives focus within the next moments
-/// selects its whole value, as Chromium does for Tab navigation (script `focus()` leaves the caret alone).
+/// selects its whole value (focus moved by code leaves the caret alone).
 pub fn note_tab_nav() {
     TAB_NAV.with(|t| t.set(Some(std::time::Instant::now())));
 }
@@ -944,7 +944,7 @@ fn tab_nav_recent() -> bool {
 actions!(text_input, [Undo, Redo]);
 
 /// Undo/redo stacks of one input. A snapshot (text + selection) is taken before every edit; a run of single
-/// characters typed at the caret is one step, like Chromium's typing coalescing.
+/// characters typed at the caret is one step.
 #[derive(Default)]
 struct History {
     undo: Vec<(SharedString, Range<usize>)>,
@@ -1047,8 +1047,8 @@ impl gpui::Global for InputMenu {}
 type InputOp = fn(&mut TextInput, &mut Window, &mut Context<TextInput>);
 
 impl TextInput {
-    /// Right-click: focus the field, keep a selection the click is inside (else move the caret there, as Chromium
-    /// does), then open the edit menu with the WebView2 items and their shortcuts.
+    /// Right-click: focus the field, keep a selection the click is inside (else move the caret there),
+    /// then open the edit menu with its items and their shortcuts.
     fn on_right_down(&mut self, ev: &MouseDownEvent, window: &mut Window, cx: &mut Context<Self>) {
         self.mouse_focus = true;
         window.focus(&self.focus_handle);

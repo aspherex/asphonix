@@ -1,5 +1,5 @@
-//! The three virtual-grid routes: Albums (`Albums.svelte`), Artists (`Artists.svelte`) and one genre's albums
-//! (`GenreDetail.svelte`). Each owns a paged [`GridState`] and renders through [`grid_element`].
+//! The three virtual-grid routes: Albums, Artists and one genre's albums
+//! (genre detail). Each owns a paged [`GridState`] and renders through [`grid_element`].
 use super::cards::{CardItem, card};
 use super::grid::{Geo, GridHost, GridState, grid_element};
 use super::parts::{checkbox, segmented};
@@ -7,7 +7,6 @@ use super::{Ctx, LibEvent, menus};
 use crate::app;
 use crate::metrics::library as m;
 use crate::pager::PAGE;
-use crate::probe::pid;
 use crate::text::txt;
 use crate::theme::Theme;
 use crate::tracking::{BODY_SM, HEADLINE_LG, HEADLINE_MD, LABEL_CAPS, MONO_CODE, MONO_DATA};
@@ -16,29 +15,19 @@ use gpui::{AnyElement, Context, IntoElement, Render, Subscription, Window, div, 
 use sonix_api::format::fmt_int;
 use sonix_api::*;
 
-/// The id of the n-th card of the web's rendered window (`.window > .cell:nth-child(n)`): the web renders from
-/// `max(0, floor(scrollTop / rowHeight) - 2)` rows.
-pub(crate) fn web_index<T>(g: &GridState<T>, ix: usize, geo: Geo) -> Option<usize> {
-    let start = ((g.scroll_top() / geo.row_h()).floor() as i64 - 2).max(0) as usize * geo.cols;
-    ix.checked_sub(start)
-}
-
 fn loading_cell(th: &Theme, geo: Geo) -> AnyElement {
     div().w(px(geo.cell_w)).h(px(geo.cell_h)).flex_none().bg(th.low).into_any_element()
 }
 
 fn page_shell(header: impl IntoElement, body: impl IntoElement) -> AnyElement {
-    pid(
-        "page",
-        div()
+    div()
             .size_full()
             .flex()
             .flex_col()
             .gap(px(m::PAGE_GAP))
             .p(px(m::PAGE_PAD))
             .child(header)
-            .child(pid("lib.gridwrap", div().flex_1().min_h_0().child(body))),
-    )
+            .child(div().flex_1().min_h_0().child(body))
     .into_any_element()
 }
 
@@ -64,7 +53,7 @@ impl AlbumsView {
                 }
             }
         });
-        // native-only play-button state: repaint when the loaded track / status / source changes
+        // play-button state: repaint when the loaded track / status / source changes
         cx.subscribe(&ctx.player.clone(), |_, _, _: &crate::app::PlayerEvent, cx| cx.notify()).detach();
         let mut this = Self { ctx, grid: GridState::new(String::new()), sort: AlbumSort::Alphabetical, starred_only: false, _sub: sub };
         this.reload(cx);
@@ -95,7 +84,7 @@ impl AlbumsView {
                         cx.notify();
                     }
                 }
-                // native-only: any current answer (a failure too) ends the first-load skeleton
+                // any current answer (a failure too) ends the first-load skeleton
                 if !t.grid.loaded && epoch == t.grid.pager.epoch {
                     t.grid.loaded = true;
                     cx.notify();
@@ -110,11 +99,10 @@ impl GridHost<Album> for AlbumsView {
     fn grid(&mut self) -> &mut GridState<Album> {
         &mut self.grid
     }
-    fn cell(&mut self, ix: usize, item: Option<Album>, geo: Geo, window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
+    fn cell(&mut self, item: Option<Album>, geo: Geo, window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
         let th = app::theme(cx);
         let Some(a) = item else { return loading_cell(&th, geo) };
-        let ids = web_index(&self.grid, ix, geo).filter(|n| *n < 8).map(|n| format!("lib.card.{n}"));
-        card(&self.ctx.clone(), &th, CardItem::Album(&a), geo.cell_w, Some(geo.cell_h), ids, window, cx)
+        card(&self.ctx.clone(), &th, CardItem::Album(&a), geo.cell_w, Some(geo.cell_h), window, cx)
     }
     fn request(&mut self, page: usize, cx: &mut Context<Self>) {
         if self.grid.pager.want(page) {
@@ -136,25 +124,19 @@ impl Render for AlbumsView {
             .flex_row()
             .items_center()
             .gap(px(m::CONTROLS_GAP))
-            .child(pid(
-                "lib.check",
-                checkbox(&th, "starred-only", self.starred_only, "Starred only", move |v, _, cx| {
+            .child(checkbox(&th, "starred-only", self.starred_only, "Starred only", move |v, _, cx| {
                     let _ = this.update(cx, |t, cx| {
                         t.starred_only = v;
                         t.reload(cx);
                     });
-                }),
-            ))
-            .child(pid(
-                "lib.seg",
-                segmented(&th, "lib.seg", &options, self.sort, move |v, _, cx| {
+                }))
+            .child(segmented(&th, "lib.seg", &options, self.sort, move |v, _, cx| {
                     let _ = this2.update(cx, |t, cx| {
                         t.sort = v;
                         t.reload(cx);
                     });
-                }),
-            ));
-        let header = pid("lib.header", header_row().child(pid("page.title", txt(&th, HEADLINE_MD, "Albums").color(th.text))).child(pid("lib.controls", controls)));
+                }));
+        let header = header_row().child(txt(&th, HEADLINE_MD, "Albums").color(th.text)).child(controls);
         let body = grid_element(self, th, window, cx);
         page_shell(header, body)
     }
@@ -177,7 +159,7 @@ impl ArtistsView {
                 }
             }
         });
-        // native-only play-button state: repaint when the loaded track / status / source changes
+        // play-button state: repaint when the loaded track / status / source changes
         cx.subscribe(&ctx.player.clone(), |_, _, _: &crate::app::PlayerEvent, cx| cx.notify()).detach();
         let mut this = Self { ctx, grid: GridState::new(String::new()), sort: ArtistSort::Alphabetical, _sub: sub };
         this.reload(cx);
@@ -203,7 +185,7 @@ impl ArtistsView {
                         cx.notify();
                     }
                 }
-                // native-only: any current answer (a failure too) ends the first-load skeleton
+                // any current answer (a failure too) ends the first-load skeleton
                 if !t.grid.loaded && epoch == t.grid.pager.epoch {
                     t.grid.loaded = true;
                     cx.notify();
@@ -218,11 +200,10 @@ impl GridHost<Artist> for ArtistsView {
     fn grid(&mut self) -> &mut GridState<Artist> {
         &mut self.grid
     }
-    fn cell(&mut self, ix: usize, item: Option<Artist>, geo: Geo, window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
+    fn cell(&mut self, item: Option<Artist>, geo: Geo, window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
         let th = app::theme(cx);
         let Some(a) = item else { return loading_cell(&th, geo) };
-        let ids = web_index(&self.grid, ix, geo).filter(|n| *n < 8).map(|n| format!("lib.card.{n}"));
-        card(&self.ctx.clone(), &th, CardItem::Artist(&a), geo.cell_w, Some(geo.cell_h), ids, window, cx)
+        card(&self.ctx.clone(), &th, CardItem::Artist(&a), geo.cell_w, Some(geo.cell_h), window, cx)
     }
     fn request(&mut self, page: usize, cx: &mut Context<Self>) {
         if self.grid.pager.want(page) {
@@ -236,18 +217,12 @@ impl Render for ArtistsView {
         let th = app::theme(cx);
         let this = cx.entity().downgrade();
         let options: [(ArtistSort, &'static str); 2] = [(ArtistSort::Alphabetical, "A-Z"), (ArtistSort::Random, "Random")];
-        let header = pid(
-            "lib.header",
-            header_row().child(pid("page.title", txt(&th, HEADLINE_MD, "Artists").color(th.text))).child(pid(
-                "lib.seg",
-                segmented(&th, "lib.seg", &options, self.sort, move |v, _, cx| {
+        let header = header_row().child(txt(&th, HEADLINE_MD, "Artists").color(th.text)).child(segmented(&th, "lib.seg", &options, self.sort, move |v, _, cx| {
                     let _ = this.update(cx, |t, cx| {
                         t.sort = v;
                         t.reload(cx);
                     });
-                }),
-            )),
-        );
+                }));
         let body = grid_element(self, th, window, cx);
         page_shell(header, body)
     }
@@ -274,7 +249,7 @@ impl GenreDetailView {
                 }
             }
         });
-        // native-only play-button state: repaint when the loaded track / status / source changes
+        // play-button state: repaint when the loaded track / status / source changes
         cx.subscribe(&ctx.player.clone(), |_, _, _: &crate::app::PlayerEvent, cx| cx.notify()).detach();
         let mut this = Self { ctx, grid: GridState::new(format!("genre:{name}")), name, info: None, missing: false, flow_btn: std::rc::Rc::new(std::cell::Cell::new(gpui::Bounds::default())), _sub: sub };
         this.grid.pager.want(0);
@@ -312,7 +287,7 @@ impl GenreDetailView {
                         cx.notify();
                     }
                 } else if !t.grid.loaded && epoch == t.grid.pager.epoch {
-                    // native-only: a failed first page ends the skeleton (the empty note shows instead)
+                    // a failed first page ends the skeleton (the empty note shows instead)
                     t.grid.loaded = true;
                     cx.notify();
                 }
@@ -326,11 +301,10 @@ impl GridHost<Album> for GenreDetailView {
     fn grid(&mut self) -> &mut GridState<Album> {
         &mut self.grid
     }
-    fn cell(&mut self, ix: usize, item: Option<Album>, geo: Geo, window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
+    fn cell(&mut self, item: Option<Album>, geo: Geo, window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
         let th = app::theme(cx);
         let Some(a) = item else { return loading_cell(&th, geo) };
-        let ids = web_index(&self.grid, ix, geo).filter(|n| *n < 8).map(|n| format!("lib.card.{n}"));
-        card(&self.ctx.clone(), &th, CardItem::Album(&a), geo.cell_w, Some(geo.cell_h), ids, window, cx)
+        card(&self.ctx.clone(), &th, CardItem::Album(&a), geo.cell_w, Some(geo.cell_h), window, cx)
     }
     fn request(&mut self, page: usize, cx: &mut Context<Self>) {
         if self.grid.pager.want(page) {
@@ -344,48 +318,45 @@ impl Render for GenreDetailView {
         let th = app::theme(cx);
         let ready = self.info.is_some();
         let (n1, n2) = (self.name.clone(), self.name.clone());
-        // native-only: the loaded genre source's Play button shows the active state
+        // the loaded genre source's Play button shows the active state
         let pst = self.ctx.player.read(cx).play_state(&crate::app::PlayTarget::Genre(self.name.clone()));
         let title = div()
             .flex()
             .flex_col()
             .gap(px(crate::metrics::space::XS))
             .min_w_0()
-            .child(pid("genre.crumb", div().flex().child(txt(&th, LABEL_CAPS, "Genre").color(th.muted))))
-            .child(pid("page.title", div().flex().child(txt(&th, HEADLINE_LG, self.name.clone()).color(th.text))))
+            .child(div().flex().child(txt(&th, LABEL_CAPS, "Genre").color(th.muted)))
+            .child(div().flex().child(txt(&th, HEADLINE_LG, self.name.clone()).color(th.text)))
             .when_some(self.info.clone(), |d, g| {
-                d.child(pid(
-                    "genre.stats",
-                    div()
+                d.child(div()
                         .flex()
                         .flex_row()
                         .gap(px(crate::metrics::space::XS))
                         .child(txt(&th, MONO_DATA, format!("{} ALBUMS", fmt_int(g.album_count as u64))).color(th.muted))
                         .child(txt(&th, MONO_DATA, "·").color(th.muted))
-                        .child(txt(&th, MONO_DATA, format!("{} TRACKS", fmt_int(g.track_count as u64))).color(th.muted)),
-                ))
+                        .child(txt(&th, MONO_DATA, format!("{} TRACKS", fmt_int(g.track_count as u64))).color(th.muted)))
             });
         let actions = div()
             .flex()
             .flex_row()
             .gap(px(crate::metrics::space::SM))
-            .child(pid("genre.btn.0", button("genre-play", th, Variant::Secondary, "Play", Some(pst.icon()), !ready, window).when(pst.active(), |b| b.border_color(th.accent)).on_click(move |_, _, cx| {
+            .child(button("genre-play", th, Variant::Secondary, "Play", Some(pst.icon()), !ready, window).when(pst.active(), |b| b.border_color(th.accent)).on_click(move |_, _, cx| {
                 if pst.active() {
                     crate::playback::toggle(cx);
                 } else {
                     menus::play_genre(cx, n1.clone(), false)
                 }
-            })))
-            .child(pid("genre.btn.1", button("genre-shuffle", th, Variant::Primary, "Shuffle", Some("shuffle"), !ready, window).on_click(move |_, _, cx| menus::play_genre(cx, n2.clone(), true))))
-            .child(pid("genre.btn.2", {
+            }))
+            .child(button("genre-shuffle", th, Variant::Primary, "Shuffle", Some("shuffle"), !ready, window).on_click(move |_, _, cx| menus::play_genre(cx, n2.clone(), true)))
+            .child({
                 let (cell, menu, n3) = (self.flow_btn.clone(), self.ctx.menu.clone(), self.name.clone());
                 button("genre-flow", th, Variant::Secondary, "Flow", Some("sliders"), !ready, window).relative().child(crate::flow::bounds_probe(cell.clone())).on_click(move |_, window, cx| {
                     let name = n3.clone();
                     let play: crate::flow::Play = std::rc::Rc::new(move |arc, cx| crate::playback::play_genre(cx, name.clone(), false, Some(arc)));
                     crate::flow::open_menu(menu.clone(), cell.get(), crate::flow::pool(sonix_api::FlowPoolKind::Genre, Some(n3.clone()), None), "genre", play, window, cx);
                 })
-            }));
-        let header = pid("lib.header", div().flex().flex_row().items_end().justify_between().gap(px(crate::metrics::space::MD)).flex_wrap().flex_none().child(title).child(actions));
+            });
+        let header = div().flex().flex_row().items_end().justify_between().gap(px(crate::metrics::space::MD)).flex_wrap().flex_none().child(title).child(actions);
         let body: AnyElement = if self.missing {
             txt(&th, MONO_CODE, format!("NO TRACKS TAGGED “{}”.", self.name.to_uppercase())).color(th.muted).into_any_element_wrapped()
         } else if self.grid.loaded && self.grid.pager.total == 0 {

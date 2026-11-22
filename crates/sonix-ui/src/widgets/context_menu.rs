@@ -1,9 +1,8 @@
-//! Context menu (`ContextMenu.svelte`): right-click / "..." / Menu key opens it at a
+//! Context menu: right-click / "..." / Menu key opens it at a
 //! point; it flips to stay inside the window (GPUI `anchored` with `SwitchAnchor`),
 //! supports one submenu level, full keyboard navigation (Up/Down/Home/End/Enter/Left/
 //! Right/Esc) and restores the previous focus when it closes.
 use super::{hard_shadow, icon};
-use crate::probe::pid;
 use crate::text::txt;
 use crate::tracking::{BODY_SM, MONO_CODE};
 use crate::theme::Theme;
@@ -104,11 +103,11 @@ pub struct ContextMenu {
     sub_bounds: Rc<Cell<Option<Bounds<Pixels>>>>,
 }
 
-/// `ContextMenu.svelte:.menu { min-width: 200px; max-width: 280px }` (the width is the content width in between).
+/// A menu panel is 200..280 px wide (the content width in between).
 const MIN_W: f32 = 200.0;
 const MAX_W: f32 = 280.0;
 
-/// Content width of a menu panel: `.item` padding 12 + [icon 14 + gap 8] + label + [gap 8 + chevron 12] + padding 12.
+/// Content width of a menu panel: item padding 12 + [icon 14 + gap 8] + label + [gap 8 + chevron 12] + padding 12.
 fn panel_width(window: &Window, th: &Theme, items: &[MenuItem]) -> f32 {
     let mut w = MIN_W;
     for it in items {
@@ -137,26 +136,7 @@ impl ContextMenu {
         self.open.is_some()
     }
 
-    /// Parity harness: whether the menu panel really holds keyboard focus.
-    #[cfg(feature = "parity")]
-    pub fn has_focus(&self, window: &Window) -> bool {
-        self.focus.is_focused(window)
-    }
 
-    /// Parity harness: open flag, item labels and the highlighted entry (top level and submenu).
-    #[cfg(feature = "parity")]
-    pub fn parity_state(&self) -> serde_json::Value {
-        match &self.open {
-            None => serde_json::json!({"open": false}),
-            Some(o) => serde_json::json!({
-                "open": true,
-                "items": o.items.iter().map(|i| i.label.to_string()).collect::<Vec<_>>(),
-                "active": o.active,
-                "subOpen": o.sub_open,
-                "subActive": o.sub_active,
-            }),
-        }
-    }
 
     pub fn show(&mut self, items: Vec<MenuItem>, pos: Point<Pixels>, window: &mut Window, cx: &mut Context<Self>) {
         let prev_focus = window.focused(cx);
@@ -274,12 +254,9 @@ impl ContextMenu {
             .text_size(px(12.))
             .line_height(px(16.))
             .font_family(th.body_font);
-        let mut dom = 0usize;
         for (i, it) in items.iter().enumerate() {
-            let this_dom = dom;
-            dom += 1;
             if matches!(it.kind, Kind::Separator) {
-                col = col.child(pid(format!("menu.child.{}", this_dom + usize::from(parent.is_some()) * 100), div().h(px(1.)).my(px(4.)).bg(th.border)));
+                col = col.child(div().h(px(1.)).my(px(4.)).bg(th.border));
                 continue;
             }
             let is_active = active == Some(i);
@@ -354,10 +331,9 @@ impl ContextMenu {
                 .child(div().flex_1().min_w_0().flex().child(txt(&th, BODY_SM, it.label.clone()).ellipsis()))
                 .children(is_sub.then(|| icon("chevron-right", 12., colr)))
                 .children(bounds_probe);
-            col = col.child(pid(format!("menu.child.{}", this_dom + usize::from(parent.is_some()) * 100), row));
+            col = col.child(row);
             if let Some(h) = &it.hint {
-                dom += 1;
-                col = col.child(pid(format!("menu.child.{}", this_dom + 1 + usize::from(parent.is_some()) * 100), div().px(px(12.)).pb(px(4.)).mt(px(-4.)).child(crate::typo::ts(&th, MONO_CODE).text_color(th.muted).child(h.clone()))));
+                col = col.child(div().px(px(12.)).pb(px(4.)).mt(px(-4.)).child(crate::typo::ts(&th, MONO_CODE).text_color(th.muted).child(h.clone())));
             }
         }
         col
@@ -376,22 +352,22 @@ impl Render for ContextMenu {
         let Some(o) = self.open.as_ref() else { return div().into_any_element() };
         let (items, pos, active, sub) = (o.items.clone(), o.pos, o.active, o.sub_active);
         let width = panel_width(window, &self.th, &items);
-        let panel: AnyElement = pid("menu", self
+        let panel: AnyElement = self
             .panel(&items, active, None, width, cx)
             .id("context-menu")
             .track_focus(&self.focus)
             .key_context("ContextMenu")
             .on_key_down(cx.listener(|this, ev: &KeyDownEvent, window, cx| this.on_key(ev, window, cx)))
             .on_mouse_down_out(cx.listener(|this, ev: &MouseDownEvent, window, cx| {
-                // a press inside the open submenu is not "outside" (it used to be a child of the panel)
+                // a press inside the open submenu is not "outside", even though the submenu is not a child of the main panel
                 let in_sub = this.open.as_ref().is_some_and(|o| o.sub_open) && this.sub_bounds.get().is_some_and(|b| b.contains(&ev.position));
                 if !in_sub {
                     this.close(window, cx);
                 }
             }))
-            .on_mouse_down(MouseButton::Right, cx.listener(|this, _, window, cx| this.close(window, cx))))
+            .on_mouse_down(MouseButton::Right, cx.listener(|this, _, window, cx| this.close(window, cx)))
             .into_any_element();
-        // The submenu: `ContextMenu.svelte` places it at the row's right edge - 4 px, top - 5 px.
+        // The submenu sits at the row's right edge - 4 px, top - 5 px.
         let sub_open = self.open.as_ref().is_some_and(|o| o.sub_open);
         let submenu = match active.map(|a| (a, &items[a].kind)) {
             Some((a, Kind::Submenu(v))) if sub_open => match self.row_bounds.borrow().get(a).copied().flatten() {

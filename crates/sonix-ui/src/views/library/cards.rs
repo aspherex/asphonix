@@ -1,11 +1,10 @@
-//! `AlbumCard.svelte` / `ArtistCard.svelte` (grid cards with hover play + "..." overlays) and the compact
-//! `.pl-card` tile of Home (Jump Back In, Recently Played Tracks, Playlists // Vectors).
+//! Album / artist grid cards (with hover play + "..." overlays) and the compact
+//! tile of Home (Jump Back In, Recently Played Tracks, Playlists // Vectors).
 use super::entity_link::{Kind, entity_link};
 use super::parts::art_slot;
 use super::{Ctx, menus, navigate};
 use crate::anim;
 use crate::metrics::library as m;
-use crate::probe::pid;
 use crate::router::Route;
 use crate::text::txt;
 use crate::theme::Theme;
@@ -24,7 +23,7 @@ thread_local! {
     static FOCUS: std::cell::RefCell<std::collections::HashMap<usize, gpui::FocusHandle>> = std::cell::RefCell::new(std::collections::HashMap::new());
 }
 
-/// The persistent focus handle of a card (`tabindex=0`): one per card id, bounded so scrolling a 5k-card grid
+/// The persistent focus handle of a card: one per card id, bounded so scrolling a 5k-card grid
 /// does not accumulate handles.
 pub(super) fn focus_handle<V: 'static>(cx: &mut Context<V>, key: usize) -> gpui::FocusHandle {
     FOCUS.with(|m| {
@@ -48,9 +47,8 @@ pub(super) fn key_of(prefix: &str, id: &str) -> usize {
     h.finish() as usize
 }
 
-/// Chromium's UA focus ring for keyboard focus (`:focus-visible { outline: auto 1px -webkit-focus-ring-color }`, the
-/// web app never restyles it): a 2 px rgb(16, 16, 16) ring just outside the element's border box. Add as a child of a
-/// relative element. An ancestor that clips (`VirtualGrid .cell { overflow: hidden }`) hides it, as on the web.
+/// The keyboard focus ring: a 2 px rgb(16, 16, 16) ring just outside the element's border box. Add as a child of a
+/// relative element. An ancestor that clips (the virtual grid's cells) hides it.
 pub fn focus_ring() -> gpui::Div {
     div().absolute().top(px(-2.)).left(px(-2.)).right(px(-2.)).bottom(px(-2.)).border_2().border_color(gpui::rgb(0x101010))
 }
@@ -64,7 +62,7 @@ fn track_bounds(cell: &Rc<Cell<Bounds<Pixels>>>) -> AnyElement {
     canvas(move |b, _, _| cell.set(b), |_, _, _, _| {}).absolute().top_0().left_0().size_full().into_any_element()
 }
 
-/// `openContextMenuFor(anchor)`: left-aligned, 4 px under the element.
+/// Opens a menu left-aligned, 4 px under the element.
 fn open_menu_under(ctx: &Ctx, anchor: &Rc<Cell<Bounds<Pixels>>>, items: impl FnOnce(Point<Pixels>) -> Vec<crate::widgets::context_menu::MenuItem>, window: &mut Window, cx: &mut App) {
     let b = anchor.get();
     let pos = point(b.origin.x, b.origin.y + b.size.height + px(4.));
@@ -76,16 +74,14 @@ pub fn open_menu_at(ctx: &Ctx, items: Vec<crate::widgets::context_menu::MenuItem
     ctx.menu.update(cx, |m, cx| m.show(items, pos, window, cx));
 }
 
-/// One grid card. `width` is the cell width; `height` is `Some(cell height)` inside the `VirtualGrid` (`.cell { overflow: hidden }`),
-/// `None` for the natural height (Home "Heavy Rotation", the artist page's grids). `ids` = parity id prefix.
-#[allow(clippy::too_many_arguments)]
+/// One grid card. `width` is the cell width; `height` is `Some(cell height)` inside the `VirtualGrid` (cells clip),
+/// `None` for the natural height (Home "Heavy Rotation", the artist page's grids).
 pub fn card<V: 'static>(
     ctx: &Ctx,
     th: &Theme,
     item: CardItem<'_>,
     width: f32,
     height: Option<f32>,
-    ids: Option<String>,
     window: &mut Window,
     cx: &mut Context<V>,
 ) -> AnyElement {
@@ -101,7 +97,7 @@ pub fn card<V: 'static>(
     let key = key_of("card", &id);
     let fh = focus_handle(cx, key);
     let focused = fh.contains_focused(window, cx);
-    // `.card:hover / :focus-within` show the overlays
+    // hover or focus inside the card shows the overlays
     let hovered = anim::hovered(key) || focused;
     let t = anim::transition(window, ("card-ov", key), if hovered { 1.0 } else { 0.0 }, m::CARD_TRANSITION);
     let items_for = {
@@ -114,22 +110,13 @@ pub fn card<V: 'static>(
             Err(a) => menus::artist_menu(a),
         }
     };
-    let pid_of = |suffix: &str| ids.as_ref().map(|p| format!("{p}.{suffix}")).unwrap_or_default();
-    let tag = |suffix: &str, el: AnyElement| -> AnyElement {
-        if ids.is_some() {
-            pid(pid_of(suffix), el).into_any_element()
-        } else {
-            el
-        }
-    };
-    let _ = tag;
 
     // --- art slot with the hover overlays
     let mut art = art_slot(&th, &ctx.art, &ctx.backend, cover.as_deref(), width, true, 160, if is_album { "album" } else { "artist" }, 22.0, window, cx);
     if starred {
         art = art.child(div().absolute().top(px(m::CARD_STAR_INSET)).right(px(m::CARD_STAR_INSET)).child(icon("star-filled", m::CARD_STAR_ICON, th.accent_fg)));
     }
-    // native-only (not in the web): the play overlay of the source that is loaded shows the active state (outline, pause icon, always visible)
+    // the play overlay of the source that is loaded shows the active state (outline, pause icon, always visible)
     let target = if let CardItem::Album(a) = &item { crate::app::PlayTarget::Album { id: id.clone(), tracks: a.song_count } } else { crate::app::PlayTarget::Artist(id.clone()) };
     let pst = ctx.player.read(cx).play_state(&target);
     let t_play = if pst.active() { 1.0 } else { t };
@@ -209,7 +196,7 @@ pub fn card<V: 'static>(
     let (ctx_key, items_key, card_anchor) = (ctx.clone(), items_ctx.clone(), anchor_cell());
     let (route_key, anchor_key) = (route.clone(), card_anchor.clone());
     let fh_menu = fh.clone();
-    // `draggable="true"`: `{ kind: "album" | "artist", id, name }`
+    // drag payload: album or artist with id and name
     let drag = match &item {
         CardItem::Album(a) => crate::dnd::DragPayload::Album { id: a.id.clone(), name: a.name.clone() },
         CardItem::Artist(a) => crate::dnd::DragPayload::Artist { id: a.id.clone(), name: a.name.clone() },
@@ -236,31 +223,22 @@ pub fn card<V: 'static>(
         .on_click(move |_, _, cx| navigate(cx, route.clone()))
         .on_mouse_down(MouseButton::Right, move |ev: &MouseDownEvent, window, cx| {
             cx.stop_propagation();
-            window.focus(&fh_menu); // a mouse down focuses the card (tabindex=0); the menu returns focus to it on close
+            window.focus(&fh_menu); // a mouse down focuses the card; the menu returns focus to it on close
             open_menu_at(&ctx_menu, items_ctx(ev.position), ev.position, window, cx);
         })
         .child(track_bounds(&card_anchor))
         .when(focused, |d| d.child(focus_ring()))
-        .child(match &ids {
-            Some(p) => pid(format!("{p}.art"), art).into_any_element(),
-            None => art.into_any_element(),
-        })
-        .child(match &ids {
-            Some(p) => pid(format!("{p}.meta"), meta).into_any_element(),
-            None => meta.into_any_element(),
-        });
-    let root = match ids {
-        Some(p) => pid(p, root).into_any_element(),
-        None => root.into_any_element(),
-    };
-    // `.cell { height: cellHeight; overflow: hidden }` clips the natural-height card
+        .child(art)
+        .child(meta);
+    let root = root.into_any_element();
+    // the fixed-height cell clips the natural-height card
     match height {
         Some(h) => div().w(px(width)).h(px(h)).flex_none().overflow_hidden().child(root).into_any_element(),
         None => root,
     }
 }
 
-// ------------------------------------------------------------------ Home `.pl-card`
+// ------------------------------------------------------------------ Home tiles
 /// What the 56 px art slot of a tile shows.
 pub enum TileArt {
     /// An album/track cover (or the empty-state icon when the item has none).
@@ -275,7 +253,7 @@ pub struct Tile<'a> {
     /// Optional genre tag above the title (Jump Back In).
     pub genre: Option<&'a str>,
     pub title: &'a str,
-    /// `Some((kind, id, text))`: an EntityLink; else plain `sub_text`.
+    /// `Some((kind, id, text))`: an entity link; else plain `sub_text`.
     pub link: Option<(Kind, Option<&'a str>, &'a str)>,
     pub sub_text: String,
     /// Playlist tiles: play + "..." overlays.
@@ -291,12 +269,11 @@ pub struct TileOverlays {
     pub menu: MenuUnder,
 }
 
-/// `.pl-card`: a 56 px art slot + title/sub, 8 px padding, hover border -> focus. Callers attach click handlers on the result.
+/// A Home tile: a 56 px art slot + title/sub, 8 px padding, hover border -> focus. Callers attach click handlers on the result.
 pub fn tile<V: 'static>(ctx: &Ctx, th: &Theme, t: Tile<'_>, width: f32, window: &mut Window, cx: &mut Context<V>) -> Stateful<Div> {
     let th = *th;
     let key = key_of("tile", t.id);
-    // `role="button" tabindex="0"` (`<button>` for the recent-track tiles): keyboard focusable, `:focus-within` shows
-    // the overlays, the UA ring marks it; callers bind `CardOpen` (Enter/Space) and, for playlists, `CardMenu`.
+    // keyboard focusable; focus inside shows the overlays and the focus ring marks it; callers bind `CardOpen` (Enter/Space) and, for playlists, `CardMenu`.
     let fh = focus_handle(cx, key);
     let focused = fh.contains_focused(window, cx);
     let hovered = anim::hovered(key);
@@ -310,7 +287,7 @@ pub fn tile<V: 'static>(ctx: &Ctx, th: &Theme, t: Tile<'_>, width: f32, window: 
     };
     if let Some(o) = &t.overlays {
         let play = o.play.clone();
-        // native-only: the loaded playlist's tile overlay shows the active state
+        // the loaded playlist's tile overlay shows the active state
         let pst = ctx.player.read(cx).play_state(&crate::app::PlayTarget::Playlist(t.id.to_string()));
         let ov = if pst.active() { 1.0 } else { ov };
         slot = slot.child(
@@ -403,7 +380,7 @@ pub fn tile<V: 'static>(ctx: &Ctx, th: &Theme, t: Tile<'_>, width: f32, window: 
     root
 }
 
-/// Native-only skeleton of [`card`]: the same box (art square of `width`, `CARD_GAP`, title line + sub line at their
+/// Skeleton of [`card`]: the same box (art square of `width`, `CARD_GAP`, title line + sub line at their
 /// real line heights), so a grid that is still loading has the geometry of the loaded one.
 pub fn card_skeleton(th: &Theme, width: f32) -> AnyElement {
     use crate::widgets::skeleton as sk;
@@ -418,7 +395,7 @@ pub fn card_skeleton(th: &Theme, width: f32) -> AnyElement {
         .into_any_element()
 }
 
-/// Native-only skeleton of [`tile`] (`.pl-card`): 56 px art + two text lines, 8 px padding, 1 px frame.
+/// Skeleton of [`tile`]: 56 px art + two text lines, 8 px padding, 1 px frame.
 pub fn tile_skeleton(th: &Theme, width: f32) -> AnyElement {
     use crate::widgets::skeleton as sk;
     div()

@@ -1,4 +1,4 @@
-//! `smartRules.ts`: field/operator metadata of the smart-playlist rule builder and the human-readable
+//! Field/operator metadata of the smart-playlist rule builder and the human-readable
 //! rule descriptions ("Rating ≥ 4★ AND Liked · by rating · max 200").
 use sonix_api::*;
 
@@ -92,7 +92,7 @@ pub fn sort_label(s: SmartSort) -> &'static str {
 pub const SORT_ORDER: [SmartSort; 7] =
     [SmartSort::Random, SmartSort::RecentlyAdded, SmartSort::MostPlayed, SmartSort::RecentlyPlayed, SmartSort::Title, SmartSort::Artist, SmartSort::Rating];
 
-/// JS `String(number)` for the whole numbers the editor produces.
+/// Number formatting for rule descriptions: whole numbers without a fraction, a missing value as "undefined".
 fn num_str(v: &Option<SmartValue>) -> String {
     match v {
         Some(SmartValue::Num(n)) if n.fract() == 0.0 => format!("{}", *n as i64),

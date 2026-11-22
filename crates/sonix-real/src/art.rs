@@ -1,8 +1,6 @@
 //! Cover art: real covers (`getCoverArt` at the bucket size + disk cache) and playlist mosaics.
 //!
-//! The mosaic composition (`compose`, `cover_crop`, `gutter_px`, cover-set hash) is vendored from SoniX @ 642db10
-//! `src-tauri/src/art/mosaic.rs`; `decode_limited` from `art/resize.rs`. The web app routes `/art/mosaic/{playlistId}`
-//! to the mosaic; here `art_get("mosaic/{playlistId}", size)` does the same, and a bare playlist id (a row of the
+//! Playlist mosaics are requested as `art_get("mosaic/{playlistId}", size)`; a bare playlist id (a row of the
 //! local playlist mirror) is treated the same way. Everything is read-only (`getCoverArt` only).
 use crate::{err, RealBackend};
 use image::{imageops, DynamicImage, GenericImageView, Rgb, RgbImage};
@@ -236,22 +234,22 @@ fn not_found(msg: String) -> ApiError {
     ApiError::new(ErrorCode::NotFound, msg)
 }
 
-/// The only size ever requested from the server (`art/sizes.rs` `MASTER_SIZE`): every smaller bucket is derived from
+/// The only size ever requested from the server: every smaller bucket is derived from
 /// these bytes locally, so one cover costs one network round trip no matter how many sizes the UI asks for.
 pub(crate) const MASTER_SIZE: u32 = 640;
-/// Concurrent foreground `getCoverArt` fetches (`art/mod.rs` `MAX_CONCURRENT_FETCHES`).
+/// Concurrent foreground `getCoverArt` fetches.
 const MAX_CONCURRENT_FETCHES: usize = 4;
-/// Background prefetch budget, separate so it never queues a foreground request (`prefetch.rs` `PREFETCH_CONCURRENCY`).
+/// Background prefetch budget, separate so it never queues a foreground request.
 const PREFETCH_CONCURRENCY: usize = 2;
 /// Decode + resize + encode at once (bounds the transient working set: a 640 master is 1.6 MB of RGBA).
 const MAX_CONCURRENT_DECODES: usize = 2;
 const PREFETCH_START_DELAY: std::time::Duration = std::time::Duration::from_secs(5);
-/// Poll interval while the prefetcher is paused (`prefetch.rs` `PAUSE_POLL_INTERVAL`).
+/// Poll interval while the prefetcher is paused.
 const PREFETCH_PAUSE_POLL: std::time::Duration = if cfg!(test) { std::time::Duration::from_millis(20) } else { std::time::Duration::from_millis(500) };
 /// This many network failures in a row end a prefetch pass (server unreachable): it is retried after the next sync
 /// instead of timing out once per remaining id.
 const PREFETCH_MAX_NET_ERRORS: usize = 5;
-/// JPEG quality of a derived bucket (`art/resize.rs` `DERIVED_JPEG_QUALITY`).
+/// JPEG quality of a derived bucket.
 const DERIVED_JPEG_QUALITY: u8 = 85;
 
 /// Counting semaphore for the blocking `art_get` callers.
@@ -299,7 +297,7 @@ struct Slot<V> {
     cv: Condvar,
 }
 
-/// Collapses concurrent identical work into one execution (`art/singleflight.rs`): the first caller (leader) runs the
+/// Collapses concurrent identical work into one execution: the first caller (leader) runs the
 /// closure, everyone arriving while it runs waits for and clones its result. Keyed by cache file path.
 struct SingleFlight<V> {
     inflight: Mutex<HashMap<PathBuf, Arc<Slot<V>>>>,
@@ -408,7 +406,7 @@ impl Default for ArtState {
     }
 }
 
-/// Downscale `img` to fit `target x target` keeping the aspect ratio; never upscales (`art/resize.rs`).
+/// Downscale `img` to fit `target x target` keeping the aspect ratio; never upscales.
 fn downscale(img: &DynamicImage, target: u32) -> DynamicImage {
     let (w, h) = img.dimensions();
     if w <= target && h <= target {
@@ -511,7 +509,7 @@ impl RealBackend {
     }
 
     /// Cover at `size`: bucket file on disk, else derived from the (once fetched) 640 master, else - when the master
-    /// is not decodable (avif, junk) - fetched at exactly `size` like the reference's odd-format fallback. An id whose
+    /// is not decodable (avif, junk) - fetched at exactly `size` from the server. An id whose
     /// master cannot be decoded is remembered, so it is not decoded (or re-requested) again.
     fn cover_image(&self, cover_art: &str, size: u32) -> ApiResult<Arc<DynamicImage>> {
         let path = cache_path(&self.art_dir(), cover_art, size);
@@ -557,7 +555,7 @@ impl RealBackend {
 
     /// Mosaic of a playlist's first distinct covers, cached (JPEG) under a key that includes a hash of the source
     /// cover ids (so it invalidates when the leading covers change). A partial mosaic (some cover failed) is served
-    /// but not cached. Tiles load one after another like the reference (`mosaic.rs`), which keeps the working set small.
+    /// but not cached. Tiles load one after another, which keeps the working set small.
     fn mosaic_image(&self, playlist_id: &str, size: u32) -> ApiResult<DynamicImage> {
         let covers = library::get_playlist_distinct_covers(&self.0.db, playlist_id, MOSAIC_TILES).map_err(err)?;
         if covers.is_empty() {
@@ -602,7 +600,7 @@ impl RealBackend {
         Ok(ArtPixels { width: rgba.width(), height: rgba.height(), rgba: rgba.into_raw() })
     }
 
-    /// Reference `Prefetcher`: after a sync, fetch the missing 640 masters of every album then artist cover in the
+    /// Cover prefetch: after a sync, fetch the missing 640 masters of every album then artist cover in the
     /// background (2 at a time), so grids open from disk. Idempotent: ids that already hold a master are skipped.
     pub(crate) fn schedule_art_prefetch(&self, epoch: u64) {
         let me = self.clone();
@@ -613,7 +611,7 @@ impl RealBackend {
         });
     }
 
-    /// Reference `wait_until_clear`: blocks (polling) while a foreground request runs, a track is buffering, or the
+    /// Blocks (polling) while a foreground request runs, a track is buffering, or the
     /// window is minimized; `false` as soon as the session (epoch) has moved on.
     fn prefetch_wait_until_clear(&self, epoch: u64) -> bool {
         loop {
@@ -747,7 +745,7 @@ mod cache_tests {
 
     #[test]
     fn eviction_drops_least_recently_used_first_and_ignores_temp_files() {
-        let dir = PathBuf::from("<build-dir>/tmp").join(format!("art-evict-{}", std::process::id()));
+        let dir = std::env::var_os("SONIX_TEST_TMP").map(std::path::PathBuf::from).unwrap_or_else(std::env::temp_dir).join(format!("art-evict-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
         let now = std::time::SystemTime::now();

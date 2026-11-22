@@ -72,7 +72,7 @@ fn fresh_rng() -> SmallRng {
 
 /// Drops repeated ids, keeping each one's first occurrence. A shuffled
 /// round is "every *track* once": real playlists can list the same track
-/// many times (the dev server's 5,178-entry "Liked Songs" holds only 1,571
+/// many times (one real 5,178-entry "Liked Songs" list holds only 1,571
 /// distinct tracks, some 8 times), and shuffling those duplicates would
 /// replay a track several times per round.
 fn dedup_keep_first(ids: Vec<String>) -> Vec<String> {
@@ -817,7 +817,7 @@ impl Queue {
     }
 
     /// Removes the entry at `index` (a position in *play order*, matching
-    /// `RemoveFromQueueRequest.index` as documented in `docs/IPC.md`). An
+    /// `RemoveFromQueueRequest.index`). An
     /// auto (`Source`-origin) entry removed this way is never re-drawn —
     /// it's already out of `source.remaining`, and removal doesn't put it
     /// back.

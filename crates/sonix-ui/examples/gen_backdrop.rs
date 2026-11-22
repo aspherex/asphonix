@@ -1,9 +1,9 @@
-//! Pre-renders the `--bg-canvas` gradients of tokens.css (GPUI cannot draw radial
+//! Pre-renders the app's canvas background gradients (GPUI cannot draw radial
 //! gradients) into two small dithered PNGs under `assets/bg/`. The image is stretched
 //! over the shell once; 480x270 keeps the decoded texture at ~0.5 MB while the soft
 //! washes stay smooth. Run: `cargo run -p sonix-ui --example gen_backdrop`.
-//! Premultiplied compositing like CSS: layers are listed top-first in the CSS, so they
-//! are painted in reverse over the base.
+//! Premultiplied compositing: layers are listed top-first, so they are painted in
+//! reverse over the base.
 use image::{Rgb, RgbImage};
 
 const W: u32 = 480;
@@ -61,7 +61,7 @@ fn main() {
         ],
         "assets/bg/dark.png",
     );
-    // light: pearl. base = linear-gradient(135deg, #f7f4f8, #f2f5f9)
+    // light: pearl. base = 135° diagonal linear gradient #f7f4f8 -> #f2f5f9
     let (a, b) = (rgb(0xf7, 0xf4, 0xf8), rgb(0xf2, 0xf5, 0xf9));
     let base = move |u: f32, v: f32| {
         let (w, h) = (W as f32, H as f32);

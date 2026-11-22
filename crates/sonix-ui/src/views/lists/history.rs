@@ -1,11 +1,10 @@
-//! `History.svelte`: locally recorded plays, grouped by local day (the backend interleaves day-header
+//! The history page: locally recorded plays, grouped by local day (the backend interleaves day-header
 //! rows into one flat paged list), single selection, no column header.
 use super::menus::{self, TrackMenu};
 use super::table::{Arrows, Fetch, RowItem, Table, TableCfg, TableEvent};
 use super::ListsEvent;
 use crate::app::{self, PlayerModel};
 use crate::metrics::lists as lm;
-use crate::probe::pid;
 use crate::text::txt;
 use crate::tracking::{BODY_SM, HEADLINE_MD, MONO_CODE};
 use crate::widgets::button::{Variant, button};
@@ -63,7 +62,7 @@ impl HistoryView {
         cx.notify();
     }
 
-    /// A like changed: re-read the resident pages in place (the scroll position stays, like `pager.reset()` on the web).
+    /// A like changed: re-read the resident pages in place (the scroll position stays).
     pub fn refresh(&mut self, cx: &mut Context<Self>) {
         self.table.update(cx, |t, cx| t.refresh_visible(cx));
     }
@@ -72,10 +71,6 @@ impl HistoryView {
         self.table.update(cx, |t, _| t.release());
     }
 
-    #[cfg(feature = "parity")]
-    pub(crate) fn parity_state(&self, window: &Window, cx: &gpui::App) -> serde_json::Value {
-        self.table.read(cx).parity_state(window)
-    }
 
     fn play(&self, id: String, cx: &mut Context<Self>) {
         app::call(cx, move |b| {
@@ -172,19 +167,16 @@ impl Render for HistoryView {
             .justify_between()
             .gap(px(lm::HISTORY_GAP))
             .flex_none()
-            .child(pid("page.title", txt(&th, HEADLINE_MD, "History").color(th.text)))
+            .child(txt(&th, HEADLINE_MD, "History").color(th.text))
             .child(
                 div()
                     .flex()
                     .flex_row()
                     .items_center()
                     .gap(px(lm::HISTORY_GAP))
-                    .child(pid("page.count", txt(&th, MONO_CODE, "RECORDED LOCALLY · LAST 10,000 PLAYS").color(th.muted)))
-                    .child(pid(
-                        "page.btn.0",
-                        button("clear-history", th, Variant::Secondary, "Clear history", Some("trash"), total == 0 || self.clearing, window).on_click(cx.listener(|this, _, _, cx| this.clear(cx))),
-                    )),
+                    .child(txt(&th, MONO_CODE, "RECORDED LOCALLY · LAST 10,000 PLAYS").color(th.muted))
+                    .child(button("clear-history", th, Variant::Secondary, "Clear history", Some("trash"), total == 0 || self.clearing, window).on_click(cx.listener(|this, _, _, cx| this.clear(cx)))),
             );
-        pid("page", div().size_full().flex().flex_col().gap(px(lm::HISTORY_GAP)).p(px(lm::PAGE_PAD)).child(header).child(pid("table.panel", self.table.clone())))
+        div().size_full().flex().flex_col().gap(px(lm::HISTORY_GAP)).p(px(lm::PAGE_PAD)).child(header).child(self.table.clone())
     }
 }

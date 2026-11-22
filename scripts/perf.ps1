@@ -1,11 +1,12 @@
-# One full measured run of SONIX.native (release build): time to visible, private WS idle /
-# after a full 54k scroll / Now Playing 60 s / minimized 35 s, CPU in each phase, restore latency,
+# One full measured run of SONIX (release build): time to visible, private WS idle /
+# after a full scroll of the Tracks list / Now Playing 40 s / minimized 35 s, CPU in each phase, restore latency,
 # frame pacing. The app drives its own timeline (SONIX_SCRIPT=1) and logs `phase ...` and
 # `frames ...` lines to SONIX_LOG; this script samples the process tree around them.
 # Processes are only ever stopped by the exact PID this script started.
-# Usage: powershell -File scripts\perf.ps1 [-Runs 3] [-OutDir perf-out]
+# Needs a signed-in profile with a library (the script plays tracks from it).
+# Usage: powershell -File scriptsperf.ps1 [-Runs 3] [-OutDir perf-out]
 param(
-  [string]$Exe = "$PSScriptRoot\..\target\release\sonix-native.exe",
+  [string]$Exe = "$PSScriptRoot\..\target\release\sonix.exe",
   [int]$Runs = 3,
   [string]$OutDir = "$PSScriptRoot\..\perf-out"
 )
@@ -47,12 +48,12 @@ function One([int]$n) {
     [void](WaitPhase "np_start")
     Start-Sleep -Milliseconds 12000
     $c0 = CpuSec; $t0 = [Diagnostics.Stopwatch]::StartNew(); $npmax = 0
-    while (-not (Has "phase np_60s")) {
-      if ($t0.Elapsed.TotalSeconds -gt 30 -and -not $res.Contains('np_cpu_pct_of_one_core')) { $res.np_cpu_pct_of_one_core = [math]::Round(((CpuSec) - $c0) / $t0.Elapsed.TotalSeconds * 100, 2) }
+    while (-not (Has "phase np_end")) {
       $x = (Snap).pws; if ($x -gt $npmax) { $npmax = $x }
       Start-Sleep -Milliseconds 200
     }
-    $x = Snap; $res.np_60s_pws_mb = MB $x.pws; $res.np_peak_pws_mb = MB $npmax
+    $res.np_cpu_pct_of_one_core = [math]::Round(((CpuSec) - $c0) / $t0.Elapsed.TotalSeconds * 100, 2)
+    $x = Snap; $res.np_end_pws_mb = MB $x.pws; $res.np_peak_pws_mb = MB $npmax
     [void](WaitPhase "done")
     # minimize 35 s
     [void][SonixPerf]::ShowWindow($hwnd, 6)
@@ -77,6 +78,6 @@ $all = @()
 for ($i = 1; $i -le $Runs; $i++) { $r = One $i; $all += $r; ($r | ConvertTo-Json -Depth 3) | Set-Content "$OutDir\run-$i.json"; $r | Format-List | Out-String | Write-Host }
 function Med($f) { $v = $all | ForEach-Object { $_.$f } | Where-Object { $_ -ne $null } | Sort-Object; if ($v.Count) { $v[[int]($v.Count / 2)] } }
 $sum = [ordered]@{}
-foreach ($f in 'visibleMs','idle_pws_mb','idle_cpu_pct_of_one_core','scroll_peak_pws_mb','scroll_cpu_pct_of_one_core','after_scroll_pws_mb','np_60s_pws_mb','np_peak_pws_mb','np_cpu_pct_of_one_core','min_5s_pws_mb','min_cpu_pct_of_one_core','min_35s_pws_mb','restore_to_first_render_ms','after_restore_pws_mb') { $sum[$f] = Med $f }
+foreach ($f in 'visibleMs','idle_pws_mb','idle_cpu_pct_of_one_core','scroll_peak_pws_mb','scroll_cpu_pct_of_one_core','after_scroll_pws_mb','np_end_pws_mb','np_peak_pws_mb','np_cpu_pct_of_one_core','min_5s_pws_mb','min_cpu_pct_of_one_core','min_35s_pws_mb','restore_to_first_render_ms','after_restore_pws_mb') { $sum[$f] = Med $f }
 $sum.exe_mb = [math]::Round((Get-Item $Exe).Length / 1MB, 2)
 "MEDIANS over $Runs runs:"; $sum | ConvertTo-Json | Tee-Object "$OutDir\summary.json"

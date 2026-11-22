@@ -1,7 +1,7 @@
-//! `VirtualGrid.svelte`: a windowed grid of square-art cards. Only the rows on screen exist; every row is one uniform
-//! list item of `cellHeight + gap` px. Columns = as many `minCellWidth` cells (+ gap) as fit the viewport width
-//! (`clientWidth`, i.e. without the scrollbar gutter); `cellHeight = round(cellWidth + textHeight)`.
-//! The scroll offset is remembered per key for the session (`savedScroll`).
+//! A windowed grid of square-art cards. Only the rows on screen exist; every row is one uniform
+//! list item of `cell_h + gap` px. Columns = as many `min_cell` cells (+ gap) as fit the viewport width
+//! (without the scrollbar gutter); `cell_h = round(cell_w + text_h)`.
+//! The scroll offset is remembered per key for the session.
 use crate::metrics::library as m;
 use crate::pager::{PAGE, Pager};
 use crate::theme::Theme;
@@ -30,7 +30,7 @@ impl Geo {
     }
 }
 
-/// `columns`, `cellWidth`, `cellHeight` of `VirtualGrid` for a viewport of `vw` CSS px.
+/// Column count, cell width and cell height of the grid for a viewport of `vw` px.
 pub fn geometry(vw: f32, min_cell: f32, text_h: f32, gap: f32) -> Geo {
     let cols = (((vw + gap) / (min_cell + gap)).floor() as usize).max(1);
     let cell_w = ((vw - gap * (cols as f32 - 1.0)) / cols as f32).max(1.0);
@@ -42,13 +42,13 @@ pub struct GridState<T> {
     pub list: UniformListScrollHandle,
     pub sb: ScrollbarHandle,
     pub width: Rc<Cell<f32>>,
-    /// `scrollKey` of the Svelte grid.
+    /// Key under which the scroll offset is remembered.
     pub key: String,
     restored: bool,
     /// Rows currently rendered and the column count of the last frame (to re-fetch the visible pages in place).
     pub vis: Range<usize>,
     pub cols: usize,
-    /// The first page arrived (`pager.loaded` in the Svelte pager), or its query failed (ends the loading skeleton).
+    /// The first page arrived, or its query failed (ends the loading skeleton).
     pub loaded: bool,
 }
 
@@ -63,7 +63,7 @@ impl<T> GridState<T> {
         self.list.0.borrow().base_handle.set_offset(point(px(0.), px(0.)));
         self.pager.reset()
     }
-    /// Scroll offset of the grid viewport in CSS px.
+    /// Scroll offset of the grid viewport in px.
     pub fn scroll_top(&self) -> f32 {
         -f32::from(self.list.0.borrow().base_handle.offset().y)
     }
@@ -76,8 +76,8 @@ impl<T> GridState<T> {
 
 pub trait GridHost<T: Clone + 'static>: Sized + 'static {
     fn grid(&mut self) -> &mut GridState<T>;
-    /// One cell (`item == None`: the page is still loading, draw the `.loading` block).
-    fn cell(&mut self, ix: usize, item: Option<T>, geo: Geo, window: &mut Window, cx: &mut Context<Self>) -> AnyElement;
+    /// One cell (`item == None`: the page is still loading, draw the loading block).
+    fn cell(&mut self, item: Option<T>, geo: Geo, window: &mut Window, cx: &mut Context<Self>) -> AnyElement;
     /// Start fetching page `page` (the host checks `pager.want`).
     fn request(&mut self, page: usize, cx: &mut Context<Self>);
 }
@@ -88,7 +88,7 @@ pub fn list_overflows(list: &UniformListScrollHandle) -> Option<bool> {
     Some(f32::from(item.contents.height) > f32::from(item.item.height) + 0.5)
 }
 
-/// The grid inside its `.grid-wrap` (flex: 1; min-height: 0).
+/// The grid inside its wrapper (fills the remaining height).
 pub fn grid_element<T: Clone + 'static, V: GridHost<T>>(this: &mut V, th: Theme, window: &mut Window, cx: &mut Context<V>) -> AnyElement {
     let g = this.grid();
     let total = g.pager.total;
@@ -101,7 +101,7 @@ pub fn grid_element<T: Clone + 'static, V: GridHost<T>>(this: &mut V, th: Theme,
         f32::from(window.viewport_size().width) - crate::views::shell::Shell::sidebar_width(f32::from(window.viewport_size().width)) - 2.0 * m::PAGE_PAD - scrollbar::WIDTH
     };
     let geo = geometry(vw, m::GRID_MIN_CELL, m::GRID_TEXT_H, m::GRID_GAP);
-    // native-only: before the first answer, placeholder cards of the loaded cell size fill the viewport. Keyed on
+    // before the first answer, placeholder cards of the loaded cell size fill the viewport. Keyed on
     // `loaded` (set by every host on any current answer, failures included), not on page 0 being resident: a failed
     // first query never inserts page 0 and must not leave skeletons up forever.
     if total == 0 && !g.loaded {
@@ -140,7 +140,7 @@ pub fn grid_element<T: Clone + 'static, V: GridHost<T>>(this: &mut V, th: Theme,
                     if item.is_none() {
                         this.request(ix / PAGE, cx);
                     }
-                    row = row.child(this.cell(ix, item, geo, window, cx));
+                    row = row.child(this.cell(item, geo, window, cx));
                 }
                 out.push(row);
             }
@@ -164,7 +164,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn columns_and_cell_height_follow_the_svelte_grid() {
+    fn columns_and_cell_height_follow_the_viewport() {
         // Albums at 1440 x 900: stage 840 - 32 padding - 10 scrollbar = 798 wide
         let g = geometry(798.0, 140.0, 40.0, 16.0);
         assert_eq!(g.cols, 5);

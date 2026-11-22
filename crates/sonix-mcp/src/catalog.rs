@@ -1,6 +1,6 @@
 //! The static MCP tool table. `tools/list` is answered from here even when
 //! SONIX is not running (clients list tools at startup). The app side
-//! (`src-tauri/src/mcp_bridge`) validates every argument itself and has a test
+//! (`sonix-core/src/mcp_bridge`) validates every argument itself and has a test
 //! that every name below has a handler, so the two cannot drift.
 
 use serde_json::{json, Value};

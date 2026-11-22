@@ -1,8 +1,0 @@
-[package]
-name = "sonix-mock"
-version.workspace = true
-edition.workspace = true
-publish.workspace = true
-
-[dependencies]
-sonix-api = { path = "../sonix-api" }

@@ -1,8 +1,8 @@
-//! Track-change preview card (`overlay/Overlay.svelte` + `overlay.rs`): a second, tiny, always-on-top window shown without
+//! Track-change preview card: a second, tiny, always-on-top window shown without
 //! taking the focus, 4.5 s, then faded out and **destroyed** (nothing of it stays resident after it closes).
 //!
-//! Timings are the web's: the page paints first (cover preloaded, capped at 400 ms), then `opacity/transform .2s ease-out`
-//! (`translateY(8px)` -> 0); `SHOW_FOR` 4500 ms; the fade-out is the same transition in reverse (`FADE` 220 ms) and the
+//! Timings: the page paints first (cover preloaded, capped at 400 ms), then a 200 ms ease-out fade/slide in
+//! (8 px up to 0); `SHOW_FOR` 4500 ms; the fade-out is the same transition in reverse (`FADE` 220 ms) and the
 //! window is destroyed after it. A generation counter keeps a stale timer from closing a card that got a newer track.
 use crate::anim::cubic_bezier;
 use crate::app;
@@ -34,7 +34,7 @@ pub enum Corner {
 }
 
 impl Corner {
-    /// `OverlayCorner::from_u8` (the persisted setting).
+    /// From the persisted setting (0..3).
     pub fn from_u8(v: u8) -> Self {
         match v {
             1 => Corner::TopRight,
@@ -44,7 +44,7 @@ impl Corner {
         }
     }
 
-    /// Top-left of a `w`x`h` card `m` px inside the work area (`overlay.rs OverlayCorner::place`, physical px).
+    /// Top-left of a `w`x`h` card `m` px inside the work area (physical px).
     pub fn place(self, (ax, ay, aw, ah): (i32, i32, i32, i32), w: i32, h: i32, m: i32) -> (i32, i32) {
         let (left, right, top, bottom) = (ax + m, ax + aw - w - m, ay + m, ay + ah - h - m);
         match self {
@@ -56,7 +56,7 @@ impl Corner {
     }
 }
 
-/// `overlay.rs should_show`: only on an actual track change into a track that starts playing, never while the app is focused.
+/// Only on an actual track change into a track that starts playing, never while the app is focused.
 pub fn should_show(prev_track_id: Option<&str>, st: &sonix_api::PlayerState, enabled: bool, main_focused: bool) -> bool {
     let Some(t) = st.track.as_ref() else { return false };
     enabled && !main_focused && prev_track_id != Some(t.id.as_str()) && matches!(st.status, sonix_api::PlaybackStatus::Loading | sonix_api::PlaybackStatus::Playing)
@@ -112,7 +112,7 @@ impl Render for CardView {
         let u = (((now - self.since) / TRANSITION) as f32).clamp(0.0, 1.0);
         let e = ease_out(u);
         let k = if self.shown { e } else { 1.0 - e };
-        if u < 1.0 && !crate::clock::frozen() {
+        if u < 1.0 {
             window.request_animation_frame();
         }
         let hover = crate::anim::transition(window, ("card-hover", 0), if crate::anim::hovered(0xCA2D) { 1.0 } else { 0.0 }, 0.12);
@@ -147,7 +147,7 @@ impl Render for CardView {
                         crate::anim::set_hovered(0xCA2D, *h);
                         window.refresh();
                     })
-                    // the 4 px left rule is always the accent (`border-left: 4px solid var(--color-accent-fg)`)
+                    // the 4 px left rule is always accent-fg
                     .child(div().absolute().left(px(-4.)).top(px(-1.)).w(px(4.)).h(px(HEIGHT)).bg(th.accent_fg))
                     .child(div().size(px(78.)).flex_none().bg(th.high).overflow_hidden().child(cover))
                     .child(

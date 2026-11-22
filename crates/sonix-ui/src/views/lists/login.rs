@@ -1,9 +1,8 @@
-//! `Login.svelte`: the server connect screen (shown without top bar, sidebar and dock).
+//! The server connect screen (shown without top bar, sidebar and dock).
 use super::ui::{field, scroll_page, wrap_text};
 use super::ListsEvent;
 use crate::app;
 use crate::metrics::space;
-use crate::probe::pid;
 use crate::router::Route;
 use crate::text::txt;
 use crate::theme::{MONO, Theme};
@@ -65,10 +64,6 @@ impl LoginView {
         this
     }
 
-    #[cfg(feature = "parity")]
-    pub(crate) fn parity_state(&self) -> serde_json::Value {
-        serde_json::json!({ "loginPhase": match self.phase { Phase::Idle => "idle", Phase::Connecting => "connecting", Phase::Error => "error", Phase::Connected => "connected" } })
-    }
 
     fn connect(&mut self, cx: &mut Context<Self>) {
         if self.phase == Phase::Connecting || self.url.read(cx).content.is_empty() {
@@ -161,9 +156,9 @@ impl Render for LoginView {
                 .flex_col()
                 .gap(px(space::LG))
                 .p(px(space::LG))
-                .child(pid("login.group.0", Self::group(&th, "// Server URL", url_f)))
-                .child(pid("login.group.1", Self::group(&th, "// Username", user_f)))
-                .child(pid("login.group.2", Self::group(&th, "// Password", pw_row)));
+                .child(Self::group(&th, "// Server URL", url_f))
+                .child(Self::group(&th, "// Username", user_f))
+                .child(Self::group(&th, "// Password", pw_row));
             if self.phase == Phase::Error {
                 let msg = self.error.clone().unwrap_or_default();
                 let lines = wrap_text(&th, window, &msg, BODY_SM, card_w - 2.0 * space::LG - 2.0 - 2.0 * space::MD);
@@ -218,7 +213,7 @@ impl Render for LoginView {
                 .child(icon("sync", 16., th.accent_text))
                 .child(txt(&th, HEADLINE_SM, label).color(th.accent_text))
                 .map(|d| if disabled { d.opacity(0.5).cursor(CursorStyle::OperationNotAllowed) } else { d.tab_index(0).focus(move |s| if crate::widgets::key_nav() { s.bg(th.accent_hover) } else { s }).cursor(CursorStyle::PointingHand).hover(move |s| s.bg(th.accent_hover)).on_click(cx.listener(|t, _, _, cx| t.connect(cx))) });
-            form = form.child(pid("login.btn", btn));
+            form = form.child(btn);
             if self.signed_in && self.phase != Phase::Connected {
                 form = form.child(
                     div().flex().flex_row().justify_center().child(
@@ -245,7 +240,7 @@ impl Render for LoginView {
                 .mb(px(space::SM))
                 .child(div().size(px(6.)).flex_none().bg(th.accent))
                 .child(txt(&th, MONO_CODE, "SYS_PROTOCOL // V1.16.1 SPEC").color(th.muted));
-            let card_header = pid("login.card.head", div()
+            let card_header = div()
                 .flex()
                 .flex_row()
                 .items_center()
@@ -254,22 +249,22 @@ impl Render for LoginView {
                 .bg(th.mid)
                 .border_b_1()
                 .border_color(th.border)
-                .child(pid("login.brand.mark", div().size(px(40.)).flex_none().flex().items_center().justify_center().bg(th.accent).child(icon("equalizer", 20., th.accent_text))))
+                .child(div().size(px(40.)).flex_none().flex().items_center().justify_center().bg(th.accent).child(icon("equalizer", 20., th.accent_text)))
                 .child(
                     div()
                         .flex()
                         .flex_col()
                         .child(
-                            pid("login.brand.row", div()
+                            div()
                                 .flex()
                                 .flex_row()
                                 .items_center()
                                 .gap(px(space::SM))
-                                .child(pid("login.brand.name", div().flex().child(txt(&th, HEADLINE_SM, "SONIX").color(th.text))))
-                                .child(pid("login.brand.tag", div().px(px(space::XS)).py(px(1.)).bg(th.high).child(txt(&th, LABEL_CAPS, "Engine").color(th.muted))))),
+                                .child(div().flex().child(txt(&th, HEADLINE_SM, "SONIX").color(th.text)))
+                                .child(div().px(px(space::XS)).py(px(1.)).bg(th.high).child(txt(&th, LABEL_CAPS, "Engine").color(th.muted))),
                         )
-                        .child(div().h(px(18.)).child(pid("login.brand.sub", div().mt(px(2.)).h(px(15.)).flex().items_center().child(txt(&th, BODY_SM, "High-performance audio workstation").color(th.muted))))),
-                ));
+                        .child(div().h(px(18.)).child(div().mt(px(2.)).h(px(15.)).flex().items_center().child(txt(&th, BODY_SM, "High-performance audio workstation").color(th.muted)))),
+                );
             let card = div().w(px(card_w)).flex().flex_col().bg(th.low).border_1().border_color(th.border).shadow(hard_shadow(&th, 4.0)).child(card_header).child(form);
             let status = match self.phase {
                 Phase::Idle => "IDLE",
@@ -294,9 +289,9 @@ impl Render for LoginView {
                 .items_center()
                 .px(px(space::LG))
                 .py(px(space::XL))
-                .child(pid("login.header", header_bar))
-                .child(pid("login.card", card))
-                .child(pid("login.footer", footer))
+                .child(header_bar)
+                .child(card)
+                .child(footer)
                 .into_any_element()
         })
     }

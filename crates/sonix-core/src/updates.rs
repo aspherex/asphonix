@@ -1,22 +1,21 @@
 //! In-app updates: "notify, the user clicks" - nothing here ever installs on its own.
 //!
-//! Port of the reference `updates.rs` (SoniX @ 642db10), which used `tauri-plugin-updater`. The native
-//! app has no Tauri, so the plugin's pieces are re-implemented here with the same security model:
+//! The mechanism is a minisign-signed update feed:
 //!
-//! - The feed is a static Tauri-style `latest.json`
+//! - The feed is a static `latest.json`
 //!   (`{"version", "notes", "pub_date", "platforms": {"windows-x86_64": {"url", "signature"}}}`) at an
 //!   HTTPS URL. Plain HTTP is refused (loopback HTTP only in this module's own tests).
 //! - The installer is verified against the minisign public key (`signature` = base64 of the `.sig` file,
-//!   public key = base64 of the `.pub` file, exactly what `tauri signer` writes) BEFORE anything is
+//!   public key = base64 of the minisign `.pub` file) BEFORE anything is
 //!   executed, and the version in the signed trusted comment (`version:X`) must equal the version the
-//!   feed announced (`requireSignedVersion`: a tampered feed can't pair a new version with an old,
+//!   feed announced (so a tampered feed can't pair a new version with an old,
 //!   validly signed installer).
 //! - Only a strictly newer version is ever offered ([`is_newer`]).
 //! - The UI reaches the updater only through `updates_check` / `updates_install`, which take no
 //!   URL/path arguments; the endpoint and key are compile-time constants below.
 //!
-//! DISABLED BY DEFAULT: [`UPDATE_ENDPOINT`] is empty because the native app has no release channel
-//! yet. With an empty endpoint or key, `check` answers "no update" without touching the network and
+//! DISABLED BY DEFAULT: [`UPDATE_ENDPOINT`] is empty until a release channel
+//! exists. With an empty endpoint or key, `check` answers "no update" without touching the network and
 //! `install` refuses. To enable: see `docs/UPDATES.md`.
 
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -31,11 +30,11 @@ use crate::ipc::{IpcError, IpcErrorCode};
 
 /// Feed URL (HTTPS `latest.json`). EMPTY = updates disabled, no request is ever made.
 pub const UPDATE_ENDPOINT: &str = "";
-/// Minisign public key, base64 of the `.pub` file (the content `tauri signer generate` prints).
+/// Minisign public key, base64 of the whole minisign `.pub` file.
 /// Empty = updates disabled.
 pub const UPDATE_PUBKEY: &str = "";
 
-/// First background check after startup, then every `CHECK_INTERVAL` (reference values).
+/// First background check after startup, then every `CHECK_INTERVAL`.
 pub const FIRST_CHECK_DELAY: Duration = Duration::from_secs(10);
 pub const CHECK_INTERVAL: Duration = Duration::from_secs(6 * 60 * 60);
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(20);
@@ -116,12 +115,12 @@ fn b64_to_string(s: &str) -> Result<String, String> {
     String::from_utf8(bytes).map_err(|_| "not UTF-8".to_string())
 }
 
-/// The `version:` field of a Tauri-style trusted comment (`timestamp:..\tfile:..\tversion:1.2.3`).
+/// The `version:` field of the signature's trusted comment (`timestamp:..\tfile:..\tversion:1.2.3`).
 fn signed_version(trusted_comment: &str) -> Option<&str> {
     trusted_comment.split('\t').find_map(|f| f.strip_prefix("version:"))
 }
 
-/// `requireSignedVersion = true`: the signature must carry a version and it must equal the announced one
+/// The signature must carry a version and it must equal the announced one
 /// (semver-equal, so `v1.2.3` == `1.2.3`).
 fn verify_signed_version(trusted_comment: &str, announced: &str) -> Result<(), String> {
     let Some(signed) = signed_version(trusted_comment) else {
@@ -154,8 +153,7 @@ pub trait Installer: Send + Sync + 'static {
     fn install(&self, bytes: &[u8], version: &str) -> Result<(), String>;
 }
 
-/// Windows NSIS setup (`/P /UPDATE /R`: passive UI, update mode, relaunch afterwards - what Tauri's
-/// `installMode: passive` runs). Writes the exe to a fresh temp dir, starts it with `ShellExecuteW`
+/// Windows NSIS setup (`/P /UPDATE /R`: passive UI, update mode, relaunch afterwards). Writes the exe to a fresh temp dir, starts it with `ShellExecuteW`
 /// (so a UAC prompt works) and then exits this process so the installer can replace the files.
 pub struct NsisInstaller;
 
@@ -165,7 +163,7 @@ impl Installer for NsisInstaller {
         use windows::core::{w, HSTRING};
         use windows::Win32::UI::Shell::ShellExecuteW;
         use windows::Win32::UI::WindowsAndMessaging::SW_SHOW;
-        let dir = tempfile::Builder::new().prefix(&format!("sonix-native-{version}-updater-")).tempdir().map_err(|e| e.to_string())?.keep();
+        let dir = tempfile::Builder::new().prefix(&format!("sonix-{version}-updater-")).tempdir().map_err(|e| e.to_string())?.keep();
         let path = dir.join("sonix-setup.exe");
         std::fs::write(&path, bytes).map_err(|e| e.to_string())?;
         let r = unsafe { ShellExecuteW(None, w!("open"), &HSTRING::from(path.as_os_str()), w!("/P /UPDATE /R"), None, SW_SHOW) };
@@ -506,7 +504,7 @@ Connection: close
         let pubkey_b64 = base64::engine::general_purpose::STANDARD.encode(kp.pk.to_box().unwrap().to_string());
         Keys { pubkey_b64, sk: kp.sk, pk: kp.pk }
     }
-    /// Signs like `tauri signer sign`: trusted comment `timestamp:..\tfile:..\tversion:X`, base64 of the .sig text.
+    /// Signs a release: trusted comment `timestamp:..\tfile:..\tversion:X`, base64 of the .sig text.
     fn sign(k: &Keys, data: &[u8], version: &str) -> String {
         let tc = format!("timestamp:1700000000\tfile:setup.exe\tversion:{version}");
         let sb = minisign::sign(Some(&k.pk), &k.sk, std::io::Cursor::new(data), Some(&tc), None).unwrap();

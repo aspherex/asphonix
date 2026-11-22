@@ -1,4 +1,4 @@
-//! Library sync + all read-only browse/search/history/liked/playlist calls over the vendored SQLite mirror.
+//! Library sync + all read-only browse/search/history/liked/playlist calls over the local SQLite mirror.
 //! Wire types of `sonix-core::ipc` and `sonix-api` are the same JSON shape; values cross via serde.
 use crate::{err, RealBackend};
 use serde::{de::DeserializeOwned, Serialize};

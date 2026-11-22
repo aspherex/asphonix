@@ -30,11 +30,11 @@ pub fn tip(el: Stateful<Div>, text: impl Into<SharedString>, th: Theme) -> State
     el.tooltip(move |_, cx| -> AnyView { cx.new(|_| TooltipView { text: text.clone(), th }).into() })
 }
 
-/// Chainable form of [`tip`] (the web's `title=` attribute): `div().id(..).tip("Lyrics (T)", th)`.
-/// Appending keeps call sites one line, so the tooltip sweep stays additive.
+/// Chainable form of [`tip`]: `div().id(..).tip("Lyrics (T)", th)`.
+/// Appending keeps call sites one line.
 pub trait Tip: Sized {
     fn tip(self, text: impl Into<SharedString>, th: Theme) -> Self;
-    /// `title={cond ? text : undefined}`: no tooltip when `None`.
+    /// Optional tooltip: none when `None`.
     fn tip_opt(self, text: Option<impl Into<SharedString>>, th: Theme) -> Self {
         match text {
             Some(t) => self.tip(t, th),

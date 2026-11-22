@@ -1,9 +1,9 @@
-//! `BootIntro.svelte`: the one-shot launch animation (1.1 s). Everything is painted by one canvas from the shared clock
-//! (`crate::clock::now`), so the parity runner can freeze/seek it like the web's paused CSS/WAAPI animations.
+//! The one-shot launch animation (1.1 s). Everything is painted by one canvas from the shared clock
+//! (`crate::clock::now`).
 //!
-//! Timings, easings and keyframes are the web's (see the constants). Two deliberate approximations, both because GPUI has
-//! no radial gradients / element transforms: (1) the rings and the bloom are drawn as stacks of thin concentric annuli
-//! (rounded quads with a border) whose alpha follows the CSS gradient stops; (2) the letters fade in without the 0.9 -> 1 scale.
+//! Timings, easings and keyframes are in the constants. GPUI has no radial gradients or element transforms, so:
+//! (1) the rings and the bloom are drawn as stacks of thin concentric annuli (rounded quads with a border) whose alpha
+//! follows the gradient stops; (2) the letters fade in without a scale.
 use crate::anim::cubic_bezier;
 use crate::theme::{DISPLAY, MONO, Theme};
 use gpui::{
@@ -16,7 +16,7 @@ pub enum BootEvent {
 }
 impl EventEmitter<BootEvent> for BootIntro {}
 
-/// `introWave.ts` WAVE_ENVELOPE / WAVE_BANDS (a real track's loudness envelope and spectrum snapshot).
+/// Loudness envelope and spectrum snapshot of a real track, driving the rings and the bars.
 const ENV: [f32; 50] = [
     0., 0.07, 0.22, 0.4, 0.47, 0.4, 0.26, 0.17, 0.14, 0.13, 0.13, 0.12, 0.14, 0.22, 0.4, 0.65, 0.88, 1., 0.98, 0.88, 0.78, 0.78, 0.83, 0.84, 0.79, 0.74, 0.75, 0.78, 0.8, 0.81, 0.83, 0.85, 0.89, 0.94, 0.95, 0.87, 0.71, 0.59,
     0.58, 0.69, 0.81, 0.88, 0.91, 0.91, 0.91, 0.89, 0.85, 0.82, 0.81, 0.81,
@@ -26,7 +26,7 @@ const BANDS: [f32; 40] = [
     0.08, 0.08, 0.08, 0.08,
 ];
 
-/// Total length: `setTimeout(finish, 1100)`.
+/// Total length in seconds.
 pub const DURATION: f64 = 1.1;
 
 pub struct BootIntro {
@@ -60,7 +60,7 @@ fn ease_in(u: f32) -> f32 {
     cubic_bezier(0.42, 0.0, 1.0, 1.0, u)
 }
 
-/// A CSS animation of `dur` s starting at `delay` s, evaluated at `t`: progress 0..1 (before the delay = 0, `fill: forwards`).
+/// An animation of `dur` s starting at `delay` s, evaluated at `t`: progress 0..1 (0 before the delay, held at 1 after the end).
 fn prog(t: f64, delay: f64, dur: f64) -> f32 {
     clamp01((t - delay) / dur)
 }
@@ -69,7 +69,7 @@ fn rgba(c: (u8, u8, u8), a: f32) -> Hsla {
     Rgba { r: c.0 as f32 / 255.0, g: c.1 as f32 / 255.0, b: c.2 as f32 / 255.0, a: a.clamp(0.0, 1.0) }.into()
 }
 
-/// One WAAPI frame of `playWave`: (opacity, scale) of a ring/bloom at its own time `el` seconds (40 linear keyframes).
+/// One frame of the wave: (opacity, scale) of a ring/bloom at its own time `el` seconds (40 linear keyframes).
 fn wave_frame(el: f64, dur: f64, peak: f32, bloom: bool) -> (f32, f32) {
     let u = (el / dur).clamp(0.0, 1.0);
     let at = |t: f64| ENV[((t / 0.02).round().max(0.0) as usize).min(ENV.len() - 1)];
@@ -87,7 +87,7 @@ fn wave_frame(el: f64, dur: f64, peak: f32, bloom: bool) -> (f32, f32) {
     ((a.0 + (b.0 - a.0) * f) as f32, (a.1 + (b.1 - a.1) * f) as f32)
 }
 
-/// A circle outline of outer radius `r`, `thick` wide, centred at `c` (CSS px).
+/// A circle outline of outer radius `r`, `thick` wide, centred at `c` (logical px).
 fn annulus(window: &mut Window, c: (f32, f32), r: f32, thick: f32, color: Hsla) {
     if color.a <= 0.002 || r <= 0.3 {
         return;
@@ -118,14 +118,14 @@ impl Render for BootIntro {
             self.done = true;
             cx.emit(BootEvent::Done);
         }
-        if !self.done && !crate::clock::frozen() {
+        if !self.done {
             window.request_animation_frame();
         }
         let backdrop = self.backdrop.clone();
         let light = th.light;
         let (c1, c2, c3) = if light { ((255, 110, 180), (90, 155, 255), (50, 205, 170)) } else { ((255, 60, 150), (60, 130, 255), (20, 215, 185)) };
         let (meter, text, muted, accent_fg) = (th.meter, th.text, th.muted, th.accent_fg);
-        // `.skip { opacity: 0; transition: opacity 120ms linear }`
+        // skip: everything fades out linearly over 120 ms
         let master = skip_t.map(|s| 1.0 - clamp01(s / 0.12)).unwrap_or(1.0);
         div()
             .absolute()
@@ -144,7 +144,7 @@ impl Render for BootIntro {
                     move |b, _, window, cx| {
                         let (vw, vh) = (f32::from(b.size.width), f32::from(b.size.height));
                         let (ox, oy) = (f32::from(b.origin.x), f32::from(b.origin.y));
-                        // ---- shutter halves: translateY(-100% / 100%) after 820 ms (cubic-bezier(.8,0,.2,1), 300 ms)
+                        // ---- shutter halves slide out up / down after 820 ms (cubic-bezier(.8,0,.2,1), 300 ms)
                         let open = cubic_bezier(0.8, 0.0, 0.2, 1.0, prog(t, 0.82, 0.3));
                         for (half, dir) in [(0usize, -1.0f32), (1, 1.0)] {
                             let hh = vh / 2.0;
@@ -162,10 +162,10 @@ impl Render for BootIntro {
                                 }
                             });
                         }
-                        // ---- `.run .wave, .run .content { animation: vanish 200ms ease-in 800ms }`
+                        // ---- wave and content vanish: 200 ms ease-in from 800 ms
                         let vanish = 1.0 - ease_in(prog(t, 0.8, 0.2));
                         let alpha_all = vanish * master;
-                        // ---- rings + bloom (centre of the screen, 220vmax elements)
+                        // ---- rings + bloom (centre of the screen, 2.2 x the larger viewport side)
                         let c = (ox + vw / 2.0, oy + vh / 2.0);
                         let vmax = vw.max(vh);
                         let (bl_o, bl_s) = wave_frame(t, 0.85, 0.8, true);
@@ -235,7 +235,7 @@ impl Render for BootIntro {
                         for (j, h) in BANDS.iter().enumerate() {
                             let d = (j as f64 - 19.5).abs();
                             let u = prog(t, 0.22 + d * 0.008, 0.52);
-                            // @keyframes bar: 0 % scaleY(0), 45 % scaleY(h), 100 % scaleY(.08); the easing applies per interval
+                            // bar keyframes: 0 % scaleY(0), 45 % scaleY(h), 100 % scaleY(.08); the easing applies per interval
                             let e = |x: f32| cubic_bezier(0.2, 0.8, 0.3, 1.0, x);
                             let s = if u < 0.45 { *h * e(u / 0.45) } else { *h + (0.08 - *h) * e((u - 0.45) / 0.55) };
                             let bh = 34.0 * s;
@@ -244,7 +244,7 @@ impl Render for BootIntro {
                                 window.paint_quad(gpui::fill(r, meter.opacity(alpha_all)));
                             }
                         }
-                        // meta: `.meta { gap: 14px; letter-spacing: .18em }` mono-code 11 px
+                        // meta: mono-code 11 px, 14 px gap, 0.18em tracking
                         let meta_a = ease_out(prog(t, 0.45, 0.24)) * alpha_all;
                         let meta_top = bars_top + 34.0 + 22.0;
                         let parts = [("BIT-PERFECT AUDIO TERMINAL".to_string(), muted), (format!("v{}", env!("CARGO_PKG_VERSION")), accent_fg)];
@@ -263,7 +263,7 @@ impl Render for BootIntro {
                         let tw: f32 = lines.iter().map(|l| l.1).sum::<f32>() + 14.0;
                         let mut mx = ox + (vw - tw) / 2.0;
                         for (line, w, s) in &lines {
-                            // paint glyph by glyph with the tracking step (the per-glyph path of `tracking.rs`)
+                            // paint glyph by glyph with the tracking step (like `text::Txt`)
                             let run_len = s.chars().count();
                             let _ = run_len;
                             let mut gx = mx;

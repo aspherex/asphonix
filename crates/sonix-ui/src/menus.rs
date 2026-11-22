@@ -1,7 +1,5 @@
-//! `lib/menus.ts trackMenuItems`: the one place that assembles a track context menu (same order, labels, icons and
-//! conditions as the web). Every track list uses it: Tracks, the queue rail, album/artist pages, playlists, Liked,
-//! smart playlists, History and Search.
-//!
+//! The one place that assembles a track context menu (order, labels, icons and conditions). Every track list uses
+//! it: Tracks, the queue rail, album/artist pages, playlists, Liked, smart playlists, History and Search.
 use crate::app;
 use crate::router::Route;
 use crate::widgets::context_menu::MenuItem;
@@ -17,7 +15,7 @@ pub type NavFn = dyn Fn(Route, &mut App);
 
 pub struct TrackMenu {
     pub tracks: Vec<Track>,
-    /// Where the menu opened (the add-to-playlist popover anchors here, `anchorPoint()`).
+    /// Where the menu opened (the add-to-playlist popover anchors here).
     pub at: Point<Pixels>,
     pub on_play_now: Rc<dyn Fn(&mut App)>,
     pub on_play_next: Option<MenuAction>,
@@ -34,7 +32,7 @@ impl TrackMenu {
     }
 }
 
-/// `ratingSubmenu`: ★ .. ★★★★★ (1★ is the danger entry with the purge hint), rule, "Clear rating".
+/// The rating submenu: ★ .. ★★★★★ (one entry per star count), rule, "Clear rating".
 pub fn rating_submenu(ids: Vec<String>, kind: StarTargetType) -> Vec<MenuItem> {
     let apply = |ids: Vec<String>, value: u8| {
         move |_: &mut gpui::Window, cx: &mut App| {
@@ -47,10 +45,7 @@ pub fn rating_submenu(ids: Vec<String>, kind: StarTargetType) -> Vec<MenuItem> {
         }
     };
     let mut v: Vec<MenuItem> = (1..=5u8)
-        .map(|n| {
-            let it = MenuItem::action("★".repeat(n as usize), apply(ids.clone(), n));
-            if n == 1 { it.danger().hint("Purges from library on NAS nightly.") } else { it }
-        })
+        .map(|n| MenuItem::action("★".repeat(n as usize), apply(ids.clone(), n)))
         .collect();
     v.push(MenuItem::separator());
     v.push(MenuItem::action("Clear rating", apply(ids, 0)));

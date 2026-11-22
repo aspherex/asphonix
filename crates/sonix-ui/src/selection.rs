@@ -1,4 +1,4 @@
-//! Multi-select over row *indices* (`trackSelection.svelte.ts`): Ctrl/Cmd+click toggles,
+//! Multi-select over row *indices*: Ctrl/Cmd+click toggles,
 //! Shift+click selects a range from the anchor, Ctrl+A selects everything, arrows move
 //! the cursor (Shift extends). Holds indices only, never rows, so it works with paged
 //! 50k-row lists.
@@ -74,7 +74,7 @@ impl Selection {
         Some(n)
     }
 
-    /// Move only the keyboard cursor (`selectedIndex`), leaving the selected set alone (PlaylistDetail's arrows).
+    /// Move only the keyboard cursor, leaving the selected set alone (arrow keys in a playlist page).
     pub fn set_cursor(&mut self, n: usize) {
         self.cursor = Some(n);
     }

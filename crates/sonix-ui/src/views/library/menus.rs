@@ -1,6 +1,6 @@
-//! Context-menu contents of the library routes (`menus.ts`: `albumMenuItems`, `artistMenuItems`; tracks use the shared
-//! `crate::menus` builder, playlists the list routes' `playlistMenuItems`), plus the album/selection helpers of
-//! `playback.ts` (rolling sources are `crate::playback`).
+//! Context-menu contents of the library routes (album and artist menus; tracks use the shared `crate::menus` builder,
+//! playlists the list routes' playlist menu), plus the album/selection playback helpers (rolling sources are
+//! `crate::playback`).
 use super::navigate;
 use crate::app;
 use crate::router::Route;
@@ -9,7 +9,7 @@ use gpui::{App, Pixels, Point, px};
 use std::rc::Rc;
 use sonix_api::*;
 
-// ---------------------------------------------------------------- playback.ts
+// ---------------------------------------------------------------- playback
 fn shuffled<T>(mut v: Vec<T>) -> Vec<T> {
     let mut s = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_nanos() as u64).unwrap_or(1) | 1;
     for i in (1..v.len()).rev() {
@@ -21,7 +21,7 @@ fn shuffled<T>(mut v: Vec<T>) -> Vec<T> {
     v
 }
 
-/// `playAlbum`: the album's tracks as a plain static queue.
+/// Plays the album's tracks as a plain static queue.
 pub fn play_album(cx: &App, id: String, shuffle: bool) {
     app::call(cx, move |b| {
         if let Ok(d) = b.browse_get_album(&id) {
@@ -32,7 +32,7 @@ pub fn play_album(cx: &App, id: String, shuffle: bool) {
     });
 }
 
-/// `playTracks`: an explicit selection as a static queue starting at `start`.
+/// Plays an explicit selection as a static queue starting at `start`.
 pub fn play_tracks(cx: &App, ids: Vec<String>, start: usize) {
     app::call(cx, move |b| {
         let _ = b.player_play_queue(PlayQueueRequest { track_ids: ids, start_index: start });
@@ -47,7 +47,7 @@ pub fn play_genre(cx: &App, name: String, shuffle: bool) {
     crate::playback::play_genre(cx, name, shuffle, None);
 }
 
-/// `playPlaylist`: the rolling `player_play_playlist` source.
+/// Plays a playlist as the rolling `player_play_playlist` source.
 pub fn play_playlist(cx: &App, id: String, shuffle: bool) {
     crate::playback::play_playlist(cx, id, shuffle, None);
 }
@@ -73,8 +73,8 @@ fn album_ids(b: &dyn Backend, album: &str) -> Vec<String> {
 }
 
 // ---------------------------------------------------------------- entities
-/// `albumMenuItems`.
-/// `at` = where the menu opened (the add-to-playlist popover anchors there, `anchorPoint()`).
+/// The album context menu.
+/// `at` = where the menu opened (the add-to-playlist popover anchors there).
 pub fn album_menu(album: &Album, at: Point<Pixels>) -> Vec<MenuItem> {
     let id = album.id.clone();
     let starred = album.starred.is_some();
@@ -149,7 +149,7 @@ pub fn album_menu(album: &Album, at: Point<Pixels>) -> Vec<MenuItem> {
     items
 }
 
-/// `artistMenuItems`.
+/// The artist context menu.
 pub fn artist_menu(artist: &Artist) -> Vec<MenuItem> {
     let id = artist.id.clone();
     let starred = artist.starred.is_some();
@@ -184,7 +184,7 @@ pub fn artist_menu(artist: &Artist) -> Vec<MenuItem> {
     ]
 }
 
-/// `trackMenuItems` for a selection (the shared builder; "Play now" is the caller's context).
+/// The track context menu for a selection (the shared builder; "Play now" is the caller's context).
 pub fn track_menu(tracks: &[Track], at: Point<Pixels>, on_play_now: impl Fn(&mut App) + 'static) -> Vec<MenuItem> {
     crate::menus::track_menu_items(crate::menus::TrackMenu::new(tracks.to_vec(), at, on_play_now))
 }

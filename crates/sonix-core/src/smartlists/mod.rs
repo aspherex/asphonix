@@ -19,7 +19,7 @@
 //! interpolated into the SQL string.
 //!
 //! Random order is *stable per seed* (`(rid * K + seed) % 2^32`), so paging
-//! and a `LIMIT` stay consistent within one view; the frontend picks a new
+//! and a `LIMIT` stay consistent within one view; the UI picks a new
 //! seed per page load.
 
 use std::path::{Path, PathBuf};

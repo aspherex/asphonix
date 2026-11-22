@@ -1,14 +1,14 @@
-//! The `Backend` trait: `src/lib/ipc/commands.ts` as Rust.
+//! The `Backend` trait: the full command surface the UI calls.
 //!
 //! Design rules:
 //! * Methods are synchronous and `Send + Sync`: the UI calls them from GPUI's
-//!   background executor, never from the render path. A tokio-based real backend
+//!   background executor, never from the render path. A tokio-based backend
 //!   can `block_on` inside (it owns its runtime).
-//! * One sub-trait per `commands.ts` namespace. Methods the first UI phases do not
-//!   need have a default body returning [`ApiError::unimplemented`], so a backend
-//!   (and a later phase) can implement command by command without touching the UI.
-//! * Request/response types are the wire types of `types.rs`; the Rust command name
-//!   from `ipc.rs` is in each doc comment so the mapping stays greppable.
+//! * One sub-trait per command namespace. Many methods have a default body
+//!   returning [`ApiError::unimplemented`], so a backend can implement command
+//!   by command without touching the UI.
+//! * Request/response types are the wire types of `types.rs`; each method's doc
+//!   comment starts with its snake_case command name so commands stay greppable.
 use crate::discovery::*;
 use crate::error::{ApiError, ApiResult};
 use crate::types::*;
@@ -295,7 +295,7 @@ pub trait PlayerApi {
     fn player_remove_from_queue(&self, _index: usize) -> ApiResult<()> {
         Ok(())
     }
-    /// `player_reorder_queue`: move one entry (`mock.ts` splice semantics, `current` follows).
+    /// `player_reorder_queue`: move one entry (remove at `from`, insert at `to`; `current` follows).
     fn player_reorder_queue(&self, _from: usize, _to: usize) -> ApiResult<()> {
         Ok(())
     }
@@ -363,8 +363,7 @@ pub trait SettingsApi {
     }
 }
 
-/// Cover art. Native replacement for the `sonix://art/{id}?s={size}` protocol:
-/// decoded pixels at an exact size (one of [`ART_SIZES`]), served from the
+/// Cover art: decoded pixels at an exact size (one of [`ART_SIZES`]), served from the
 /// backend's disk cache. Called off the UI thread.
 pub trait ArtApi {
     fn art_get(&self, cover_art: &str, size: u32) -> ApiResult<ArtPixels>;
@@ -377,20 +376,15 @@ pub trait Backend:
     /// New event stream (each subscriber gets every event from now on). Dropping
     /// the receiver unsubscribes.
     fn subscribe(&self) -> Receiver<Event>;
-    /// `Some("MOCK")` for a backend whose data is generated. The UI shows this in
-    /// the title bar: mock data must never be mistaken for real telemetry.
-    /// "Now" for relative labels (History day headers). The mock anchors its data on a fixed epoch.
+    /// "Now" for relative labels (History day headers).
     fn now_ms(&self) -> i64 {
         std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_millis() as i64).unwrap_or(0)
-    }
-    fn mock_label(&self) -> Option<&'static str> {
-        None
     }
     /// App exit (quit): final session write, listen `quit` row, service teardown. Bounded; default no-op.
     fn shutdown(&self) {}
     /// The window is minimized (`true`) or restored: background work (cover prefetch) pauses while suspended. Default no-op.
     fn set_suspended(&self, _suspended: bool) {}
     /// The main window's native handle (Win32 HWND). Called on the window's own thread (the backend registers OS media
-    /// controls there, like the reference's `run_on_main_thread`), again if the window is recreated.
+    /// controls there, as they must live on the window's thread), again if the window is recreated.
     fn attach_window(&self, _hwnd: isize) {}
 }

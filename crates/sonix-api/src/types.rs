@@ -1,6 +1,6 @@
-//! Wire types. Mirrors `src/lib/ipc/types.ts` and `src-tauri/src/ipc.rs`.
+//! Wire types.
 //! Every struct is `camelCase` on the wire; enums carry the exact attribute the
-//! Rust side of SoniX uses (documented per type where it is not camelCase).
+//! backend uses (documented per type where it is not camelCase).
 use serde::{Deserialize, Serialize};
 
 fn is_false(b: &bool) -> bool {
@@ -714,8 +714,7 @@ pub struct Settings {
 }
 
 // --------------------------------------------------------------- art
-/// Decoded cover pixels at an exact size (the native replacement for the
-/// `sonix://art/{id}?s={size}` protocol): tightly packed RGBA8, `width*height*4` bytes.
+/// Decoded cover pixels at an exact size: tightly packed RGBA8, `width*height*4` bytes.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ArtPixels {
     pub width: u32,

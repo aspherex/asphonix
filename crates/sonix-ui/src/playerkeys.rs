@@ -1,4 +1,4 @@
-//! `lib/playerKeys.ts` `PLAYER_KEYS`: the single table behind the Now Playing legend and key handling.
+//! The single table behind the Now Playing legend and key handling.
 pub struct PlayerKey {
     pub keys: &'static [&'static str],
     pub legend: &'static str,

@@ -1,7 +1,7 @@
 //! Page cache for virtualized lists: pages of `PAGE` rows keyed by page number,
 //! at most `MAX_PAGES` resident (~1,600 rows), the one farthest from the viewport
 //! evicted first. Stale answers (older `epoch`) are dropped, so a changed
-//! sort/filter never mixes rows. Mirrors the frontend `createPager`.
+//! sort/filter never mixes rows.
 use std::collections::{HashMap, HashSet};
 
 pub const PAGE: usize = 100;

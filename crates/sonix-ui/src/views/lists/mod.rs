@@ -1,6 +1,6 @@
-//! The list routes: Playlists, PlaylistDetail, Liked, SmartPlaylistDetail, History (and, in sibling
+//! The list routes: Playlists, playlist detail, Liked, smart playlist detail, History (and, in sibling
 //! files, Search, Settings, Login, Favorites, the smart-playlist editor). They are plain entities
-//! owned by [`ListsHost`] (created on first visit, so startup stays as lean as before); the shell only
+//! owned by [`ListsHost`] (created on first visit, so startup stays lean); the shell only
 //! asks [`Shell::lists_stage`] for the element of a route.
 pub mod favorites;
 pub mod history;
@@ -49,11 +49,11 @@ pub fn hot_shadow(th: &Theme, off: f32) -> Vec<BoxShadow> {
 pub struct Bridge;
 impl gpui::EventEmitter<ListsEvent> for Bridge {}
 
-/// The bridge, reachable from other routes (Home's playlist tiles use the same `playlistMenuItems`).
+/// The bridge, reachable from other routes (Home's playlist tiles use the same playlist menu).
 pub struct BridgeHandle(pub gpui::WeakEntity<Bridge>);
 impl gpui::Global for BridgeHandle {}
 
-/// `playlistMenuItems` for a playlist shown outside the list routes (rename / duplicate / delete included).
+/// The playlist menu for a playlist shown outside the list routes (rename / duplicate / delete included).
 pub fn playlist_menu(p: &sonix_api::Playlist, cx: &gpui::App) -> Vec<crate::widgets::context_menu::MenuItem> {
     match cx.try_global::<BridgeHandle>() {
         Some(h) => menus::playlist_menu_items(h.0.clone(), p, false),
@@ -201,7 +201,7 @@ impl Shell {
         }
     }
 
-    /// Window-level keys of the Search route (`<svelte:window onkeydown>`): Up/Down move, Shift+Enter enqueues.
+    /// Window-level keys of the Search route: Up/Down move, Shift+Enter enqueues.
     pub(crate) fn lists_search_key(&mut self, ev: &gpui::KeyDownEvent, cx: &mut Context<Self>) {
         if *self.router.current() != Route::Search {
             return;
@@ -260,7 +260,7 @@ impl Shell {
         cx.stop_propagation();
     }
 
-    /// "+" in the sidebar: `promptText("New playlist")`, create, open it.
+    /// "+" in the sidebar: prompt for a name, create, open it.
     pub(crate) fn lists_new_playlist(&mut self, cx: &mut Context<Self>) {
         let Some(br) = self.lists.bridge.clone() else { return };
         let br = br.downgrade();
@@ -316,7 +316,7 @@ impl Shell {
                                 cx.emit(ListsEvent::Navigate(Route::Home));
                             });
                         }
-                        // `showToast(`Switched to ${user} @ ${host}`)` / the error
+                        // toast: the new profile or the error
                         let msg = match r {
                             Ok(_) => format!("Switched to {label}"),
                             Err(e) if !e.message.is_empty() => format!("Could not switch: {}", e.message),
@@ -378,7 +378,7 @@ impl Shell {
             .icon("logout")
             .danger(),
         );
-        // `openContextMenuFor(profile button)`: left edge of the window, just below the button (4 px)
+        // the profile menu opens at the left edge of the window, just below the button (4 px)
         let _ = pos;
         let at = gpui::point(gpui::px(0.), window.viewport_size().height - gpui::px(crate::metrics::layout::DOCK_H) + gpui::px(4.));
         self.lists_show_menu(items, at, window, cx);
@@ -421,7 +421,7 @@ impl Shell {
         }
     }
 
-    /// `uiState.starsRev` / `libraryRev`: the visible list pages re-read.
+    /// Stars or the library changed: the visible list pages re-read.
     pub(crate) fn lists_library_changed(&mut self, cx: &mut Context<Self>) {
         if let Some(p) = self.lists.track_page.clone() {
             p.update(cx, |p, cx| p.stars_changed(cx));
@@ -451,19 +451,4 @@ impl Shell {
         }
     }
 
-    #[cfg(feature = "parity")]
-    pub(crate) fn lists_parity_state(&self, window: &Window, cx: &gpui::App) -> serde_json::Value {
-        if let Some(e) = self.lists.editor.as_ref().filter(|e| e.read(cx).is_open()) {
-            return e.read(cx).parity_state();
-        }
-        match self.router.current() {
-            Route::Playlist(_) | Route::Liked | Route::Smart(_) => self.lists.track_page.as_ref().map(|p| p.read(cx).parity_state(window, cx)).unwrap_or_default(),
-            Route::History => self.lists.history.as_ref().map(|p| p.read(cx).parity_state(window, cx)).unwrap_or_default(),
-            Route::Playlists => self.lists.playlists.as_ref().map(|p| p.read(cx).parity_state()).unwrap_or_default(),
-            Route::Search => self.lists.search.as_ref().map(|p| p.read(cx).parity_state()).unwrap_or_default(),
-            Route::Settings => self.lists.settings.as_ref().map(|p| p.read(cx).parity_state()).unwrap_or_default(),
-            Route::Login => self.lists.login.as_ref().map(|p| p.read(cx).parity_state()).unwrap_or_default(),
-            _ => serde_json::Value::Null,
-        }
-    }
 }

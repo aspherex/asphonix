@@ -14,7 +14,7 @@ use std::sync::Arc;
 
 type Key = (SharedString, u32);
 
-/// Cover fetches running at once (the reference's `MAX_CONCURRENT_FETCHES`): a grid asks for dozens of covers in one
+/// Cover fetches running at once: a grid asks for dozens of covers in one
 /// frame; starting them all would open as many connections / threads and starve the visible ones.
 const MAX_WORKERS: usize = 4;
 /// Requests waiting beyond this are dropped oldest-batch first (they re-request when their view renders again).
@@ -254,8 +254,8 @@ impl ArtCache {
     }
 }
 
-/// Cache key of a playlist mosaic (`mosaicUrl` in `types.ts`): always a mosaic when the playlist has tracks (the real
-/// `coverArt` is ignored); `v` only busts the cache when the playlist changes, the backend strips it.
+/// Cache key of a playlist mosaic: always a mosaic when the playlist has tracks (the real
+/// `cover_art` is ignored); `v` only busts the cache when the playlist changes, the backend strips it.
 pub fn mosaic_key(p: &sonix_api::Playlist) -> String {
     format!("mosaic/{}?v={}-{}", p.id, p.song_count, p.updated_at.as_deref().unwrap_or(""))
 }
@@ -274,7 +274,7 @@ pub fn cover<V: 'static>(
     cover_bucket(art, backend, id, logical, bucket, window, cx)
 }
 
-/// [`cover`] at an explicit size bucket (the sizes the web requests: cards 160, album header 320, thumbs 64).
+/// [`cover`] at an explicit size bucket (cards 160, album header 320, thumbs 64).
 pub fn cover_bucket<V: 'static>(
     art: &ArtHandle,
     backend: &Arc<dyn Backend>,
@@ -285,12 +285,6 @@ pub fn cover_bucket<V: 'static>(
     cx: &mut Context<V>,
 ) -> AnyElement {
     let base = div().size(px(logical)).flex_none().overflow_hidden();
-    // Parity harness: the web mock cannot resolve `sonix://art` in a plain browser (the <img> is hidden, leaving the
-    // slot background), so the native side renders the empty slot too.
-    #[cfg(feature = "parity")]
-    if std::env::var_os("SONIX_PARITY_NOART").is_some() {
-        return base.into_any_element();
-    }
     let Some(id) = id else { return base.bg(hsla(0.0, 0.0, 0.5, 0.12)).into_any_element() };
     let sid: SharedString = id.to_string().into();
     let hit = art.borrow_mut().get(&sid, bucket);
@@ -342,7 +336,7 @@ pub fn cover_bucket<V: 'static>(
             .detach();
         }
     }
-    // `.art { background: var(--color-surface-high) }` until the image arrives (no per-id tint)
+    // the high surface shows until the image arrives (no per-id tint)
     let base = base.bg(crate::app::theme(cx).high);
     match hit {
         Some(i) => base.child(img(ImageSource::Render(i)).size_full().object_fit(ObjectFit::Cover)).into_any_element(),

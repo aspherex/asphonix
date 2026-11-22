@@ -1,12 +1,11 @@
 //! The audio engine: one dedicated OS thread that owns the queue, decode
 //! threads, ring buffers and output render thread, driven by a command
-//! channel so `ipc.rs`'s async `player_*`/`output_*` commands never touch
+//! channel so the async `player_*`/`output_*` commands never touch
 //! WASAPI/decoder state directly.
 //!
-//! Lazily started: [`EngineHandle::new`] does nothing but store an
-//! `AppHandle` — the engine thread (and therefore any device/network work)
-//! only spawns on the first command, per the no-work-on-startup rule in
-//! `PLAN.md`.
+//! Lazily started: [`EngineHandle::with_events`] does nothing but store its
+//! inputs — the engine thread (and therefore any device/network work)
+//! only spawns on the first command, so app startup does no audio work.
 //!
 //! Position is **render-side**: the render thread publishes how many real
 //! frames the device has actually played (`RenderHandle::played_frames`,
@@ -60,8 +59,8 @@ const STATE_TICK: Duration = Duration::from_millis(250); // 4 Hz player-state ev
 /// change reopens the device promptly after the old track's last sample.
 const BOUNDARY_TICK: Duration = Duration::from_millis(10);
 const SPECTRUM_TICK: Duration = Duration::from_millis(16); // paced further inside SpectrumAnalyzer
-/// Paused/stopped and unchanged: re-send only this often. The frontend store
-/// is fed by events alone, so a heartbeat still serves a webview that
+/// Paused/stopped and unchanged: re-send only this often. The UI state
+/// is fed by events alone, so a heartbeat still serves a view that
 /// subscribed after the last change (reload, late mount) within a moment.
 const IDLE_HEARTBEAT: Duration = Duration::from_secs(2);
 
@@ -93,7 +92,7 @@ const SPECTRUM_DRY_POLLS: u32 = 12;
 /// Poll interval while the tap is dry (paused / stopped); the 250 ms tap ring
 /// easily covers it, and the first popped samples switch back to the fast tick.
 const SPECTRUM_IDLE_TICK: Duration = Duration::from_millis(100);
-/// Poll interval while no webview shows the spectrum (`Prefs::spectrum_active` off).
+/// Poll interval while no view shows the spectrum (`Prefs::spectrum_active` off).
 const SPECTRUM_INACTIVE_TICK: Duration = Duration::from_millis(250);
 const FORMAT_TIMEOUT: Duration = Duration::from_secs(10);
 /// Consecutive track failures (no track started in between) after which the
@@ -126,12 +125,12 @@ pub enum EngineCommand {
     },
     SetShuffle(bool),
     SetRepeat(RepeatMode),
-    /// "Spread artists in shuffle" setting (`ipc::settings_set_spread_artists_in_shuffle`),
+    /// "Spread artists in shuffle" setting ,
     /// mirrored onto `Queue::spread_artists`; takes effect on the next
     /// shuffle (toggling it doesn't itself reshuffle a queue already in
     /// progress).
     SetSpreadArtists(bool),
-    /// "Queue window" setting (`ipc::settings_set_queue_window_size`),
+    /// "Queue window" setting,
     /// mirrored onto `Queue::set_window_size` — takes effect immediately
     /// (tops the window back up if it just grew).
     SetQueueWindowSize(u32),
@@ -185,7 +184,7 @@ pub enum EngineCommand {
     GetPlayerState(tokio::sync::oneshot::Sender<PlayerState>),
     /// Full teardown: stop playback, drop the queue and cached track
     /// metadata, cancel any in-flight prefetch/probe. Sent on logout and on
-    /// switching accounts (`ipc::auth_logout`/`auth_connect`) — the engine
+    /// switching accounts (`auth_logout`/`auth_connect`) — the engine
     /// must not keep playing, or hold onto, ids that belonged to a different
     /// server/account.
     Stop,
@@ -212,7 +211,7 @@ pub enum EngineCommand {
     FlushListen(tokio::sync::oneshot::Sender<()>),
 }
 
-/// Where the engine's events go: the Tauri app in production, anything
+/// Where the engine's events go: the app's event sink in production, anything
 /// else (a channel, a log) in examples/tests.
 pub trait EngineEvents: Send + Sync + 'static {
     fn player_state(&self, state: &PlayerState);
@@ -220,15 +219,14 @@ pub trait EngineEvents: Send + Sync + 'static {
 }
 
 
-// --- Phase 4 OS-integration hook -------------------------------------------
-// A single, small, well-isolated addition: every `PlayerState` the engine
-// emits to the WebView is *also* published on a `tokio::sync::watch`
-// channel, so in-process Rust consumers (`media::` for SMTC, `scrobble::`)
-// can observe play/pause/track-change/position without a WebView round-trip.
+// --- OS-integration hook ----------------------------------------------------
+// Every `PlayerState` the engine emits to its event sink is *also* published
+// on a `tokio::sync::watch` channel, so in-process consumers (`media::` for
+// SMTC, `scrobble::`) can observe play/pause/track-change/position directly.
 // This wraps `EngineEvents` rather than touching the engine's run loop or
-// command handling at all, so it stays out of the way of other engine work.
+// command handling.
 
-/// Forwards every event to the real sink (Tauri in production, a test sink
+/// Forwards every event to the real sink (the app in production, a test sink
 /// in examples/tests) and mirrors `player_state` onto the watch channel.
 struct BroadcastEvents {
     inner: Arc<dyn EngineEvents>,
@@ -274,7 +272,7 @@ fn idle_player_state() -> PlayerState {
     }
 }
 
-/// One-line trace of the commands that replace or move the queue (native addition: with `SONIX_LOG` set the UI's
+/// One-line trace of the commands that replace or move the queue (with `SONIX_LOG` set the UI's
 /// logger writes it, so a startup log names who started what). `None` for queries and high-frequency commands.
 fn describe_queue_command(cmd: &EngineCommand) -> Option<String> {
     Some(match cmd {
@@ -300,14 +298,14 @@ fn describe_queue_command(cmd: &EngineCommand) -> Option<String> {
     })
 }
 
-/// The handle `ipc.rs` commands talk to via `tauri::State`. The actual
+/// The handle the backend's player commands talk to. The actual
 /// engine lives on its own thread once started.
 pub struct EngineHandle {
     inner: Mutex<Option<Sender<EngineCommand>>>,
     events: Arc<dyn EngineEvents>,
     source: Arc<dyn TrackSource>,
     db: Arc<Db>,
-    /// Phase 4 observer hook; see [`Self::subscribe_player_state`].
+    /// Observer hook; see [`Self::subscribe_player_state`].
     player_state_tx: tokio::sync::watch::Sender<PlayerState>,
     /// The persisted "spread artists in shuffle" setting at app startup
     /// (`secrets::Settings`), applied when the engine thread actually spawns
@@ -408,9 +406,9 @@ impl EngineHandle {
         let _ = tokio::time::timeout(timeout, rx).await;
     }
 
-    /// In-process observer hook (Phase 4 `media::`/`scrobble::`): every
-    /// `PlayerState` the engine produces, without going through the WebView
-    /// event bus. `watch` semantics: a lagging subscriber only ever sees the
+    /// In-process observer hook (`media::`/`scrobble::`): every
+    /// `PlayerState` the engine produces, without going through the UI
+    /// event sink. `watch` semantics: a lagging subscriber only ever sees the
     /// latest value, never a backlog.
     /// The last emitted `PlayerState` (idle before the engine ever ran), read
     /// from the watch channel: no engine round-trip, never spawns the thread.
@@ -693,7 +691,7 @@ struct Engine {
     /// See `MAX_CONSECUTIVE_FAILURES`; reset when a track starts or the user
     /// picks something to play.
     consecutive_failures: u32,
-    /// Native addition: set by the first command that changes the queue (play, enqueue, remove, reorder, jump,
+    /// Set by the first command that changes the queue (play, enqueue, remove, reorder, jump,
     /// skip, stop, a forced restore). A startup (non-forced) restore is refused from then on, even when the queue
     /// is empty again: the user emptied it on purpose, and a re-offered saved session must not bring it back.
     queue_touched: bool,
@@ -2280,7 +2278,7 @@ impl Engine {
 
     /// Just the codec (e.g. `FLAC`): `PlayerState`/`OutputStatus` carry the
     /// mode, bit depth and rate as separate fields and the UI composes the
-    /// readout from them (docs/IPC.md), so repeating them here doubled up as
+    /// readout from them, so repeating them here doubled up as
     /// "SHARED · 32/44 · SHARED · 32/44100 · FLAC".
     fn format_label(&self) -> Option<String> {
         self.playback.as_ref().map(|pb| pb.current.format.codec_label())
@@ -2990,7 +2988,7 @@ mod tests {
 
     // -----------------------------------------------------------------
     // Engine-level tests exercising real `EngineCommand` handling (the same
-    // path `ipc.rs`'s `player_*` commands drive) against an in-memory
+    // path the `player_*` commands drive) against an in-memory
     // library DB and a fake `TrackSource` — no real audio device or network
     // needed, so these run everywhere `cargo test` does. Device-dependent
     // behaviour (actual WASAPI playback, gapless hand-off, seeks) is covered
@@ -3021,7 +3019,7 @@ mod tests {
             false,
             super::super::queue::DEFAULT_WINDOW_SIZE as u32,
         );
-        // `Prefs::default()` is autoplay OFF in the native port; these engine tests exercise autoplay.
+        // `Prefs::default()` is autoplay OFF; these engine tests exercise autoplay.
         engine.prefs.set_autoplay(true);
         engine
     }

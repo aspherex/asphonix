@@ -1,4 +1,4 @@
-//! Read-only probe of the waveform data path against the user's real server:
+//! Read-only probe of the waveform data path against the server saved in the app's connection:
 //! `cargo test -p sonix-core --test real_wave -- --ignored --nocapture`.
 //! Credentials come from the saved connection + OS keychain (never printed). Only `stream` GETs, no writes,
 //! no audio device (the decoder thread is driven into a ring nobody drains).
@@ -15,8 +15,8 @@ use sonix_core::audio::{SubsonicTrackSource, TrackSource};
 #[test]
 #[ignore]
 fn real_tracks_get_a_waveform_from_the_playback_download() {
-    sonix_core::secrets::set_service_name("dev.sonix.native");
-    let dir = std::path::PathBuf::from(std::env::var("APPDATA").unwrap()).join("dev.sonix.native");
+    sonix_core::secrets::set_service_name("dev.sonix.app");
+    let dir = std::path::PathBuf::from(std::env::var("APPDATA").unwrap()).join("dev.sonix.app");
     let cfg = sonix_core::secrets::load_config(&dir).expect("saved connection");
     let pw = sonix_core::secrets::load_profile_password(&cfg.url, &cfg.username).unwrap().expect("keychain password");
     let client = sonix_core::subsonic::Client::new(&cfg.url, &cfg.username, &pw).unwrap();

@@ -1,5 +1,5 @@
 //! Non-Windows shared-mode output fallback (`cpal`). macOS CoreAudio hog
-//! mode is post-MVP per `PLAN.md`; this keeps the engine compiling and
+//! mode is not implemented yet; this keeps the engine compiling and
 //! playable on non-Windows platforms in the meantime. Always reports
 //! `OutputMode::Shared` — truthfully, since `cpal` has no exclusive mode —
 //! and always negotiates an `F32` container at the *source's* rate/channels

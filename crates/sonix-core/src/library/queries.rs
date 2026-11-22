@@ -1,6 +1,6 @@
-//! Paged read queries backing every `browse_*`/`search_*` IPC command, plus
+//! Paged read queries backing every `browse_*`/`search_*` command, plus
 //! the local-DB side of playlist CRUD and star/unstar (the server is always
-//! written first — see `ipc.rs` — these functions mirror that write
+//! written first; these functions mirror that write
 //! locally so the UI reflects it without waiting for the next resync).
 #![allow(dead_code)] // pins the full query surface; not all type aliases have an external caller yet
 
@@ -63,7 +63,7 @@ impl HomeSectionKind {
     }
 
     /// The Subsonic `getAlbumList2` `type` parameter used to populate this
-    /// section's cache (see `ipc.rs`'s background home-section refresher).
+    /// section's cache (background home-section refresh).
     pub fn subsonic_list_type(self) -> &'static str {
         match self {
             HomeSectionKind::RecentlyPlayed => "recent",
@@ -299,12 +299,11 @@ pub fn get_tracks(
 /// artists in shuffle" post-process), in the requested base order — the
 /// *whole* (filtered) result set, not a page: this is `player_play_all`'s
 /// source of truth for what "all" means, resolved once in Rust from SQLite
-/// so the frontend never builds or transmits a 50k-element array. Only two
+/// so the UI never builds or transmits a 50k-element array. Only two
 /// narrow columns are selected (not full `Track` rows), so even a 50k-row
 /// unfiltered result is a few MB at most.
 ///
-/// Tracks rated 1★ are left out (a 1★ rating means "never play this" — on
-/// the dev setup a nightly job even deletes those files), except
+/// Tracks rated 1★ are left out (a 1★ rating means "never play this"), except
 /// `keep_id`: the row the user explicitly started playback from is always
 /// kept, whatever its rating.
 pub fn get_all_track_ids(
@@ -340,7 +339,7 @@ pub fn get_all_track_ids(
 }
 
 /// `(label, [(id, artist)])` for an artist's "Play all"/"Shuffle"
-/// (`ipc::player_play_artist`) — same two-narrow-columns shape as
+/// (`player_play_artist`) — same two-narrow-columns shape as
 /// `get_all_track_ids`, resolved straight from SQLite rather than reusing
 /// `get_artist_tracks`'s full `Track` rows: playing an artist's catalog
 /// (which can be hundreds of tracks) never needs more than ids + artist
@@ -371,7 +370,7 @@ pub fn get_artist_play_source(
 }
 
 /// `(label, [(id, artist)])` for a playlist's "Play"/"Shuffle"
-/// (`ipc::player_play_playlist`) — same reasoning as
+/// (`player_play_playlist`) — same reasoning as
 /// `get_artist_play_source`: `playlists_get`/`PlaylistDetail` already fetch
 /// every track for the detail page's own list, but play/shuffle resolves
 /// fresh here so a 1,980-track playlist never needs its whole `Track` list
@@ -685,7 +684,7 @@ fn search_playlists(db: &Db, text: &str, offset: u64, limit: u64) -> Result<Page
 }
 
 // ---------------------------------------------------------------------------
-// Playlists (local mirror; server is always written first by `ipc.rs`)
+// Playlists (local mirror; the server is always written first)
 // ---------------------------------------------------------------------------
 
 pub fn playlists_list(db: &Db) -> Result<Vec<Playlist>, IpcError> {

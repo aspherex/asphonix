@@ -2,7 +2,7 @@
 //! playlist store and a [`Player`] port (production: the audio engine; tests:
 //! a recorder, so no test ever touches an audio device).
 //!
-//! Every handler reuses the code the Tauri commands use (`library::` queries,
+//! Every handler reuses the code the app's own commands use (`library::` queries,
 //! the `*_source_cmd` builders, smart-list evaluation); this file only parses
 //! arguments, enforces caps and projects results into compact JSON. Results
 //! never contain file paths, cover-art ids, ReplayGain data or server URLs.

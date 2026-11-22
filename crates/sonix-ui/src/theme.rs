@@ -1,6 +1,5 @@
-//! SONIX tokens (`src/styles/tokens.css` of the SoniX repo) as plain Rust values.
-//! Dark = `:root`, light = `:root[data-theme="light"]` ("Editorial Laboratory").
-//! Switching theme = swapping this `Copy` struct (no CSS variables needed).
+//! The SONIX colour palette and fonts as plain Rust values: a dark theme and a light one ("Editorial Laboratory").
+//! Switching theme = swapping this `Copy` struct.
 use gpui::{Hsla, rgb, rgba};
 
 fn c(hex: u32) -> Hsla {
@@ -13,25 +12,26 @@ fn ca(hex: u32) -> Hsla {
 #[derive(Clone, Copy)]
 pub struct Theme {
     pub light: bool,
-    pub base: Hsla,    // --color-surface-base
-    pub low: Hsla,     // --color-surface-low
-    pub mid: Hsla,     // --color-surface-mid
-    pub high: Hsla,    // --color-surface-high
-    pub highest: Hsla, // --color-surface-highest
+    // surfaces, from the page background up
+    pub base: Hsla,
+    pub low: Hsla,
+    pub mid: Hsla,
+    pub high: Hsla,
+    pub highest: Hsla,
     pub accent: Hsla,
     pub accent_text: Hsla, // text on accent fills
     pub accent_fg: Hsla,   // accent used as text/line color (olive in light)
     pub accent_hover: Hsla,
     pub clip: Hsla,
-    pub border: Hsla, // --color-border-idle
-    pub frame: Hsla,  // --color-border-frame
-    pub focus: Hsla,  // --color-border-focus
-    pub text: Hsla,   // --color-text-stark
-    pub muted: Hsla,  // --color-text-muted
-    pub meter: Hsla,  // --color-meter (canvas bars)
+    pub border: Hsla, // idle border / rules
+    pub frame: Hsla,  // strong frame border
+    pub focus: Hsla,  // focus / hover border
+    pub text: Hsla,   // primary text
+    pub muted: Hsla,  // secondary text
+    pub meter: Hsla,  // spectrum / meter bars
     pub shadow: Hsla, // hard offset shadow colour
-    pub chrome: Hsla, // --color-chrome (translucent rails)
-    /// `--font-body`: Inter in dark, Space Grotesk in light.
+    pub chrome: Hsla, // translucent rails
+    /// Body font: Inter in dark, Space Grotesk in light.
     pub body_font: &'static str,
 }
 

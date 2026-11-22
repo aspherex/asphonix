@@ -1,4 +1,4 @@
-//! `Playlists.svelte`: smart (local) and server playlists as a card grid.
+//! The playlists page: smart (local) and server playlists as a card grid.
 use sonix_api::bucket_for;
 use super::menus;
 use super::smart_rules::describe_smart;
@@ -8,7 +8,6 @@ use crate::anim;
 use crate::app;
 use crate::art::{self, ArtHandle};
 use crate::metrics::{lists as lm, space};
-use crate::probe::pid;
 use crate::router::Route;
 use crate::text::txt;
 use crate::theme::Theme;
@@ -38,7 +37,7 @@ pub struct PlaylistsView {
 
 impl PlaylistsView {
     pub fn new(backend: Arc<dyn Backend>, art: ArtHandle, menu: &Entity<ContextMenu>, player: &Entity<crate::app::PlayerModel>, cx: &mut Context<Self>) -> Self {
-        // native-only play-button state: repaint when the loaded track / status / source changes
+        // play-button state: repaint when the loaded track / status / source changes
         cx.subscribe(player, |_, _, _: &crate::app::PlayerEvent, cx| cx.notify()).detach();
         let mut this = Self { backend, art, menu: menu.clone(), lists: Vec::new(), smart: Vec::new(), loaded: false, hover: None, scroll: ScrollHandle::new(), player: player.clone() };
         this.reload(cx);
@@ -59,10 +58,6 @@ impl PlaylistsView {
         .detach();
     }
 
-    #[cfg(feature = "parity")]
-    pub(crate) fn parity_state(&self) -> serde_json::Value {
-        serde_json::json!({ "playlists": self.lists.len(), "smart": self.smart.len(), "hover": self.hover.map(|h| format!("{}{}", if h.0 { "s" } else { "p" }, h.1)) })
-    }
 
     fn show_menu(&self, items: Vec<MenuItem>, pos: gpui::Point<gpui::Pixels>, cx: &mut Context<Self>) {
         let menu = self.menu.clone();
@@ -91,7 +86,6 @@ impl PlaylistsView {
 
     fn card(&mut self, th: Theme, smart: bool, ix: usize, cw: f32, window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
         let hovered = self.hover == Some((smart, ix));
-        let pfx = if smart { format!("pl.smart.{ix}") } else { format!("pl.card.{ix}") };
         let actions_w = if smart { 0.0 } else if self.lists[ix].read_only { lm::CARD_ICON_BTN } else { 3.0 * lm::CARD_ICON_BTN + 2.0 * lm::CARD_ACTIONS_GAP };
         let meta_w = cw - 2.0 - 2.0 * lm::CARD_PAD - lm::CARD_ART - lm::CARD_GAP - if smart { 0.0 } else { actions_w + lm::CARD_GAP };
         let key = ix + if smart { 10_000 } else { 0 };
@@ -199,8 +193,8 @@ impl PlaylistsView {
             .border_1()
             .border_color(if hovered { th.focus } else { th.border })
             .cursor(CursorStyle::PointingHand)
-            .child(pid(format!("{pfx}.art"), art_box))
-            .child(pid(format!("{pfx}.meta"), meta));
+            .child(art_box)
+            .child(meta);
         if !smart {
             let pl = pl_for_menu.clone().unwrap();
             let btn = |name: &'static str, bid: &'static str| {
@@ -257,7 +251,7 @@ impl PlaylistsView {
                 let items = menus::playlist_menu_items(cx.entity().downgrade(), &p4, false);
                 this.show_menu(items, gpui::point(r.x, r.y + px(8.)), cx);
             })));
-            card = card.child(pid(format!("{pfx}.actions"), actions));
+            card = card.child(actions);
             let p5 = pl.clone();
             card = card.on_mouse_down(
                 MouseButton::Right,
@@ -282,14 +276,14 @@ impl PlaylistsView {
             let target = Route::Smart(id);
             card = card.on_click(cx.listener(move |_, _, _, cx| cx.emit(ListsEvent::Navigate(target.clone()))));
         }
-        pid(pfx.clone(), card.on_hover(cx.listener(move |this, h: &bool, _, cx| {
+        card.on_hover(cx.listener(move |this, h: &bool, _, cx| {
             if *h {
                 this.hover = Some((smart, ix));
             } else if this.hover == Some((smart, ix)) {
                 this.hover = None;
             }
             cx.notify();
-        })))
+        }))
         .into_any_element()
     }
 }
@@ -339,13 +333,13 @@ impl Render for PlaylistsView {
                     .child(icon(icon_name, lm::NEW_ICON, fg))
                     .child(txt(&th, LABEL_CAPS, label).color(fg))
             };
-            let header = div().flex().flex_row().items_center().justify_between().child(pid("page.title", txt(&th, HEADLINE_MD, "Playlists // Vectors").color(th.text))).child(
+            let header = div().flex().flex_row().items_center().justify_between().child(txt(&th, HEADLINE_MD, "Playlists // Vectors").color(th.text)).child(
                 div()
                     .flex()
                     .flex_row()
                     .gap(px(space::SM))
-                    .child(pid("pls.btn.smart", new_btn("new-smart", "New smart playlist", "bolt", true).on_click(cx.listener(|_, _, _, cx| cx.emit(ListsEvent::EditSmart(None))))))
-                    .child(pid("pls.btn.new", new_btn("new-pl", "New playlist", "add", false).on_click(cx.listener(|this, _, _, cx| this.create(cx))))),
+                    .child(new_btn("new-smart", "New smart playlist", "bolt", true).on_click(cx.listener(|_, _, _, cx| cx.emit(ListsEvent::EditSmart(None)))))
+                    .child(new_btn("new-pl", "New playlist", "add", false).on_click(cx.listener(|this, _, _, cx| this.create(cx)))),
             );
             let mut page = div().flex().flex_col().gap(px(lm::PAGE_GAP)).p(px(lm::PAGE_PAD)).w_full().child(header);
             let grid = |cards: Vec<AnyElement>| div().flex().flex_row().flex_wrap().gap(px(lm::GRID_GAP)).children(cards);
@@ -361,7 +355,7 @@ impl Render for PlaylistsView {
                 let cards = (0..self.lists.len()).map(|i| self.card(th, false, i, cw, window, cx)).collect();
                 page = page.child(grid(cards));
             }
-            pid("page", page).into_any_element()
+            page.into_any_element()
         })
     }
 }

@@ -1,4 +1,4 @@
-//! Pure "does this play count yet?" logic — no I/O, no Tauri, no `windows`,
+//! Pure "does this play count yet?" logic — no I/O, no `windows`,
 //! so it's cheap to unit test exhaustively (pause, seek, repeat-one, short
 //! tracks) without a server or an engine. One verdict drives both the local
 //! listening history and the server scrobble, so the two always agree.

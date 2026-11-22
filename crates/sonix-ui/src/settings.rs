@@ -1,7 +1,4 @@
-//! Tiny local UI preferences (theme). Stored next to the user's config, never in the
-//! library: `%APPDATA%\SoniX.native\ui.json` (or `$HOME/.config/SoniX.native/ui.json`).
-// the parity build never reads or writes the user's ui.json, so these are unused there
-#![cfg_attr(feature = "parity", allow(dead_code))]
+//! Tiny local UI preferences (theme), stored as `ui.json` in the app's config dir (`sonix_real::config_dir`).
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 
@@ -12,16 +9,15 @@ pub struct UiPrefs {
 }
 
 fn path() -> Option<PathBuf> {
-    let base = std::env::var_os("APPDATA").map(PathBuf::from).or_else(|| std::env::var_os("HOME").map(|h| PathBuf::from(h).join(".config")))?;
-    Some(base.join("SoniX.native").join("ui.json"))
+    Some(sonix_real::config_dir().join("ui.json"))
 }
 
 pub fn load() -> UiPrefs {
     path().and_then(|p| std::fs::read_to_string(p).ok()).and_then(|s| serde_json::from_str(&s).ok()).unwrap_or_default()
 }
 
-/// `theme.svelte.ts: readStored()`: true when the user has picked a theme before (`ui.json` exists). Without one
-/// the web follows `prefers-color-scheme`; `main.rs` then asks the OS (`App::window_appearance`).
+/// True when the user has picked a theme before (`ui.json` exists). Without one `main.rs` follows the OS app
+/// theme (`App::window_appearance`).
 pub fn has_stored() -> bool {
     path().is_some_and(|p| p.exists())
 }

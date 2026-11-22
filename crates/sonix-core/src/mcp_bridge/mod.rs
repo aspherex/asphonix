@@ -364,7 +364,7 @@ impl McpBridge {
         let _ = std::fs::remove_file(Discovery::path(config_dir));
         #[cfg(windows)]
         let (endpoint, listener) = {
-            let endpoint = format!(r"\\.\pipe\sonix-native-mcp-{}", random_hex(8)?);
+            let endpoint = format!(r"\\.\pipe\sonix-mcp-{}", random_hex(8)?);
             let l = transport::bind(&endpoint).map_err(|e| format!("could not create the local pipe: {e}"))?;
             (endpoint, l)
         };

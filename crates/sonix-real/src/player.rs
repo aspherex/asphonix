@@ -1,4 +1,4 @@
-//! Playback over the vendored audio engine (WASAPI/cpal output, queue, gapless, Flow...).
+//! Playback over the audio engine (WASAPI/cpal output, queue, gapless, Flow...).
 use crate::reads::conv;
 use crate::{err, RealBackend};
 use sonix_api::*;
@@ -28,8 +28,8 @@ impl RealBackend {
         Ok(())
     }
     /// A command that changes the queue (play / reorder / enqueue / remove / jump / shuffle): once the engine has
-    /// processed it (a `GetQueue` round trip is ordered behind it), the UI is told with `Event::QueueChanged`, like the
-    /// reference's `queue-changed`, so the rail and the "which source is playing" state refresh.
+    /// processed it (a `GetQueue` round trip is ordered behind it), the UI is told with `Event::QueueChanged`,
+    /// so the rail and the "which source is playing" state refresh.
     fn send_queue(&self, c: EngineCommand) -> ApiResult<()> {
         self.0.engine.send(c);
         let _ = self.0.engine.request_blocking(|reply| EngineCommand::GetQueue { offset: 0, limit: 0, reply });
@@ -177,7 +177,7 @@ pub(crate) struct PlayOpts {
 }
 
 impl RealBackend {
-    /// Rolling `PlaySource` from `(id, artist)` rows (playlist/artist/genre/liked), like the WebView app's `*_source_cmd`.
+    /// Rolling `PlaySource` from `(id, artist)` rows (playlist/artist/genre/liked).
     pub(crate) fn play_rows(&self, kind: core::SourceKind, label: String, source_id: Option<String>, rows: Vec<(String, String)>, opts: PlayOpts) -> ApiResult<()> {
         let PlayOpts { shuffle, flow, start } = opts;
         let (track_ids, artists): (Vec<String>, Vec<Option<String>>) = rows.into_iter().map(|(id, a)| (id, (!a.is_empty()).then_some(a))).unzip();

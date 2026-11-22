@@ -1,22 +1,22 @@
-//! `lib/flow.ts`: the arc choices, the "Flow ▸" context-menu entry and the header FLOW button's menu with the pool's
-//! real coverage hint (`openFlowMenu`). Every Flow entry point of every source goes through here.
+//! Flow: the arc choices, the "Flow ▸" context-menu entry and the header FLOW button's menu with the pool's
+//! real coverage hint. Every Flow entry point of every source goes through here.
 use crate::widgets::context_menu::{ContextMenu, MenuItem};
 use gpui::{App, Bounds, Entity, Pixels, Window, canvas, prelude::*, px};
 use sonix_api::{FlowArc, FlowCoverageRequest, FlowPoolKind};
 use std::cell::Cell;
 use std::rc::Rc;
 
-/// `FLOW_ARCS`
+/// The Flow arcs: value, label, hint.
 pub const ARCS: [(FlowArc, &str, &str); 3] = [
     (FlowArc::Steady, "Steady", "Smooth transitions, even energy"),
     (FlowArc::Build, "Build", "Energy rises over each ~40 tracks"),
     (FlowArc::Peak, "Peak", "Rise, then cool down"),
 ];
 
-/// A Flow start for one source (`play(arc)`).
+/// A Flow start for one source, called with the chosen arc.
 pub type Play = Rc<dyn Fn(FlowArc, &mut App)>;
 
-/// `flowArcEntries`: Steady / Build / Peak.
+/// One menu entry per arc: Steady / Build / Peak.
 pub fn arc_entries(play: Play) -> Vec<MenuItem> {
     ARCS.iter()
         .map(|&(arc, label, hint)| {
@@ -26,12 +26,12 @@ pub fn arc_entries(play: Play) -> Vec<MenuItem> {
         .collect()
 }
 
-/// `flowMenuEntry`: the context menus' "Flow ▸".
+/// The context menus' "Flow ▸" submenu.
 pub fn menu_entry(play: Play, disabled: bool) -> MenuItem {
     MenuItem::submenu("Flow", arc_entries(play)).icon("sliders").disabled(disabled)
 }
 
-/// `kindNoun` of the coverage hint.
+/// The noun the coverage hint uses for a pool kind.
 pub fn noun(kind: FlowPoolKind) -> &'static str {
     match kind {
         FlowPoolKind::Playlist => "playlist",
@@ -47,8 +47,8 @@ pub fn pool(kind: FlowPoolKind, id: Option<String>, seed: Option<u32>) -> FlowCo
     FlowCoverageRequest { kind, id, filter: None, seed }
 }
 
-/// `openFlowMenu(anchor, req, noun, play)`: looks the coverage up off the UI thread, then opens the hint (disabled
-/// entry + rule) and the arcs under the button (`openContextMenuFor`: left edge, 4 px below).
+/// Looks the coverage up off the UI thread, then opens the hint (disabled entry + rule) and the arcs under the
+/// button (left edge, 4 px below).
 pub fn open_menu(menu: Entity<ContextMenu>, anchor: Bounds<Pixels>, req: FlowCoverageRequest, noun: &'static str, play: Play, window: &mut Window, cx: &mut App) {
     let b = crate::app::backend(cx);
     let at = gpui::point(anchor.left(), anchor.bottom() + px(4.));

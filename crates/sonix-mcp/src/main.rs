@@ -1,5 +1,5 @@
 //! `sonix-mcp.exe`: MCP server over stdio (register it with
-//! `claude mcp add sonix-native -- "<path>\sonix-mcp.exe"`). Everything on stdout is
+//! `claude mcp add sonix -- "<path>\sonix-mcp.exe"`). Everything on stdout is
 //! JSON-RPC; diagnostics go to stderr.
 
 use std::io::{BufReader, Write};

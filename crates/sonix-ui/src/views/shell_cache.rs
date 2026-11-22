@@ -18,12 +18,12 @@ fn style(d: gpui::Div) -> StyleRefinement {
 }
 
 fn top_part(sh: &mut Shell, window: &mut Window, cx: &mut Context<Shell>) -> AnyElement {
-    crate::probe::pid("topbar", sh.top_bar(window, cx)).into_any_element()
+    sh.top_bar(window, cx).into_any_element()
 }
 fn side_part(sh: &mut Shell, window: &mut Window, cx: &mut Context<Shell>) -> AnyElement {
     let vw = f32::from(window.viewport_size().width);
     let route = sh.router.current().clone();
-    crate::probe::pid("sidebar", sh.sidebar(vw, &route, window, cx)).into_any_element()
+    sh.sidebar(vw, &route, window, cx).into_any_element()
 }
 
 impl Shell {
@@ -42,7 +42,7 @@ impl Shell {
         let p = self.parts.as_ref().unwrap();
         let (top, side) = (p.top.clone(), p.side.clone());
         [
-            crate::probe::pid("titlebar", self.title_bar(window, cx)).into_any_element(),
+            self.title_bar(window, cx).into_any_element(),
             part::cached(top, style(div().h(px(crate::metrics::topbar::H)).w_full().flex_none())).into_any_element(),
             part::cached(side, style(div().w(px(Self::sidebar_width(vw))).h_full().flex_none())).into_any_element(),
         ]

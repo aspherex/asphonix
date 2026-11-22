@@ -1,11 +1,10 @@
-//! `Genres.svelte`: every genre with real album/track counts in one plain CSS grid (`minmax(220px, 1fr)`), sortable by
+//! The genres page: every genre with real album/track counts in one wrapping grid (cells at least 220 px), sortable by
 //! track count or A-Z, each card with a relative-size bar.
 use super::parts::{PageScroll, auto_fill, segmented};
 use super::{Ctx, navigate};
 use crate::app;
 use crate::metrics::library as m;
 use crate::metrics::space as sp;
-use crate::probe::pid;
 use crate::router::Route;
 use crate::text::txt;
 use crate::tracking::{BODY_SM, HEADLINE_MD, HEADLINE_SM, MONO_CODE, MONO_DATA};
@@ -70,26 +69,21 @@ impl Render for GenresView {
             .justify_between()
             .gap(px(sp::MD))
             .flex_none()
-            .child(pid("page.title", txt(&th, HEADLINE_MD, "Genres").color(th.text)))
-            .child(pid("lib.controls",
-                div()
+            .child(txt(&th, HEADLINE_MD, "Genres").color(th.text))
+            .child(div()
                     .flex()
                     .flex_row()
                     .items_center()
                     .gap(px(m::CONTROLS_GAP))
-                    .child(pid("genres.count", txt(&th, MONO_CODE, format!("{} GENRES", fmt_int(self.items.len() as u64))).color(th.muted)))
-                    .child(pid(
-                        "lib.seg",
-                        segmented(&th, "lib.seg", &options, self.sort, move |v, _, cx| {
+                    .child(txt(&th, MONO_CODE, format!("{} GENRES", fmt_int(self.items.len() as u64))).color(th.muted))
+                    .child(segmented(&th, "lib.seg", &options, self.sort, move |v, _, cx| {
                             let _ = this.update(cx, |t, cx| {
                                 t.sort = v;
                                 t.load(cx);
                             });
-                        }),
-                    )),
-            ));
+                        })));
         let body: AnyElement = if !self.loaded {
-            // native-only: placeholder genre cards (same box as the loaded ones) until the list arrives
+            // placeholder genre cards (same box as the loaded ones) until the list arrives
             let content_w = (self.w.get() - 2.0 * m::PAGE_PAD).max(1.0);
             let (cols, cw) = auto_fill(content_w, m::GENRE_MIN_CELL, sp::MD);
             let mut grid = div().flex().flex_row().flex_wrap().items_start().gap(px(sp::MD));
@@ -123,7 +117,7 @@ impl Render for GenresView {
             for (i, g) in self.items.iter().enumerate() {
                 let name = g.name.clone();
                 let pct = ((g.track_count as f32 / max_tracks) * 100.0).max(2.0);
-                // a `<button>`: Tab stop, Enter/Space open, `:focus-visible` = focus border + the UA ring
+                // Tab stop, Enter/Space open; keyboard focus shows the focus border and ring
                 let fh = super::cards::focus_handle(cx, super::cards::key_of("genre", &g.name));
                 let focused = fh.contains_focused(window, cx);
                 let open = name.clone();
@@ -151,11 +145,11 @@ impl Render for GenresView {
                     .child(div().flex().min_w_0().child(txt(&th, MONO_DATA, format!("{} ALBUMS · {} TRACKS", fmt_int(g.album_count as u64), fmt_int(g.track_count as u64))).color(th.muted)))
                     .child(div().mt(px(sp::XS)).h(px(m::GENRE_BAR_H)).bg(th.high).child(div().h_full().w(gpui::relative(pct / 100.0)).bg(th.accent)))
                     .on_click(move |_, _, cx| navigate(cx, Route::Genre(name.clone())));
-                grid = grid.child(if i < 8 { pid(format!("genres.card.{i}"), c).into_any_element() } else { c.into_any_element() });
+                grid = grid.child(c);
             }
             grid.into_any_element()
         };
-        let page = div().relative().w_full().flex_none().flex().flex_col().gap(px(m::PAGE_GAP)).p(px(m::PAGE_PAD)).child(super::parts::measure_keyed("genres", &self.w)).child(pid("lib.header", header)).child(pid("genres.body", body));
-        self.page.wrap(window, &th, "genres-scroll", pid("page", page))
+        let page = div().relative().w_full().flex_none().flex().flex_col().gap(px(m::PAGE_GAP)).p(px(m::PAGE_PAD)).child(super::parts::measure_keyed("genres", &self.w)).child(header).child(body);
+        self.page.wrap(window, &th, "genres-scroll", page)
     }
 }

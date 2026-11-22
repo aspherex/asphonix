@@ -1,5 +1,6 @@
-//! Read-only login test against the dev server. `cargo test -p sonix-real -- --ignored`
-//! with SONIX_ENV_FILE=<path to .env.local>. Credentials are read at runtime, never printed.
+//! Ignored, read-only integration test (login, profiles, restore, logout) against any Navidrome/Subsonic server you point it at.
+//! Run `cargo test -p sonix-real -- --ignored` with `SONIX_ENV_FILE=<path>`, a `KEY=value` file holding
+//! `SONIX_DEV_SERVER`, `SONIX_DEV_USER` and `SONIX_DEV_PASS`. Credentials are read at runtime, never printed.
 use sonix_api::*;
 use sonix_real::RealBackend;
 

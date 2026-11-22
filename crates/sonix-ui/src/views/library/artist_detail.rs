@@ -1,6 +1,6 @@
-//! `ArtistDetail.svelte`: header (cover, name, stats, play discography / flow / star / menu), the network-backed
+//! The artist page: header (cover, name, stats, play discography / flow / star / menu), the network-backed
 //! extras (Popular or Most played tracks, About with the 4-line bio clamp), the Core Releases grid and Fans also like.
-//! The local part renders at once; top tracks and info arrive later (the mock waits 450 / 700 ms) behind skeletons.
+//! The local part renders at once; top tracks and info arrive later behind skeletons.
 use super::cards::{CardItem, anchor_cell, card, open_menu_at};
 use super::entity_link::set_current;
 use super::fmtx;
@@ -10,7 +10,6 @@ use super::{Ctx, LibEvent, menus};
 use crate::app::{self, PlayerEvent};
 use crate::columns::visible_columns;
 use crate::metrics::library as m;
-use crate::probe::pid;
 use crate::router::Route;
 use crate::text::txt;
 use crate::theme::Theme;
@@ -56,7 +55,7 @@ fn seen_put(id: &str, f: impl FnOnce(&mut Seen)) {
         }
     });
 }
-/// A failed query evicts the entry: the next visit starts from skeletons and shows the web's error state, not a page the
+/// A failed query evicts the entry: the next visit starts from skeletons and shows the error state, not a page the
 /// backend no longer serves (artist gone after a sync, offline).
 fn seen_remove(id: &str) {
     SEEN.with(|c| c.borrow_mut().retain(|(k, _)| k != id));
@@ -153,7 +152,7 @@ impl ArtistDetailView {
                     }
                     Err(_) => {
                         t.error = true;
-                        // `load()` nulls `detail` before querying: a failed revisit shows ARTIST UNAVAILABLE, not the cache
+                        // a failed revisit drops the cached detail and shows ARTIST UNAVAILABLE, not the cache
                         if t.detail_cached {
                             t.detail = None;
                         }
@@ -241,7 +240,7 @@ impl ArtistDetailView {
                 let _ = t3.update(cx, |t, cx| t.play_top(i, cx));
             }),
         };
-        let r = rows::row(&th, &t, &st, o, m::TOP_ROW_H, Some(format!("artist.top.{i}")), cb, window)
+        let r = rows::row(&th, &t, &st, o, m::TOP_ROW_H, cb, window)
             .on_click(cx.listener(move |this, ev: &ClickEvent, window, cx| {
                 if ev.click_count() >= 2 {
                     this.play_top(i, cx);
@@ -259,7 +258,7 @@ impl ArtistDetailView {
                     cx.stop_propagation();
                 }),
             );
-        pid(format!("artist.top.{i}"), r).into_any_element()
+        r.into_any_element()
     }
 
     fn header(&mut self, th: &Theme, d: &ArtistDetail, window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
@@ -267,7 +266,7 @@ impl ArtistDetailView {
         let artist = &d.artist;
         let total_tracks: u32 = d.albums.iter().map(|a| a.song_count).sum();
         let total_duration: f64 = d.albums.iter().map(|a| a.duration).sum();
-        let art = pid("artist.art", art_slot(&th, &self.ctx.art, &self.ctx.backend, artist.cover_art.as_deref(), m::ARTIST_ART, true, 160, "artist", 36.0, window, cx));
+        let art = art_slot(&th, &self.ctx.art, &self.ctx.backend, artist.cover_art.as_deref(), m::ARTIST_ART, true, 160, "artist", 36.0, window, cx);
         let sep = || txt(&th, MONO_DATA, "·").color(th.muted);
         let stats = div()
             .flex()
@@ -281,7 +280,7 @@ impl ArtistDetailView {
         let has_albums = !d.albums.is_empty();
         let (id, id2, id3) = (artist.id.clone(), artist.id.clone(), artist.id.clone());
         let starred = artist.starred.is_some();
-        // native-only: the loaded artist source's button shows the active state
+        // the loaded artist source's button shows the active state
         let pst = self.ctx.player.read(cx).play_state(&crate::app::PlayTarget::Artist(artist.id.clone()));
         let fg = if pst.active() { th.accent_fg } else { th.accent_text };
         let play = div()
@@ -310,7 +309,7 @@ impl ArtistDetailView {
                     menus::play_artist(cx, id.clone(), false);
                 }
             });
-        // `openFlowMenu(button, { kind: "artist", id }, "artist", flow => playArtist(id, { flow }))`
+        // the Flow menu under the button; picking a flow plays the artist with it
         let (flow_cell, flow_menu, flow_id) = (self.flow_btn.clone(), self.ctx.menu.clone(), artist.id.clone());
         let flow = div()
             .id("artist-flow")
@@ -365,23 +364,23 @@ impl ArtistDetailView {
             .items_center()
             .gap(px(crate::metrics::space::SM))
             .mt(px(crate::metrics::space::SM))
-            .child(pid("artist.btn.play", play))
-            .child(pid("artist.btn.flow", flow))
-            .child(pid("artist.btn.star", star))
-            .child(pid("artist.btn.more", more));
+            .child(play)
+            .child(flow)
+            .child(star)
+            .child(more);
         let info = div()
             .flex()
             .flex_col()
             .gap(px(crate::metrics::space::XS))
             .justify_end()
             .min_w_0()
-            .child(pid("artist.name", div().flex().child(txt(&th, HEADLINE_LG, artist.name.clone()).color(th.text))))
-            .child(pid("artist.stats", stats))
-            .child(pid("artist.actions", actions));
-        pid("artist.header", div().flex().flex_row().gap(px(m::PAGE_PAD)).flex_none().child(art).child(info)).into_any_element()
+            .child(div().flex().child(txt(&th, HEADLINE_LG, artist.name.clone()).color(th.text)))
+            .child(stats)
+            .child(actions);
+        div().flex().flex_row().gap(px(m::PAGE_PAD)).flex_none().child(art).child(info).into_any_element()
     }
 
-    /// Native-only: `header()` with placeholders at the real sizes. The buttons carry their invisible labels so their
+    /// `header()` with placeholders at the real sizes. The buttons carry their invisible labels so their
     /// widths are the loaded ones.
     fn header_skeleton(th: &Theme) -> AnyElement {
         use crate::widgets::skeleton as sk;
@@ -396,21 +395,21 @@ impl ArtistDetailView {
             .items_center()
             .gap(px(crate::metrics::space::SM))
             .mt(px(crate::metrics::space::SM))
-            .child(pid("artist.btn.play", btn(crate::metrics::space::LG, 16.0, false, HEADLINE_SM, "PLAY DISCOGRAPHY")))
-            .child(pid("artist.btn.flow", btn(crate::metrics::space::MD, 15.0, true, LABEL_CAPS, "FLOW")))
-            .child(pid("artist.btn.star", sk::block(&th, m::BTN_H, m::BTN_H)))
-            .child(pid("artist.btn.more", sk::block(&th, m::BTN_H, m::BTN_H)));
+            .child(btn(crate::metrics::space::LG, 16.0, false, HEADLINE_SM, "PLAY DISCOGRAPHY"))
+            .child(btn(crate::metrics::space::MD, 15.0, true, LABEL_CAPS, "FLOW"))
+            .child(sk::block(&th, m::BTN_H, m::BTN_H))
+            .child(sk::block(&th, m::BTN_H, m::BTN_H));
         let info = div()
             .flex()
             .flex_col()
             .gap(px(crate::metrics::space::XS))
             .justify_end()
             .min_w_0()
-            .child(pid("artist.name", sk::text_slot(&th, HEADLINE_LG.line, 24.0, 1.0).w(px(320.))))
-            .child(pid("artist.stats", sk::text_slot(&th, MONO_DATA.line, 12.0, 1.0).w(px(220.))))
-            .child(pid("artist.actions", actions));
-        let art = pid("artist.art", div().size(px(m::ARTIST_ART)).flex_none().bg(th.high).border_1().border_color(th.border));
-        pid("artist.header", div().flex().flex_row().gap(px(m::PAGE_PAD)).flex_none().child(art).child(info)).into_any_element()
+            .child(sk::text_slot(&th, HEADLINE_LG.line, 24.0, 1.0).w(px(320.)))
+            .child(sk::text_slot(&th, MONO_DATA.line, 12.0, 1.0).w(px(220.)))
+            .child(actions);
+        let art = div().size(px(m::ARTIST_ART)).flex_none().bg(th.high).border_1().border_color(th.border);
+        div().flex().flex_row().gap(px(m::PAGE_PAD)).flex_none().child(art).child(info).into_any_element()
     }
 
     fn section_title(th: &Theme, text: &str) -> AnyElement {
@@ -424,16 +423,16 @@ impl ArtistDetailView {
         if most {
             title = title.child(div().ml(px(crate::metrics::space::SM)).opacity(0.8).child(txt(&th, MONO_CODE, "FROM YOUR LISTENING HISTORY").color(th.muted)));
         }
-        let mut sec = div().flex().flex_col().gap(px(crate::metrics::space::SM)).min_w_0().child(pid("artist.top.title", title));
+        let mut sec = div().flex().flex_col().gap(px(crate::metrics::space::SM)).min_w_0().child(title);
         if self.top_pending || self.loading {
             let mut rows_v = div().flex().flex_col().border_1().border_color(th.border).bg(th.low);
             for _ in 0..10 {
                 rows_v = rows_v.child(crate::widgets::skeleton::row(&th, m::TOP_ROW_H));
             }
-            sec = sec.child(pid("artist.top.list", rows_v));
+            sec = sec.child(rows_v);
         } else if self.top_items().is_empty() {
-            // native-only: keep the column (the web drops it) so About does not jump wider when no tracks arrive
-            sec = sec.child(pid("artist.top.list", div().flex().items_center().h(px(m::TOP_ROW_H)).px(px(crate::metrics::space::MD)).border_1().border_color(th.border).bg(th.low).child(txt(&th, MONO_CODE, "NO TRACKS.").color(th.muted))));
+            // keep the column so About does not jump wider when no tracks arrive
+            sec = sec.child(div().flex().items_center().h(px(m::TOP_ROW_H)).px(px(crate::metrics::space::MD)).border_1().border_color(th.border).bg(th.low).child(txt(&th, MONO_CODE, "NO TRACKS.").color(th.muted)));
         } else {
             let o = RowOpts { show_artist: false, cols: visible_columns(self.top_w.get()), actions: 2 };
             let n = self.top_items().len();
@@ -469,9 +468,9 @@ impl ArtistDetailView {
             for i in 0..n {
                 list = list.child(div().h(px(m::TOP_ROW_H)).child(self.top_row(i, o, window, cx)));
             }
-            sec = sec.child(pid("artist.top.list", list));
+            sec = sec.child(list);
         }
-        pid("artist.top", sec).into_any_element()
+        sec.into_any_element()
     }
 
     fn move_top(&mut self, delta: isize, cx: &mut Context<Self>) {
@@ -488,17 +487,17 @@ impl ArtistDetailView {
         let th = *th;
         let mut sec = div().relative().flex().flex_col().gap(px(crate::metrics::space::SM)).min_w_0().child(Self::section_title(&th, "About")).child(measure(&self.bio_w));
         if self.info_pending || self.loading {
-            // native-only: 4 slots of the bio's 19.5 px line height = the clamped height, so the arrival keeps it
+            // 4 slots of the bio's 19.5 px line height = the clamped height, so the arrival keeps it
             let sk = crate::widgets::skeleton::text_slot;
-            sec = sec.child(pid("artist.bio", div().flex().flex_col().child(sk(&th, 19.5, 14.0, 1.0)).child(sk(&th, 19.5, 14.0, 1.0)).child(sk(&th, 19.5, 14.0, 1.0)).child(sk(&th, 19.5, 14.0, 0.6))));
+            sec = sec.child(div().flex().flex_col().child(sk(&th, 19.5, 14.0, 1.0)).child(sk(&th, 19.5, 14.0, 1.0)).child(sk(&th, 19.5, 14.0, 1.0)).child(sk(&th, 19.5, 14.0, 0.6)));
         } else if let Some(bio) = self.info.as_ref().and_then(|i| i.biography.clone()) {
-            // `line-height: 1.5` of the 13 px body font, clamped to 4 lines until expanded
+            // line height 1.5 of the 13 px body font, clamped to 4 lines until expanded
             let lh = 13.0 * 1.5;
             let all = bio_lines(window, &bio, self.bio_w.get(), &th);
             let overflows = all.len() > 4;
             let expanded = self.bio_expanded;
             let spec = crate::tracking::TypeSpec { line: lh, ..BODY_MD };
-            // -webkit-line-clamp: 4: the fourth line is cut to make room for "…"
+            // clamped to 4 lines: the fourth line is cut to make room for "…"
             let shown: Vec<String> = if expanded || !overflows {
                 all
             } else {
@@ -511,7 +510,7 @@ impl ArtistDetailView {
             for l in shown {
                 p = p.child(div().flex().child(txt(&th, spec, l).color(th.muted)));
             }
-            sec = sec.child(pid("artist.bio", p));
+            sec = sec.child(p);
             if overflows || expanded {
                 let this = _cx.entity().downgrade();
                 sec = sec.child(
@@ -524,14 +523,14 @@ impl ArtistDetailView {
                 );
             }
         } else {
-            // native-only: the column stays (the web drops About), so Popular keeps its width
+            // the column stays without About, so Popular keeps its width
             sec = sec.child(div().flex().child(txt(&th, BODY_SM, "No biography.").color(th.muted)));
         }
-        pid("artist.about", sec).into_any_element()
+        sec.into_any_element()
     }
 }
 
-/// The visual lines `text` wraps to at `width` in the 13 px body font (`white-space: pre-line`: newlines break, spaces collapse at wraps).
+/// The visual lines `text` wraps to at `width` in the 13 px body font (newlines break, spaces collapse at wraps).
 fn bio_lines(window: &Window, text: &str, width: f32, th: &Theme) -> Vec<String> {
     if width <= 0.0 {
         return Vec::new();
@@ -586,10 +585,10 @@ impl Render for ArtistDetailView {
             };
             let mut page = div().relative().w_full().flex_none().flex().flex_col().p(px(m::PAGE_PAD)).gap(px(crate::metrics::space::XL)).child(super::parts::measure_keyed("artist.page", &self.page_w)).child(header);
             let content_w = (self.page_w.get() - 2.0 * m::PAGE_PAD).max(1.0);
-            // native-only: both columns always exist (skeleton, content or a short empty note), so nothing re-flows
+            // both columns always exist (skeleton, content or a short empty note), so nothing re-flows
             let (show_top, show_about) = (true, true);
             if show_top || show_about {
-                // `.extras { grid-template-columns: minmax(0, 1.4fr) minmax(0, 1fr); gap: lg }`, one column below 1100 px
+                // two columns 1.4 : 1 with an `lg` gap, one column below 1100 px
                 let stacked = vw < m::EXTRAS_STACK_BELOW;
                 let mut ex = div().flex().items_start().gap(px(m::PAGE_PAD));
                 ex = if stacked { ex.flex_col() } else { ex.flex_row() };
@@ -613,37 +612,32 @@ impl Render for ArtistDetailView {
                     let about = self.about(&th, window, cx);
                     ex = ex.child(col(about, 1.0));
                 }
-                page = page.child(pid("artist.extras", ex));
+                page = page.child(ex);
             }
             // Core Releases
             let (cols, cw) = auto_fill(content_w, 160.0, crate::metrics::space::MD);
             let mut grid = div().flex().flex_row().flex_wrap().gap(px(crate::metrics::space::MD));
             match detail.as_ref().filter(|_| !sk) {
                 Some(d) => {
-                    for (i, a) in d.albums.iter().enumerate() {
-                        let ids = (i < 8).then(|| format!("artist.album.{i}"));
-                        grid = grid.child(card(&self.ctx.clone(), &th, CardItem::Album(a), cw, None, ids, window, cx));
+                    for a in &d.albums {
+                        grid = grid.child(card(&self.ctx.clone(), &th, CardItem::Album(a), cw, None, window, cx));
                     }
                 }
-                // native-only: two rows of placeholder cards (the page keeps its scroll-gutter decision)
+                // two rows of placeholder cards (the page keeps its scroll-gutter decision)
                 None => {
                     for _ in 0..cols * 2 {
                         grid = grid.child(super::cards::card_skeleton(&th, cw));
                     }
                 }
             }
-            page = page.child(pid(
-                "artist.albums",
-                div().flex().flex_col().gap(px(crate::metrics::space::SM)).child(Self::section_title(&th, "Core Releases")).child(grid),
-            ));
+            page = page.child(div().flex().flex_col().gap(px(crate::metrics::space::SM)).child(Self::section_title(&th, "Core Releases")).child(grid));
             // Fans also like (below the albums so the network-loaded row never shifts them)
             if let Some(info) = self.info.clone().filter(|i| !i.similar.is_empty()) {
                 let mut row = div().flex().flex_row().flex_wrap().gap(px(crate::metrics::space::MD));
-                for (i, s) in info.similar.iter().enumerate() {
-                    let ids = (i < 8).then(|| format!("artist.similar.{i}"));
-                    row = row.child(card(&self.ctx.clone(), &th, CardItem::Artist(s), cw, None, ids, window, cx));
+                for s in &info.similar {
+                    row = row.child(card(&self.ctx.clone(), &th, CardItem::Artist(s), cw, None, window, cx));
                 }
-                page = page.child(pid("artist.similar", div().flex().flex_col().gap(px(crate::metrics::space::SM)).child(Self::section_title(&th, "Fans also like")).child(row)));
+                page = page.child(div().flex().flex_col().gap(px(crate::metrics::space::SM)).child(Self::section_title(&th, "Fans also like")).child(row));
             }
             page.into_any_element()
         } else {

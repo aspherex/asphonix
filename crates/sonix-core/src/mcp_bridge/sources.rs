@@ -1,7 +1,5 @@
-//! `PlaySource` builders the MCP tools share with the app's own Play buttons. Vendored from the reference
-//! (`ipc.rs` `play_all_cmd` / `playlist_source_cmd` / `artist_source_cmd` / `apply_playlist_access` / `play_mode`,
-//! `discovery.rs` `genre_source_cmd`, `smart_ipc.rs` `liked_source_cmd` / `smart_source_cmd`), kept in this
-//! module so the vendored `ipc.rs` / `discovery.rs` stay untouched. Bodies are verbatim (Tauri commands omitted).
+//! `PlaySource` builders the MCP tools share with the app's own Play buttons (play all, playlist, artist,
+//! genre, liked, smart playlist), plus the playlist-access and play-mode helpers.
 use crate::audio::EngineCommand;
 use crate::ipc::{
     FlowArc, IpcError, IpcErrorCode, IpcResult, Playlist, SortDir, SourceKind, SourceMode, TrackOrder, TrackSortField,

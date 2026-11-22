@@ -1,6 +1,6 @@
-//! Wire types of the library-browsing extras (`src/lib/ipc/types.ts`: Genre, ArtistInfo, ArtistTopTracks,
+//! Wire types of the library-browsing extras (Genre, ArtistInfo, ArtistTopTracks,
 //! HistoryEntry) and the `player_play_genre` / `player_play_artist` requests. Kept in their own file so the
-//! shared `types.rs` stays untouched by the library-routes port.
+//! shared `types.rs` stays focused on the core types.
 use crate::types::{Artist, FlowArc, Track};
 use serde::{Deserialize, Serialize};
 
@@ -35,7 +35,7 @@ pub struct PlayGenreRequest {
     pub shuffle: bool,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub start_track_id: Option<String>,
-    /// Flow: play as a Flow source with this arc (overrides shuffle; `modeOf` in mock.ts).
+    /// Flow: play as a Flow source with this arc (overrides shuffle).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub flow: Option<FlowArc>,
 }
@@ -48,7 +48,7 @@ pub struct PlayArtistRequest {
     pub shuffle: bool,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub start_track_id: Option<String>,
-    /// Flow: play as a Flow source with this arc (overrides shuffle; `modeOf` in mock.ts).
+    /// Flow: play as a Flow source with this arc (overrides shuffle).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub flow: Option<FlowArc>,
 }

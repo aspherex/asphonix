@@ -22,7 +22,7 @@
 //! `v`/`c` query params, so the audio engine can `GET` it directly with a
 //! plain HTTP client and does not need to know about Subsonic auth at all.
 
-#![allow(dead_code)] // public client surface; not every method has a caller yet in Phase 1
+#![allow(dead_code)] // public client surface; not every method has a caller yet
 
 mod models;
 mod discovery_models;
@@ -61,7 +61,7 @@ pub struct Credentials {
 
 /// An authenticated Subsonic/OpenSubsonic API client. Cheaply `Clone`able
 /// (the inner `reqwest::Client` is reference-counted), so it can be shared
-/// across async tasks (sync worker, IPC commands, art fetcher) without an
+/// across async tasks (sync worker, commands, art fetcher) without an
 /// `Arc<Mutex<_>>` wrapper.
 #[derive(Clone)]
 pub struct Client {
@@ -520,7 +520,7 @@ impl Client {
     }
 
     /// Fetches cover art bytes at the given pixel size (server-side resized,
-    /// so the WebView never receives a full-res image). Returns the bytes
+    /// so the client never downloads a full-res image). Returns the bytes
     /// plus the server's declared content-type, if any.
     pub async fn get_cover_art(&self, id: &str, size: Option<u32>) -> Result<(Vec<u8>, Option<String>), IpcError> {
         let mut extra = vec![("id", id.to_string())];
@@ -697,7 +697,7 @@ fn map_reqwest_err(e: reqwest::Error) -> IpcError {
         code: IpcErrorCode::Network,
         // `without_url`: reqwest's Display embeds the full request URL, which for
         // Subsonic carries the per-request auth params (u/t/s). That message
-        // reaches the log file and the webview, so never include it.
+        // reaches the log file and the UI, so never include it.
         message: format!("request failed: {}", e.without_url()),
     }
 }
@@ -927,12 +927,11 @@ pub(crate) mod tests {
     }
 
     // -----------------------------------------------------------------
-    // Integration tests against the real Navidrome dev server. Run with:
+    // Integration tests against a real Navidrome/Subsonic server. Run with:
     //   cargo test -- --ignored --nocapture
-    // Credentials come from env vars (see `.env.local` at the worktree
-    // root) — this is a READ-ONLY admin account against a real library;
-    // these tests never call startScan, user/settings management, or
-    // mutate anything beyond `SONIX_TEST_*`-prefixed playlists they create
+    // Credentials come from the `SONIX_DEV_SERVER` / `SONIX_DEV_USER` /
+    // `SONIX_DEV_PASS` env vars. These tests never call startScan or
+    // user/settings management, and mutate nothing beyond `SONIX_TEST_*`-prefixed playlists they create
     // and delete themselves.
     // -----------------------------------------------------------------
 
@@ -952,9 +951,9 @@ pub(crate) mod tests {
 
     pub(crate) fn dev_server_env() -> (String, String, String) {
         (
-            std::env::var("SONIX_DEV_SERVER").expect("SONIX_DEV_SERVER not set (see .env.local)"),
-            std::env::var("SONIX_DEV_USER").expect("SONIX_DEV_USER not set (see .env.local)"),
-            std::env::var("SONIX_DEV_PASS").expect("SONIX_DEV_PASS not set (see .env.local)"),
+            std::env::var("SONIX_DEV_SERVER").expect("SONIX_DEV_SERVER not set"),
+            std::env::var("SONIX_DEV_USER").expect("SONIX_DEV_USER not set"),
+            std::env::var("SONIX_DEV_PASS").expect("SONIX_DEV_PASS not set"),
         )
     }
 

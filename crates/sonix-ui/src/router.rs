@@ -1,5 +1,5 @@
-//! Hash-router equivalent (`src/lib/router.svelte.ts`): a route enum, a history
-//! stack with back/forward, and the `#/…` fragment form used by the Svelte app.
+//! Routing: a route enum, a history stack with back/forward, and a path form of each
+//! route for logs.
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum Route {
@@ -25,7 +25,7 @@ pub enum Route {
 }
 
 impl Route {
-    /// Fragment without the leading `#/`, same names as the Svelte router.
+    /// Path form of the route (`album/<id>`, `genre/<encoded name>`, ...).
     pub fn path(&self) -> String {
         match self {
             Route::Home => "home".into(),
@@ -48,38 +48,9 @@ impl Route {
             Route::Login => "login".into(),
         }
     }
-
-    pub fn parse(s: &str) -> Option<Route> {
-        let s = s.trim_start_matches('#').trim_start_matches('/');
-        let (head, rest) = match s.split_once('/') {
-            Some((h, r)) => (h, Some(r)),
-            None => (s, None),
-        };
-        Some(match (head, rest) {
-            ("home", None) | ("", None) => Route::Home,
-            ("albums", None) => Route::Albums,
-            ("artists", None) => Route::Artists,
-            ("tracks", None) => Route::Tracks,
-            ("genres", None) => Route::Genres,
-            ("history", None) => Route::History,
-            ("playlists", None) => Route::Playlists,
-            ("liked", None) => Route::Liked,
-            ("settings", None) => Route::Settings,
-            ("search", None) => Route::Search,
-            ("nowplaying", None) => Route::NowPlaying,
-            ("favorites", None) => Route::Favorites,
-            ("login", None) => Route::Login,
-            ("smart", Some(id)) if !id.is_empty() => Route::Smart(id.into()),
-            ("playlist", Some(id)) if !id.is_empty() => Route::Playlist(id.into()),
-            ("album", Some(id)) if !id.is_empty() => Route::Album(id.into()),
-            ("artist", Some(id)) if !id.is_empty() => Route::Artist(id.into()),
-            ("genre", Some(n)) if !n.is_empty() => Route::Genre(decode_component(n)),
-            _ => return None,
-        })
-    }
 }
 
-/// `encodeURIComponent`: everything except `A-Z a-z 0-9 - _ . ! ~ * ' ( )`.
+/// Percent-encodes everything except `A-Z a-z 0-9 - _ . ! ~ * ' ( )`.
 pub fn encode_component(s: &str) -> String {
     let mut out = String::new();
     for b in s.bytes() {
@@ -92,35 +63,12 @@ pub fn encode_component(s: &str) -> String {
     out
 }
 
-/// `decodeURIComponent` (invalid escapes are kept literally).
-pub fn decode_component(s: &str) -> String {
-    let b = s.as_bytes();
-    let mut out = Vec::with_capacity(b.len());
-    let mut i = 0;
-    while i < b.len() {
-        if b[i] == b'%' && i + 2 < b.len() && let Ok(v) = u8::from_str_radix(&s[i + 1..i + 3], 16) {
-            out.push(v);
-            i += 3;
-        } else {
-            out.push(b[i]);
-            i += 1;
-        }
-    }
-    String::from_utf8_lossy(&out).into_owned()
+/// The route a cold start opens: Home, or Tracks when the perf harness (`SONIX_SCRIPT`) drives the list.
+pub fn initial_route(scripted: bool) -> Route {
+    if scripted { Route::Tracks } else { Route::Home }
 }
 
-/// The route a cold start opens: `router.svelte.ts parseHash()` with no hash is `home` (the native app has no URL
-/// to resume). `SONIX_ROUTE` (screenshots) picks another one; the env-driven perf/debug scripts (`SONIX_SCRIPT`,
-/// `SONIX_PLAY`, `SONIX_MENU`) drive the Tracks list and start there unless a route is given.
-pub fn initial_route(env_route: Option<&str>, scripted: bool) -> Route {
-    match env_route.and_then(Route::parse) {
-        Some(r) => r,
-        None if scripted => Route::Tracks,
-        None => Route::Home,
-    }
-}
-
-/// Browser-like history: navigating drops the forward entries; navigating to the
+/// Back/forward history: navigating drops the forward entries; navigating to the
 /// route already shown is a no-op.
 #[derive(Debug, Clone)]
 pub struct Router {
@@ -174,32 +122,15 @@ mod tests {
     use super::*;
 
     #[test]
-    fn cold_start_opens_home_like_parse_hash_without_a_hash() {
-        assert_eq!(initial_route(None, false), Route::Home);
-        assert_eq!(initial_route(Some("albums"), false), Route::Albums);
-        assert_eq!(initial_route(Some("#/nope"), false), Route::Home, "an unknown route falls back to home");
-        assert_eq!(initial_route(None, true), Route::Tracks, "perf/debug scripts drive the Tracks list");
-        assert_eq!(initial_route(Some("nowplaying"), true), Route::NowPlaying);
+    fn cold_start_opens_home() {
+        assert_eq!(initial_route(false), Route::Home);
+        assert_eq!(initial_route(true), Route::Tracks, "the perf script drives the Tracks list");
     }
 
     #[test]
-    fn parse_and_path_round_trip() {
-        for r in [
-            Route::Home,
-            Route::Tracks,
-            Route::NowPlaying,
-            Route::Playlist("pl_3".into()),
-            Route::Album("al_9".into()),
-            Route::Genre("Drum & Bass".into()),
-        ] {
-            assert_eq!(Route::parse(&format!("#/{}", r.path())), Some(r.clone()), "{r:?}");
-        }
+    fn path_encodes_genre_names() {
+        assert_eq!(Route::Album("al_9".into()).path(), "album/al_9");
         assert_eq!(Route::Genre("Drum & Bass".into()).path(), "genre/Drum%20%26%20Bass");
-        assert_eq!(Route::parse("#/genre/Drum%20%26%20Bass"), Some(Route::Genre("Drum & Bass".into())));
-        assert_eq!(Route::parse("#/"), Some(Route::Home));
-        assert_eq!(Route::parse("#/nope"), None);
-        assert_eq!(Route::parse("#/playlist/"), None);
-        assert_eq!(Route::parse("#/tracks/extra"), None);
     }
 
     #[test]

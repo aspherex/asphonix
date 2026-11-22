@@ -1,5 +1,5 @@
-//! `RealBackend`: the `Backend` trait over the vendored SONIX core (`sonix-core`).
-//! Every `Backend` method is wired; the remaining gaps are listed in `docs/HANDOFF.md`.
+//! `RealBackend`: the `Backend` trait over the SONIX core (`sonix-core`).
+//! Every `Backend` method is wired.
 mod art;
 mod extras;
 mod player;
@@ -17,21 +17,43 @@ use std::sync::atomic::AtomicU64;
 use std::sync::{Arc, Mutex};
 use sonix_core::library::Db;
 
-/// Keychain service name and data-dir name: never the installed app's `dev.sonix.app`.
-pub const IDENTIFIER: &str = "dev.sonix.native";
+/// Keychain service name and data-dir name.
+pub const IDENTIFIER: &str = "dev.sonix.app";
 
-/// Library DB dir (`%LOCALAPPDATA%dev.sonix.native`).
+fn env_dir(var: &str) -> Option<PathBuf> {
+    std::env::var_os(var).filter(|v| !v.is_empty()).map(PathBuf::from)
+}
+
+#[cfg(not(windows))]
+fn home_join(rel: &str) -> Option<PathBuf> {
+    env_dir("HOME").map(|h| h.join(rel))
+}
+
+/// Library DB, caches and logs: `%LOCALAPPDATA%\dev.sonix.app` on Windows, `~/Library/Application Support/dev.sonix.app`
+/// on macOS, `$XDG_DATA_HOME/dev.sonix.app` (default `~/.local/share`) elsewhere.
 pub fn data_dir() -> PathBuf {
-    let base = std::env::var_os("LOCALAPPDATA").map(PathBuf::from).unwrap_or_else(|| PathBuf::from("."));
-    let d = base.join(IDENTIFIER);
+    #[cfg(windows)]
+    let base = env_dir("LOCALAPPDATA");
+    #[cfg(target_os = "macos")]
+    let base = home_join("Library/Application Support");
+    #[cfg(all(not(windows), not(target_os = "macos")))]
+    let base = env_dir("XDG_DATA_HOME").or_else(|| home_join(".local/share"));
+    let d = base.unwrap_or_else(std::env::temp_dir).join(IDENTIFIER);
     let _ = std::fs::create_dir_all(&d);
     d
 }
 
-/// Where a profile/session lives (`%APPDATA%\dev.sonix.native`).
+/// Profiles, settings and the session: `%APPDATA%\dev.sonix.app` on Windows, `~/Library/Application Support/dev.sonix.app`
+/// on macOS, `$XDG_CONFIG_HOME/dev.sonix.app` (default `~/.config`) elsewhere. Same rule as `sonix_mcp::wire::config_dir`,
+/// which finds the bridge's `mcp.json` here.
 pub fn config_dir() -> PathBuf {
-    let base = std::env::var_os("APPDATA").map(PathBuf::from).unwrap_or_else(|| PathBuf::from("."));
-    base.join(IDENTIFIER)
+    #[cfg(windows)]
+    let base = env_dir("APPDATA");
+    #[cfg(target_os = "macos")]
+    let base = home_join("Library/Application Support");
+    #[cfg(all(not(windows), not(target_os = "macos")))]
+    let base = env_dir("XDG_CONFIG_HOME").or_else(|| home_join(".config"));
+    base.unwrap_or_else(std::env::temp_dir).join(IDENTIFIER)
 }
 
 #[derive(Clone, Default)]
@@ -50,11 +72,11 @@ struct Inner {
     data: PathBuf,
     db: Arc<Db>,
     epoch: AtomicU64,
-    /// Reference `state.rs`: held for a whole library sync, so at most one runs at a time (background
+    /// Held for a whole library sync, so at most one runs at a time (background
     /// resyncs skip while one runs, full syncs wait). Two overlapping catalog syncs get different
     /// generations and the later one's stale-row sweep deletes pages the earlier one re-wrote.
     sync_lock: tokio::sync::Mutex<()>,
-    /// Reference `full_sync_pending`: `epoch + 1` while a full sync of this session runs or waits, so
+    /// `epoch + 1` while a full sync of this session runs or waits, so
     /// `auth_connect` + the login screen's `library_sync_start { full: true }` fetch the catalog once.
     full_sync_pending: AtomicU64,
     client: Arc<std::sync::RwLock<Option<Client>>>,
@@ -235,7 +257,7 @@ impl RealBackend {
         let epoch = self.0.epoch.load(std::sync::atomic::Ordering::SeqCst);
         self.0.rt.spawn(async move {
             use std::sync::atomic::Ordering::SeqCst;
-            // Reference `perform_sync`: coalesce duplicate full requests within one session.
+            // Coalesce duplicate full requests within one session.
             let pending_marker = epoch + 1;
             if full && me.0.full_sync_pending.swap(pending_marker, SeqCst) == pending_marker {
                 return;
@@ -337,7 +359,7 @@ impl RealBackend {
         }
         self.0.epoch.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
         if !same {
-            // Reference `connect_account`: a different server/user (also the first login after a logout) starts clean.
+            // A different server/user (also the first login after a logout) starts clean.
             // Stop + wait for the closing listen row before the wipe, so it goes with the old account; the art cache
             // ids belong to the other library too.
             self.flush_listen();
@@ -368,7 +390,7 @@ impl AuthApi for RealBackend {
         Ok(wire_caps(&caps))
     }
 
-    /// Reference `auth_logout`: stop the engine and flush the listen writer first, drop the client, cancel a running
+    /// Stop the engine and flush the listen writer first, drop the client, cancel a running
     /// sync, then clear everything local (profile entry, keychain, `connection.json`, library mirror, art cache) even if
     /// one step fails; the first error is reported.
     fn auth_logout(&self) -> ApiResult<()> {

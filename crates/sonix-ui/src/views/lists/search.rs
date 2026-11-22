@@ -1,5 +1,5 @@
-//! `Search.svelte`: the global search page. The query lives in the top bar's input (shared entity); results
-//! come from one `searchType: all` request after an 80 ms debounce, tabs show the real totals, arrows move a
+//! The global search page. The query lives in the top bar's input (shared entity); results
+//! come from one `SearchType::All` request after an 80 ms debounce, tabs show the real totals, arrows move a
 //! flat selection, Enter opens / plays, Shift+Enter enqueues a track.
 use super::menus::{self, TrackMenu};
 use super::ui::scroll_page;
@@ -7,7 +7,6 @@ use super::ListsEvent;
 use crate::app;
 use crate::art::{self, ArtHandle};
 use crate::metrics::{lists as lm, space};
-use crate::probe::pid;
 use crate::router::Route;
 use crate::text::txt;
 use crate::theme::Theme;
@@ -140,10 +139,6 @@ impl SearchView {
         }
     }
 
-    #[cfg(feature = "parity")]
-    pub(crate) fn parity_state(&self) -> serde_json::Value {
-        serde_json::json!({ "searchSelected": self.selected, "searchTab": self.tab as u8, "searchTotal": self.flat().len() })
-    }
 
     fn open(&mut self, item: &Flat, cx: &mut Context<Self>) {
         let Some(r) = &self.results else { return };
@@ -173,7 +168,7 @@ impl SearchView {
         }
     }
 
-    /// Enter / Shift+Enter on the selection (`onKeydown`).
+    /// Enter / Shift+Enter on the selection.
     pub fn enter(&mut self, shift: bool, cx: &mut Context<Self>) {
         let flat = self.flat();
         let Some(item) = flat.get(self.selected).cloned() else { return };
@@ -249,7 +244,7 @@ impl SearchView {
         self.show_menu(items, pos, cx);
     }
 
-    fn row(&mut self, th: Theme, flat_ix: usize, item: Flat, last: bool, pid_name: Option<String>, cx: &mut Context<Self>) -> AnyElement {
+    fn row(&mut self, th: Theme, flat_ix: usize, item: Flat, last: bool, cx: &mut Context<Self>) -> AnyElement {
         let r = self.results.as_ref().unwrap();
         let selected = self.selected == flat_ix;
         let (title, sub, format, time): (String, String, Option<String>, Option<String>) = match &item {
@@ -271,7 +266,7 @@ impl SearchView {
             }
         };
         let is_track = matches!(item, Flat::Track(_));
-        // `startSonixDrag`: tracks / album / artist rows are drag sources (playlists are not)
+        // tracks / album / artist rows are drag sources (playlists are not)
         let drag = match &item {
             Flat::Track(i) => Some(crate::dnd::DragPayload::Tracks(vec![r.tracks.items[*i].id.clone()])),
             Flat::Album(i) => Some(crate::dnd::DragPayload::Album { id: r.albums.items[*i].id.clone(), name: r.albums.items[*i].name.clone() }),
@@ -279,7 +274,7 @@ impl SearchView {
             Flat::Playlist(_) => None,
         };
         let (it_click, it_dbl, it_menu) = (item.clone(), item.clone(), item.clone());
-        let el = div()
+        div()
             .id(("sr", flat_ix))
             .when_some(drag, |d, p| d.on_drag(crate::dnd::SonixDrag(p), crate::dnd::ghost(th)))
             .flex()
@@ -319,11 +314,8 @@ impl SearchView {
                     this.context_menu(it_menu.clone(), ev.position, cx);
                     cx.stop_propagation();
                 }),
-            );
-        match pid_name {
-            Some(n) => pid(n, el).into_any_element(),
-            None => el.into_any_element(),
-        }
+            )
+            .into_any_element()
     }
 }
 
@@ -344,9 +336,7 @@ impl Render for SearchView {
             for (i, (t, label, n)) in tabs.into_iter().enumerate() {
                 let active = self.tab == t;
                 let (bg, fg, bc) = if active { (th.accent, th.accent_text, th.accent_fg) } else { (th.mid, th.muted, th.border) };
-                tabs_row = tabs_row.child(pid(
-                    format!("sr.tab.{i}"),
-                    div()
+                tabs_row = tabs_row.child(div()
                         .id(("sr-tab", i))
                         .px(px(space::MD))
                         .py(px(space::XS))
@@ -360,11 +350,10 @@ impl Render for SearchView {
                             this.tab = t;
                             this.selected = 0;
                             cx.notify();
-                        })),
-                ));
+                        })));
             }
             let title = if self.query.is_empty() { "Index Search".to_string() } else { format!("// {}", self.query) };
-            let header = div().flex().flex_col().gap(px(space::SM)).child(pid("sr.title", div().flex().child(txt(&th, HEADLINE_MD, title).color(th.text)))).child(pid("sr.tabs", tabs_row));
+            let header = div().flex().flex_col().gap(px(space::SM)).child(div().flex().child(txt(&th, HEADLINE_MD, title).color(th.text))).child(tabs_row);
             let mut page = div().flex().flex_col().gap(px(lm::PAGE_GAP)).p(px(lm::PAGE_PAD)).w_full().child(header);
             let hint = |s: String| txt(&th, BODY_SM, s).color(th.muted);
             if self.query.is_empty() {
@@ -412,7 +401,7 @@ impl Render for SearchView {
                         .border_color(if selected { th.focus } else { th.border })
                         .when(selected, |d| d.shadow(super::hot_shadow(&th, 2.0)))
                         .cursor(CursorStyle::PointingHand)
-                        .child(pid("sr.hero.art", div().size(px(64.)).flex_none().flex().items_center().justify_center().overflow_hidden().bg(th.high).text_color(th.muted).child(art_inner)))
+                        .child(div().size(px(64.)).flex_none().flex().items_center().justify_center().overflow_hidden().bg(th.high).text_color(th.muted).child(art_inner))
                         .child(
                             div()
                                 .flex()
@@ -424,12 +413,11 @@ impl Render for SearchView {
                                 .child(div().flex().child(txt(&th, MONO_DATA, sub).color(th.muted))),
                         )
                         .on_click(cx.listener(move |this, _, _, cx| this.open(&first, cx)));
-                    page = page.child(pid("sr.hero", hero));
+                    page = page.child(hero);
                 }
                 // groups
                 let groups: [(&str, Tab, usize, usize); 4] = [("Tracks", Tab::Track, r.tracks.items.len(), 0), ("Albums", Tab::Album, r.albums.items.len(), 1), ("Artists", Tab::Artist, r.artists.items.len(), 2), ("Playlists", Tab::Playlist, r.playlists.items.len(), 3)];
                 let mut base = 0usize;
-                let mut first_group = true;
                 for (label, tab, n, kind) in groups {
                     if n == 0 || !(self.tab == Tab::All || self.tab == tab) {
                         continue;
@@ -442,11 +430,10 @@ impl Render for SearchView {
                             2 => Flat::Artist(k),
                             _ => Flat::Playlist(k),
                         };
-                        list = list.child(self.row(th, base + k, item, k + 1 == n, first_group.then(|| format!("sr.row.{k}")), cx));
+                        list = list.child(self.row(th, base + k, item, k + 1 == n, cx));
                     }
                     base += n;
-                    first_group = false;
-                    page = page.child(pid(format!("sr.group.{kind}"), div().flex().flex_col().gap(px(space::XS)).child(div().flex().child(txt(&th, LABEL_CAPS, label).color(th.muted))).child(list)));
+                    page = page.child(div().flex().flex_col().gap(px(space::XS)).child(div().flex().child(txt(&th, LABEL_CAPS, label).color(th.muted))).child(list));
                 }
             }
             let _ = hard_shadow;

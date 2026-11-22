@@ -1,4 +1,4 @@
-//! `PlaylistDetail.svelte`, `Liked.svelte` and `SmartPlaylistDetail.svelte`: three pages with the same
+//! Playlist detail, Liked Songs and smart playlist detail: three pages with the same
 //! skeleton (120 px art + title block + actions, then the track table), one entity.
 use sonix_api::bucket_for;
 use super::menus::{self, TrackMenu};
@@ -8,7 +8,6 @@ use super::{ListsEvent, hot_shadow};
 use crate::app::{self, PlayerModel};
 use crate::art::{self, ArtHandle};
 use crate::metrics::lists as lm;
-use crate::probe::pid;
 use crate::router::Route;
 use crate::text::txt;
 use crate::theme::Theme;
@@ -97,26 +96,19 @@ fn table_cfg(kind: &PageKind, read_only: bool) -> TableCfg {
 }
 
 fn initial_seed() -> u32 {
-    // `Math.floor(Math.random() * 1_000_000)`; the parity harness pins Math.random() to 0.5
-    #[cfg(feature = "parity")]
-    {
-        500_000
-    }
-    #[cfg(not(feature = "parity"))]
-    {
-        std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| (d.as_nanos() % 999_999) as u32 + 1).unwrap_or(1)
-    }
+    // a random seed per page open, so every visit shuffles differently
+    std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| (d.as_nanos() % 999_999) as u32 + 1).unwrap_or(1)
 }
 
 impl TrackPage {
     pub fn new(kind: PageKind, backend: Arc<dyn Backend>, art: ArtHandle, player: &Entity<PlayerModel>, menu: &Entity<ContextMenu>, cx: &mut Context<Self>) -> Self {
         let table = cx.new(|cx| {
             let mut t = Table::new(backend.clone(), player, table_cfg(&kind, false), cx);
-            // native-only: the loading skeleton embeds the table; until `playlists_get` fills it, skeleton rows, not the empty text
+            // the loading skeleton embeds the table; until `playlists_get` fills it, skeleton rows, not the empty text
             t.pending = matches!(kind, PageKind::Playlist(_));
             t
         });
-        // native-only play-button state: repaint when the loaded track / status / source changes
+        // play-button state: repaint when the loaded track / status / source changes
         let subs = vec![cx.subscribe(&table, Self::on_table), cx.subscribe(player, |_, _, _: &crate::app::PlayerEvent, cx| cx.notify())];
         let mut this = Self {
             kind,
@@ -252,24 +244,13 @@ impl TrackPage {
         self.table.update(cx, |t, _| t.release());
     }
 
-    #[cfg(feature = "parity")]
-    pub(crate) fn parity_state(&self, window: &Window, cx: &gpui::App) -> serde_json::Value {
-        let mut v = self.table.read(cx).parity_state(window);
-        v["pageKind"] = match &self.kind {
-            PageKind::Playlist(_) => "playlist",
-            PageKind::Liked => "liked",
-            PageKind::Smart(_) => "smart",
-        }
-        .into();
-        v
-    }
 
     // ------------------------------------------------------------ actions
     fn play_source(&self, start: Option<String>, shuffle: bool, cx: &mut Context<Self>) {
         self.play_with(start, shuffle, None, cx);
     }
 
-    /// `playPlaylist|playLiked|playSmart(…, { startTrackId, shuffle, flow })`
+    /// Plays this page's list (playlist, Liked Songs or smart playlist) from `start`, optionally shuffled or with a flow.
     fn play_with(&self, start: Option<String>, shuffle: bool, flow: Option<FlowArc>, cx: &gpui::App) {
         let (kind, seed) = (self.kind.clone(), self.seed);
         app::call(cx, move |b| {
@@ -281,7 +262,7 @@ impl TrackPage {
         });
     }
 
-    /// The header FLOW button (`openFlowMenu` with this list's pool and coverage noun).
+    /// The header FLOW button (the Flow menu with this list's pool and coverage noun).
     fn open_flow(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let (kind, id, seed) = match &self.kind {
             PageKind::Playlist(id) => (FlowPoolKind::Playlist, Some(id.clone()), None),
@@ -298,7 +279,7 @@ impl TrackPage {
     }
 
     /// Tracks of the menu selection, handed to `then`. Rows the table has evicted (or never loaded, after Ctrl+A) are
-    /// fetched on a background task first (`resolveTracks`), so the UI never blocks on the backend.
+    /// fetched on a background task first, so the UI never blocks on the backend.
     fn with_selection(&mut self, ix: usize, cx: &mut Context<Self>, then: impl FnOnce(&mut Self, Vec<Track>, &mut Context<Self>) + 'static) {
         let (idx, have) = self.table.update(cx, |t, _| {
             let idx = t.menu_indices(ix);
@@ -363,7 +344,7 @@ impl TrackPage {
                     let _ = if starred { b.star_remove(req) } else { b.star_add(req) };
                 });
                 if let PageKind::Playlist(_) = self.kind {
-                    // PlaylistDetail patches its own copy: the row's heart flips at once
+                    // the playlist page patches its own copy: the row's heart flips at once
                     let stamp = Some(sonix_api::format::utc_iso(self.backend.now_ms()));
                     self.table.update(cx, |tb, cx| tb.patch_track(*ix, |t| t.starred = if starred { None } else { stamp.clone() }, cx));
                 }
@@ -379,7 +360,7 @@ impl TrackPage {
                 });
             }
             TableEvent::AddToPlaylist { ix, pos } => {
-                // `openAddToPlaylistMenu(anchor, t.id)`: the row's own track, not the selection
+                // add-to-playlist for the row's own track, not the selection
                 if let Some(id) = self.table.read(cx).track_at(*ix).map(|t| t.id.clone()) {
                     crate::overlays::add_to_playlist(cx, vec![id], *pos);
                 }
@@ -475,7 +456,7 @@ impl TrackPage {
         let ids: Vec<String> = d.tracks.iter().map(|t| t.id.clone()).collect();
         let rows: Vec<RowItem> = d.tracks.iter().cloned().map(|t| RowItem::Track { t: Box::new(t), label: None }).collect();
         self.table.update(cx, |t, cx| t.set_local_keep_scroll(rows, cx));
-        // The web app has no toast here; on failure (e.g. the backend refused a stale/hidden-entry list) tell the user
+        // on failure (e.g. the backend refused a stale/hidden-entry list) tell the user
         // and reload so the rows match the server.
         let b = self.backend.clone();
         cx.spawn(async move |this, cx| {
@@ -588,7 +569,7 @@ impl Render for TrackPage {
         let th = app::theme(cx);
         match self.load {
             Load::Loading => {
-                // native-only: the loaded page's geometry (art, title block, 40 px actions, the table's own skeleton rows)
+                // the loaded page's geometry (art, title block, 40 px actions, the table's own skeleton rows)
                 use crate::widgets::skeleton as sk;
                 let actions = div().flex().flex_row().items_center().gap(px(lm::ACTIONS_GAP)).mt(px(lm::ACTIONS_MT)).child(sk::block(&th, 150.0, 40.0)).child(sk::block(&th, 40.0, 40.0)).child(sk::block(&th, 40.0, 40.0));
                 let info = div()
@@ -602,7 +583,7 @@ impl Render for TrackPage {
                     .child(actions);
                 let art = div().w(px(lm::ART)).h(px(lm::ART)).flex_none().bg(th.high).border_1().border_color(th.border);
                 let header = div().flex().flex_row().gap(px(lm::HEADER_GAP)).flex_none().child(art).child(info);
-                return pid("page", div().size_full().flex().flex_col().p(px(lm::PAGE_PAD)).gap(px(lm::PAGE_GAP)).child(header).child(pid("tp.panel", self.table.clone()))).into_any_element();
+                return div().size_full().flex().flex_col().p(px(lm::PAGE_PAD)).gap(px(lm::PAGE_GAP)).child(header).child(self.table.clone()).into_any_element();
             }
             Load::Error => {
                 let msg = match self.kind {
@@ -652,8 +633,8 @@ impl Render for TrackPage {
                 info = info.child(div().flex().flex_row().gap(px(lm::INFO_GAP)).child(badge(&th, Tone::Accent, "Smart playlist")).child(badge(&th, Tone::Default, "Local · not on server")));
             }
         }
-        let name_el = pid("pl.name", div().flex().child(txt(&th, HEADLINE_LG, name).color(th.text)));
-        info = if matches!(self.kind, PageKind::Playlist(_)) { info.child(name_el.into_any_element()) } else { info.child(pid("page.title", name_el).into_any_element()) };
+        let name_el = div().flex().child(txt(&th, HEADLINE_LG, name).color(th.text));
+        info = info.child(name_el);
         // stats
         let stat = |s: String| txt(&th, MONO_DATA, s).color(th.muted);
         let dot = || txt(&th, MONO_DATA, "·").color(th.muted);
@@ -682,7 +663,7 @@ impl Render for TrackPage {
                 }
             }
         }
-        info = info.child(pid("pl.stats", stats));
+        info = info.child(stats);
         if let PageKind::Smart(_) = &self.kind {
             let s = self.smart.as_ref().unwrap();
             info = info.child(div().id("pg-rules").tip(super::smart_rules::describe_smart(&s.input), th).flex().min_w_0().child(txt(&th, MONO_CODE, super::smart_rules::describe_smart(&s.input)).color(th.muted).ellipsis()));
@@ -697,31 +678,23 @@ impl Render for TrackPage {
         });
         let mut actions = div().flex().flex_row().items_center().gap(px(lm::ACTIONS_GAP)).mt(px(lm::ACTIONS_MT));
         actions = actions
-            .child(pid("pl.btn.play", play_btn("pg-play", &th, "PLAY", empty, pst).when(!empty, |b| b.on_click(cx.listener(move |this, _, _, cx| if pst.active() { crate::playback::toggle(cx) } else { this.play_source(None, false, cx) })))))
-            .child(pid("pl.btn.shuffle", sec_btn("pg-shuffle", &th, "shuffle", "SHUFFLE", empty).when(!empty, |b| b.on_click(cx.listener(|this, _, _, cx| this.play_source(None, true, cx))))))
-            .child(pid(
-                "pl.btn.flow",
-                sec_btn("pg-flow", &th, "sliders", "FLOW", empty).tip("Order by tempo, key and genre, keeping bit-perfect playback", th).relative().child(crate::flow::bounds_probe(self.flow_btn.clone())).when(!empty, |b| b.on_click(cx.listener(|this, _, window, cx| this.open_flow(window, cx)))),
-            ));
+            .child(play_btn("pg-play", &th, "PLAY", empty, pst).when(!empty, |b| b.on_click(cx.listener(move |this, _, _, cx| if pst.active() { crate::playback::toggle(cx) } else { this.play_source(None, false, cx) }))))
+            .child(sec_btn("pg-shuffle", &th, "shuffle", "SHUFFLE", empty).when(!empty, |b| b.on_click(cx.listener(|this, _, _, cx| this.play_source(None, true, cx)))))
+            .child(sec_btn("pg-flow", &th, "sliders", "FLOW", empty).tip("Order by tempo, key and genre, keeping bit-perfect playback", th).relative().child(crate::flow::bounds_probe(self.flow_btn.clone())).when(!empty, |b| b.on_click(cx.listener(|this, _, window, cx| this.open_flow(window, cx)))));
         match &self.kind {
             PageKind::Playlist(_) => {
                 actions = actions
-                    .child(pid("pl.btn.rename", icon_btn40("pg-rename", &th, "edit", ro).tip(if ro { "Read-only playlist" } else { "Rename" }, th).when(!ro, |b| b.on_click(cx.listener(|this, _, _, cx| this.rename(cx))))))
-                    .child(pid("pl.btn.delete", icon_btn40("pg-delete", &th, "trash", ro).tip(if ro { "Read-only playlist" } else { "Delete" }, th).when(!ro, |b| b.on_click(cx.listener(|this, _, _, cx| this.delete(cx))))))
-                    .child(pid(
-                        "pl.btn.more",
-                        icon_btn40("pg-more", &th, "more", false).on_click(cx.listener(|this, ev: &ClickEvent, _, cx| {
+                    .child(icon_btn40("pg-rename", &th, "edit", ro).tip(if ro { "Read-only playlist" } else { "Rename" }, th).when(!ro, |b| b.on_click(cx.listener(|this, _, _, cx| this.rename(cx)))))
+                    .child(icon_btn40("pg-delete", &th, "trash", ro).tip(if ro { "Read-only playlist" } else { "Delete" }, th).when(!ro, |b| b.on_click(cx.listener(|this, _, _, cx| this.delete(cx)))))
+                    .child(icon_btn40("pg-more", &th, "more", false).on_click(cx.listener(|this, ev: &ClickEvent, _, cx| {
                             let Some(d) = &this.detail else { return };
                             let items = menus::playlist_menu_items(cx.entity().downgrade(), &d.playlist, true);
                             let p = ev.position();
                             this.show_menu(items, p, cx);
-                        })),
-                    ));
+                        })));
             }
             PageKind::Liked => {
-                actions = actions.child(pid(
-                    "pl.btn.rename",
-                    div()
+                actions = actions.child(div()
                         .id("pg-starred")
                         .group("hv")
                         .px(px(crate::metrics::space::SM))
@@ -729,25 +702,23 @@ impl Render for TrackPage {
                         .text_color(th.muted)
                         .hover(move |s| s.text_color(th.accent_fg))
                         .child(txt(&th, LABEL_CAPS, "Starred albums →"))
-                        .on_click(cx.listener(|_, _, _, cx| cx.emit(ListsEvent::Navigate(Route::Favorites)))),
-                ));
+                        .on_click(cx.listener(|_, _, _, cx| cx.emit(ListsEvent::Navigate(Route::Favorites)))));
             }
             PageKind::Smart(_) => {
                 let random = self.smart.as_ref().map(|s| s.input.sort == SmartSort::Random).unwrap_or(false);
-                let mut names = ["pl.btn.rename", "pl.btn.delete", "pl.btn.more", "pl.btn.x"].into_iter();
                 if random {
-                    actions = actions.child(pid(names.next().unwrap(), icon_btn40("pg-reroll", &th, "sync", false).tip("Re-roll the random pick", th).on_click(cx.listener(|this, _, _, cx| {
+                    actions = actions.child(icon_btn40("pg-reroll", &th, "sync", false).tip("Re-roll the random pick", th).on_click(cx.listener(|this, _, _, cx| {
                         this.seed = (this.seed.wrapping_mul(1_103_515_245).wrapping_add(12_345)) % 999_999 + 1;
                         this.reload(cx);
-                    }))));
+                    })));
                 }
                 actions = actions
-                    .child(pid(names.next().unwrap(), icon_btn40("pg-edit", &th, "sliders", false).tip("Edit rules", th).on_click(cx.listener(|this, _, _, cx| {
+                    .child(icon_btn40("pg-edit", &th, "sliders", false).tip("Edit rules", th).on_click(cx.listener(|this, _, _, cx| {
                         if let Some(s) = this.smart.clone() {
                             cx.emit(ListsEvent::EditSmart(Some(Box::new(s))));
                         }
-                    }))))
-                    .child(pid(names.next().unwrap(), icon_btn40("pg-dup", &th, "add", false).tip("Duplicate", th).on_click(cx.listener(|this, _, _, cx| {
+                    })))
+                    .child(icon_btn40("pg-dup", &th, "add", false).tip("Duplicate", th).on_click(cx.listener(|this, _, _, cx| {
                         let Some(s) = this.smart.clone() else { return };
                         let b = this.backend.clone();
                         cx.spawn(async move |this, cx| {
@@ -760,29 +731,23 @@ impl Render for TrackPage {
                             });
                         })
                         .detach();
-                    }))))
+                    })))
                     .child({
                         let mb = self.more_bounds.clone();
-                        pid(
-                            names.next().unwrap(),
-                            icon_btn40("pg-more", &th, "more", false).relative().child(gpui::canvas(move |b, _, _| mb.set(b), |_, _, _, _| ()).absolute().size_full()).on_click(cx.listener(|this, _: &ClickEvent, _, cx| {
+                        icon_btn40("pg-more", &th, "more", false).relative().child(gpui::canvas(move |b, _, _| mb.set(b), |_, _, _, _| ()).absolute().size_full()).on_click(cx.listener(|this, _: &ClickEvent, _, cx| {
                                 let Some(s) = this.smart.clone() else { return };
                                 let items = menus::smart_menu_items(cx.entity().downgrade(), &s, this.seed, true);
                                 // : left edge, 4 px below the button
                                 let b = this.more_bounds.get();
                                 this.show_menu(items, gpui::point(b.origin.x, b.origin.y + b.size.height + px(4.)), cx);
-                            })),
-                        )
+                            }))
                     });
             }
         }
         info = info.child(actions);
 
-        let header = div().flex().flex_row().gap(px(lm::HEADER_GAP)).flex_none().child(pid("pl.art", self.art_box(&th, window, cx))).child(info);
-        pid(
-            "page",
-            div().size_full().flex().flex_col().p(px(lm::PAGE_PAD)).gap(px(lm::PAGE_GAP)).child(header).child(pid("tp.panel", self.table.clone())),
-        )
+        let header = div().flex().flex_row().gap(px(lm::HEADER_GAP)).flex_none().child(self.art_box(&th, window, cx)).child(info);
+        div().size_full().flex().flex_col().p(px(lm::PAGE_PAD)).gap(px(lm::PAGE_GAP)).child(header).child(self.table.clone())
         .into_any_element()
     }
 }

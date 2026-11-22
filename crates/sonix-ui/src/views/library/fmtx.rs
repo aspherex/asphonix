@@ -1,17 +1,17 @@
-//! Formatting helpers of `format.ts` that the library routes need (`formatTotalDuration`, `summarizeFormats`,
-//! `formatRelativeTime`) and `Date#toLocaleDateString()` (en-US, local time zone) for the album telemetry panel.
+//! Formatting helpers of the library routes (total duration, format summary, relative time) and the
+//! short local date of the album telemetry panel.
 use sonix_api::Track;
 use sonix_api::format::format_track_format;
 use std::collections::BTreeSet;
 
-/// `formatTotalDuration`: "2 HR 5 MIN" / "37 MIN".
+/// "2 HR 5 MIN" / "37 MIN".
 pub fn total_duration(total_seconds: f64) -> String {
     let total_min = (total_seconds / 60.0).round() as i64;
     let (h, m) = (total_min / 60, total_min % 60);
     if h > 0 { format!("{h} HR {m} MIN") } else { format!("{m} MIN") }
 }
 
-/// `summarizeFormats`: one label when every track agrees, else the suffixes.
+/// One label when every track agrees, else the suffixes.
 pub fn summarize_formats(tracks: &[Track]) -> String {
     if tracks.is_empty() {
         return "—".into();
@@ -21,7 +21,7 @@ pub fn summarize_formats(tracks: &[Track]) -> String {
     if uniq.len() == 1 {
         return labels[0].clone();
     }
-    // JS Set order = first appearance
+    // in order of first appearance
     let mut suffixes: Vec<String> = Vec::new();
     for t in tracks {
         let s = t.format.suffix.to_uppercase();
@@ -101,8 +101,7 @@ fn local_offset_ms(_: i64) -> i64 {
     0
 }
 
-/// The user's short date format for a calendar date (what Chromium's `toLocaleDateString()` follows on Windows: the
-/// OS regional settings).
+/// The user's short date format for a calendar date (the OS regional settings).
 #[cfg(windows)]
 fn system_short_date(y: i64, m: i64, d: i64) -> Option<String> {
     #[repr(C)]
@@ -127,7 +126,7 @@ fn system_short_date(y: i64, m: i64, d: i64) -> Option<String> {
     (n > 1).then(|| String::from_utf16_lossy(&buf[..n as usize - 1]))
 }
 
-/// `new Date(iso).toLocaleDateString()` in en-US: `M/D/YYYY` in the local time zone.
+/// The date of `iso` in the local time zone: the OS short date format, else `M/D/YYYY`.
 pub fn locale_date(iso: &str) -> String {
     let Some(ms) = parse_iso_ms(iso) else { return "Invalid Date".into() };
     let (y, m, d) = civil_from_days((ms + local_offset_ms(ms)).div_euclid(86_400_000));
@@ -142,7 +141,7 @@ pub fn now_ms() -> i64 {
     std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_millis() as i64).unwrap_or(0)
 }
 
-/// `formatRelativeTime` against `now`.
+/// Relative time ("JUST NOW", "3MIN AGO", ...) against `now`.
 pub fn relative_time(iso: Option<&str>, now: i64) -> String {
     let Some(then) = iso.and_then(parse_iso_ms) else { return "—".into() };
     let diff_sec = ((now - then) / 1000).max(0);

@@ -1,6 +1,6 @@
 //! Output backends: WASAPI exclusive/shared on Windows, a `cpal`
 //! shared-mode fallback everywhere else (macOS CoreAudio hog mode is
-//! post-MVP per `PLAN.md`).
+//! not implemented yet).
 //!
 //! Both backends expose the same tiny surface (`list_devices`, `negotiate`,
 //! `spawn_render`) so `audio::engine` doesn't need any `cfg` branches of its
@@ -64,7 +64,7 @@ impl PeakMeter {
 
 /// Everything the render thread feeds the analyzer thread with: the mono
 /// downmix for the FFT and the stereo peak meter. Both are only fed while
-/// `active` is set (a webview is showing them; see `Prefs::spectrum_active`).
+/// `active` is set (a view is showing them; see `Prefs::spectrum_active`).
 pub struct MonoTap {
     pub mono: Producer<f32>,
     pub peaks: Arc<PeakMeter>,
@@ -130,7 +130,7 @@ pub struct RenderHandle {
     /// Hands the render thread a freshly-seeked ring to resume from on the
     /// *same* open device stream (`engine::Engine::seek`'s common path) —
     /// see `windows::render_loop`'s seek branch. The `cpal` fallback accepts
-    /// and drains this too (for interface parity) but still reopens the
+    /// and drains this too (same interface) but still reopens the
     /// stream underneath since `cpal` has no flush/reset primitive exposed.
     pub seek_tx: Sender<Consumer<u8>>,
     /// Seeks the render thread has applied (incremented, Release, right after

@@ -1,5 +1,5 @@
-//! Continuity features, vendored from the reference `continuity.rs` + `ipc::radio_pool` with the Tauri commands
-//! turned into plain functions: the production autoplay provider, "Resume from server" check/apply.
+//! Continuity features as plain functions: the radio pool, the production autoplay provider,
+//! "Resume from server" check/apply.
 
 use std::sync::{Arc, RwLock as StdRwLock};
 
@@ -21,7 +21,6 @@ pub const RADIO_MIN_TRACKS: usize = 10;
 
 /// The radio pool for a seed (shared by `radio_start` and autoplay): server similarity first, topped up from the
 /// local fallback, restricted to tracks the local mirror has, 1-star tracks removed. Parallel `(ids, artists)`.
-/// (`ipc::radio_pool` in the reference.)
 pub async fn radio_pool(client: &Client, db: &Db, kind: StarTargetType, seed_id: &str) -> Result<(Vec<String>, Vec<Option<String>>), IpcError> {
     let local_kind = match kind {
         StarTargetType::Track => library::StarKindLocal::Track,

@@ -1,4 +1,4 @@
-//! Shared tokio runtime shim for the vendored code that used `tauri::async_runtime`.
+//! Shared tokio runtime for the core's background tasks (`spawn`, `block_on`).
 use std::future::Future;
 use std::sync::OnceLock;
 

@@ -1,10 +1,10 @@
 //! OS media integration: Windows System Media Transport Controls (SMTC) —
 //! the "Now Playing" card in the volume flyout/Action Center — plus hardware
 //! media key handling. macOS (`MPNowPlayingInfoCenter`) is a cfg stub,
-//! post-MVP per `PLAN.md`.
+//! not implemented yet.
 //!
 //! Driven entirely by `audio::EngineHandle::subscribe_player_state()` (the
-//! Phase 4 in-process hook added in `engine.rs`) — the exact same
+//! in-process hook in `engine.rs`) — the exact same
 //! `PlayerState` the UI gets, never a second source of truth. Button/media-key
 //! presses are translated straight back into `EngineCommand`s.
 //!
@@ -21,7 +21,7 @@ mod windows_backend;
 
 use crate::ipc::{PlaybackStatus, PlayerState};
 
-/// Everything the OS media integration needs from the app (reference: `AppHandle` + `EngineHandle` + `ArtCache`).
+/// Everything the OS media integration needs from the app (engine commands, player-state watch, cover bytes).
 pub trait MediaHost: Send + Sync + 'static {
     /// Transport commands from the OS (play/pause/next/previous/seek) go to the engine.
     fn send(&self, cmd: crate::audio::EngineCommand);
@@ -36,11 +36,11 @@ pub type BoxFut<T> = std::pin::Pin<Box<dyn std::future::Future<Output = T> + Sen
 /// Registers SONIX's window (`hwnd`, a Win32 HWND) as a System Media Transport Controls source and keeps it
 /// in sync with the player state.
 ///
-/// MUST be called on the thread that owns the window (reference: `run_on_main_thread`), and not on the
-/// window-show path: the caller delays it (reference `REGISTER_DELAY`, 1.5 s). `GetForWindow` and the event
+/// MUST be called on the thread that owns the window, and not on the
+/// window-show path: the caller delays it (about 1.5 s). `GetForWindow` and the event
 /// registration run right here; the update loop then runs on its own thread and ends when `generation` no
 /// longer equals `gen` (the window was re-attached) or the engine is gone. Non-Windows: no-op (macOS
-/// `MPNowPlayingInfoCenter` is post-MVP).
+/// `MPNowPlayingInfoCenter` is not implemented yet).
 #[cfg(windows)]
 pub fn attach(host: std::sync::Arc<dyn MediaHost>, hwnd: isize, generation: std::sync::Arc<std::sync::atomic::AtomicU64>, gen: u64) {
     windows_backend::attach(host, hwnd, generation, gen);

@@ -31,7 +31,7 @@
 /// stats, for local smart-playlist rules) and `playlists.readonly`.
 pub const SCHEMA_VERSION: i64 = 5;
 
-/// Drops every object this module creates (and the pre-versioned Phase 1
+/// Drops every object this module creates (and the older pre-versioned
 /// layout's tables, which used the same names).
 pub const DROP_SQL: &str = r#"
 DROP TRIGGER IF EXISTS artists_ai; DROP TRIGGER IF EXISTS artists_ad; DROP TRIGGER IF EXISTS artists_au;

@@ -2,11 +2,9 @@
 //! Transport Controls source (`ISystemMediaTransportControlsInterop::
 //! GetForWindow`) and keeps it in sync with `PlayerState`.
 //!
-//! Vendored from the reference `media/windows_backend.rs` (SoniX @ 642db10). Changes: no Tauri (`AppHandle`,
-//! `run_on_main_thread`, `AppState`/`ArtCache`) - the window handle is passed in as a raw HWND and the
-//! engine / cover bytes come through [`MediaHost`]. Like the reference, `GetForWindow` and the event
-//! registration run on the thread that owns the window: [`attach`] is called there by the UI (which also
-//! applies the reference's 1.5 s delay). The `SystemMediaTransportControls` object is WinRT-agile
+//! The window handle is passed in as a raw HWND; engine commands, player state and cover bytes come through
+//! [`MediaHost`]. `GetForWindow` and the event registration run on the thread that owns the window:
+//! [`attach`] is called there by the UI (after a 1.5 s delay). The `SystemMediaTransportControls` object is WinRT-agile
 //! (`Send + Sync` in the `windows` crate), so later updates and the OS callbacks need no thread hops.
 
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
@@ -259,7 +257,7 @@ fn request_thumbnail(host: Arc<dyn MediaHost>, display: SystemMediaTransportCont
 async fn fetch_and_set_thumbnail(host: &Arc<dyn MediaHost>, display: &Display, cover_art_id: String) {
     let Some(bytes) = host.cover(cover_art_id, THUMBNAIL_SIZE).await else { return };
     // An in-memory WinRT stream of the encoded bytes: a `file://` URI via `CreateFromUri` is silently never
-    // shown for an unpackaged app (reference E2E finding).
+    // shown for an unpackaged app.
     let thumb = match thumbnail_stream(&bytes).await {
         Ok(t) => t,
         Err(e) => {

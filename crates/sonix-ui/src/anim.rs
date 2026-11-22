@@ -1,11 +1,11 @@
-//! Animation primitives driven by `crate::clock` (so the parity runner can freeze/step time):
-//! CSS timing functions, the hover-transition tracker and the now-playing bars' keyframes.
+//! Animation primitives driven by `crate::clock`:
+//! cubic-bezier timing functions, the hover-transition tracker and the now-playing bars' keyframes.
 use crate::metrics::anim as m;
 use gpui::{Window, point, px};
 use std::cell::RefCell;
 use std::collections::HashMap;
 
-/// CSS `cubic-bezier(x1, y1, x2, y2)` evaluated at time fraction `t` in [0, 1].
+/// The cubic-bezier timing curve `(x1, y1, x2, y2)` evaluated at time fraction `t` in [0, 1].
 pub fn cubic_bezier(x1: f32, y1: f32, x2: f32, y2: f32, t: f32) -> f32 {
     let t = t.clamp(0.0, 1.0);
     let (cx, bx) = (3.0 * x1, 3.0 * (x2 - x1) - 3.0 * x1);
@@ -42,24 +42,24 @@ pub fn cubic_bezier(x1: f32, y1: f32, x2: f32, y2: f32, t: f32) -> f32 {
     ((ay * s + by) * s + cy) * s
 }
 
-/// CSS `ease` (the default `transition-timing-function`).
+/// The standard `ease` curve, `cubic-bezier(0.25, 0.1, 0.25, 1)`; every hover transition uses it.
 pub fn ease(t: f32) -> f32 {
     cubic_bezier(0.25, 0.1, 0.25, 1.0, t)
 }
-/// CSS `ease-in-out`.
+/// The standard `ease-in-out` curve.
 pub fn ease_in_out(t: f32) -> f32 {
     cubic_bezier(0.42, 0.0, 0.58, 1.0, t)
 }
 
-/// `scaleY` of bar `i` at clock time `t` seconds (`@keyframes bar`, 0.9 s ease-in-out infinite, negative delays).
+/// `scaleY` of bar `i` at clock time `t` seconds (0.9 s ease-in-out loop, each bar phase-shifted by a negative delay).
 pub fn bar_scale(i: usize, t: f32) -> f32 {
     let p = ((t - m::BARS_DELAY[i]) / m::BARS_PERIOD).rem_euclid(1.0);
-    // animation-timing-function applies per keyframe interval: 0..50 % up, 50..100 % down
+    // the easing applies per keyframe interval: 0..50 % up, 50..100 % down
     let (a, b, u) = if p < 0.5 { (m::BARS_MIN, m::BARS_MAX, p / 0.5) } else { (m::BARS_MAX, m::BARS_MIN, (p - 0.5) / 0.5) };
     a + (b - a) * ease_in_out(u)
 }
 
-/// Heights (CSS px) of the three bars: animated while playing, static `scaleY(.33)` when paused.
+/// Heights (logical px) of the three bars: animated while playing, static `scaleY(.33)` when paused.
 pub fn bar_heights(playing: bool, t: f32) -> [f32; 3] {
     let h = crate::metrics::tracks::BARS_H;
     if playing { [bar_scale(0, t) * h, bar_scale(1, t) * h, bar_scale(2, t) * h] } else { [m::BARS_PAUSED * h; 3] }
@@ -76,9 +76,8 @@ thread_local! {
     static TWEENS: RefCell<HashMap<(&'static str, usize), Tween>> = RefCell::new(HashMap::new());
 }
 
-/// A CSS-like `transition` of one value: call every frame with the *target* value; returns the
-/// current eased value and asks for another frame while it is still moving (not while the test
-/// clock is frozen: the runner steps the clock and repaints itself). `key` identifies the element.
+/// A transition of one value: call every frame with the *target* value; returns the
+/// current eased value and asks for another frame while it is still moving. `key` identifies the element.
 pub fn transition(window: &mut Window, key: (&'static str, usize), target: f32, duration: f32) -> f32 {
     let now = crate::clock::now();
     TWEENS.with(|t| {
@@ -90,7 +89,7 @@ pub fn transition(window: &mut Window, key: (&'static str, usize), target: f32, 
             *tw = Tween { from: cur, to: target, start: now };
         }
         let v = value_at(tw, now, duration);
-        if (now - tw.start) < duration as f64 && !crate::clock::frozen() {
+        if (now - tw.start) < duration as f64 {
             window.request_animation_frame();
         }
         v
@@ -125,7 +124,7 @@ mod tests {
     fn bezier_endpoints_and_symmetry() {
         assert!(ease(0.0).abs() < 1e-5 && (ease(1.0) - 1.0).abs() < 1e-5);
         assert!((ease_in_out(0.5) - 0.5).abs() < 1e-3);
-        // CSS `ease` is ahead of linear early on
+        // `ease` is ahead of linear early on
         assert!(ease(0.25) > 0.35 && ease(0.25) < 0.50);
     }
 
@@ -142,7 +141,7 @@ mod tests {
     }
 }
 
-/// Linear mix of two colours in sRGB (what CSS `transition` of a colour does, premultiplication aside).
+/// Linear mix of two colours in sRGB.
 pub fn mix(a: gpui::Hsla, b: gpui::Hsla, t: f32) -> gpui::Hsla {
     let (a, b): (gpui::Rgba, gpui::Rgba) = (a.into(), b.into());
     gpui::Rgba { r: a.r + (b.r - a.r) * t, g: a.g + (b.g - a.g) * t, b: a.b + (b.b - a.b) * t, a: a.a + (b.a - a.a) * t }.into()

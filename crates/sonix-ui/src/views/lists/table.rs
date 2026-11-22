@@ -1,7 +1,6 @@
-//! The shared dense track table of the list routes (`TrackRow.svelte` + `VirtualList.svelte` + the
-//! `.tracks-panel` around them): header row, fixed 36 px rows, hover / selected / active, the
-//! width-driven Year/Added hiding rule, optional drag handle / add / remove buttons, day-header rows
-//! (History) and keyboard handling that mirrors `trackList.ts`.
+//! The shared dense track table of the list routes (rows in a virtual list inside a framed panel): header row,
+//! fixed 36 px rows, hover / selected / active, the width-driven Year/Added hiding rule, optional drag handle /
+//! add / remove buttons, day-header rows (History) and the shared track-list keyboard handling.
 //!
 //! One entity per list. Data lives here (a `Vec` for playlist-sized lists, a [`Pager`] for server-sized
 //! ones); everything route-specific (what Play does, which menu opens) is reported as a [`TableEvent`].
@@ -13,7 +12,6 @@ use crate::app::{self, PlayerEvent, PlayerModel};
 use crate::columns::{Columns, visible_columns};
 use crate::metrics::{anim as m_anim, lists as lm, tracks as tr};
 use crate::pager::{PAGE, Pager};
-use crate::probe::pid;
 use crate::router::Route;
 use crate::selection::Selection;
 use crate::text::txt;
@@ -46,7 +44,7 @@ enum Data {
     Paged { pager: Pager<RowItem>, fetch: Fetch, loaded: bool },
 }
 
-/// What the arrow keys do (`PlaylistDetail` moves only `selectedIndex`, the others also select the row).
+/// What the arrow keys do (the playlist page moves only the cursor, the others also select the row).
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub enum Arrows {
     Select,
@@ -62,7 +60,7 @@ pub struct TableCfg {
     pub remove_btn: bool,
     pub multi: bool,
     pub arrows: Arrows,
-    /// trailing action buttons the head reserves (`actionCount`)
+    /// trailing action buttons the head reserves
     pub action_count: usize,
     pub empty: &'static str,
 }
@@ -74,7 +72,7 @@ pub enum TableEvent {
     Remove(usize),
     /// right click / "..." / menu key: `ix` is the row, `pos` the anchor in window coordinates
     Menu { ix: usize, pos: Point<Pixels> },
-    /// the row's "+": `pos` = the bottom-right corner of the button (`AddToPlaylistMenu` anchors to its rect)
+    /// the row's "+": `pos` = the bottom-right corner of the button (the add-to-playlist menu anchors there)
     AddToPlaylist { ix: usize, pos: Point<Pixels> },
     Reorder { from: usize, to: usize },
     SelectionChanged,
@@ -105,7 +103,7 @@ pub struct Table {
     hover_row: Option<usize>,
     body_bounds: Rc<Cell<Bounds<Pixels>>>,
     last_width: f32,
-    /// Native-only: the owner's rows are still on their way (a playlist page before `set_local`), so skeleton rows show
+    /// The owner's rows are still on their way (a playlist page before `set_local`), so skeleton rows show
     /// instead of the empty text of the initial empty local list. Cleared by every `set_*`.
     pub pending: bool,
     _subs: Vec<Subscription>,
@@ -224,7 +222,7 @@ impl Table {
             RowItem::Day { .. } => None,
         }
     }
-    /// Tracks of the selection indices that are resident (`resolveTracks`: paged lists only hold ~1,600 rows).
+    /// Tracks of the selection indices that are resident (paged lists only hold ~1,600 rows).
     pub fn tracks_at(&self, indices: &[usize]) -> Vec<Track> {
         indices.iter().filter_map(|i| self.track_at(*i).cloned()).collect()
     }
@@ -266,24 +264,6 @@ pub fn refresh_visible(&mut self, cx: &mut Context<Self>) {
         self.sel.len()
     }
 
-    #[cfg(feature = "parity")]
-    pub(crate) fn parity_state(&self, window: &Window) -> serde_json::Value {
-        let sel = self.sel.indices();
-        let scroll = f32::from(-self.list.0.borrow().base_handle.offset().y);
-        let titles: Vec<String> = if scroll < 36.0 {
-            (0..3).map(|i| match self.item(i) { Some(RowItem::Track { t, .. }) => t.title.clone(), _ => String::new() }).collect()
-        } else {
-            vec![]
-        };
-        serde_json::json!({
-            "titles": titles,
-            "tableFocus": self.focus.is_focused(window),
-            "selectionCount": if sel.len() > 1 { sel.len() } else { 0 },
-            "selection": sel.iter().filter(|i| **i < 12).collect::<Vec<_>>(),
-            "scrollTop": scroll,
-            "listTotal": self.total(),
-        })
-    }
 
     // ------------------------------------------------------------ keyboard
     fn scroll_to_cursor(&mut self, n: usize) {
@@ -294,7 +274,7 @@ pub fn refresh_visible(&mut self, cx: &mut Context<Self>) {
         }
     }
 
-    /// `trackListKeydown` ArrowUp/Down; History additionally skips day headers (`moveSelection`).
+    /// ArrowUp/Down; History additionally skips day headers.
     fn key_move(&mut self, dir: isize, cx: &mut Context<Self>) {
         let total = self.total();
         if total == 0 {
@@ -372,24 +352,24 @@ pub fn refresh_visible(&mut self, cx: &mut Context<Self>) {
             row = row.child(div().w(px(14.)).flex_none());
         }
         row = row
-            .child(pid("table.head.title", flex_cell(tr::TITLE_GROW).flex().child(plain("Title"))))
-            .child(pid("table.head.artist", flex_cell(tr::ARTIST_GROW).flex().child(plain("Artist"))));
+            .child(flex_cell(tr::TITLE_GROW).flex().child(plain("Title")))
+            .child(flex_cell(tr::ARTIST_GROW).flex().child(plain("Artist")));
         if self.cfg.album_column {
-            row = row.child(pid("table.head.album", flex_cell(tr::ALBUM_GROW).flex().child(plain("Album"))));
+            row = row.child(flex_cell(tr::ALBUM_GROW).flex().child(plain("Album")));
         }
         if cols.year {
-            row = row.child(pid("table.head.year", div().w(px(tr::YEAR_W)).flex_none().flex().justify_end().child(plain("Year"))));
+            row = row.child(div().w(px(tr::YEAR_W)).flex_none().flex().justify_end().child(plain("Year")));
         }
         if cols.added {
-            row = row.child(pid("table.head.added", div().w(px(tr::ADDED_W)).flex_none().flex().justify_end().child(plain("Added"))));
+            row = row.child(div().w(px(tr::ADDED_W)).flex_none().flex().justify_end().child(plain("Added")));
         }
         row = row
-            .child(pid("table.head.format", div().w(px(tr::FORMAT_W)).flex_none().flex().justify_end().child(plain("Format"))))
-            .child(pid("table.head.time", div().w(px(tr::TIME_W)).flex_none().flex().justify_end().child(plain("Time"))));
+            .child(div().w(px(tr::FORMAT_W)).flex_none().flex().justify_end().child(plain("Format")))
+            .child(div().w(px(tr::TIME_W)).flex_none().flex().justify_end().child(plain("Time")));
         for _ in 0..self.cfg.action_count {
             row = row.child(spacer());
         }
-        pid("table.head", row)
+        row
     }
 
     fn day_row(&self, th: Theme, ix: usize, day: &str, count: u32, now: i64) -> AnyElement {
@@ -438,9 +418,7 @@ pub fn refresh_visible(&mut self, cx: &mut Context<Self>) {
         let hovered = self.hover_row == Some(ix);
         let idx_opacity = 1.0 - anim::transition(window, ("lidx-fade", ix), if hovered { 1.0 } else { 0.0 }, m_anim::IDX_FADE);
         let idx_text = label.unwrap_or_else(|| format!("{:02}", ix + 1));
-        let idx_cell = pid(
-            format!("track.row.{ix}.idx"),
-            div()
+        let idx_cell = div()
                 .id(("lidxc", ix))
                 .relative()
                 .w(px(tr::IDX_W))
@@ -450,7 +428,7 @@ pub fn refresh_visible(&mut self, cx: &mut Context<Self>) {
                 .justify_center()
                 .gap(px(2.))
                 .text_color(th.muted)
-                // `.idx-play:hover` (TrackRow.svelte): only the index cell, not the whole row (see views/tracks.rs)
+                // the play-glyph hover tracks only the index cell, not the whole row (see views/tracks.rs)
                 .on_hover(cx.listener(move |this, h: &bool, _, cx| {
                     if *h {
                         this.hover_row = Some(ix);
@@ -470,12 +448,11 @@ pub fn refresh_visible(&mut self, cx: &mut Context<Self>) {
                         .child(div().opacity(idx_opacity).child(txt(&th, MONO_CODE, idx_text)))
                         .when(hovered, |d| d.child(div().absolute().child(icon("play", tr::ROW_PLAY_ICON, th.muted))))
                         .into_any_element()
-                }),
-        );
-        let cell = |name: &str, grow: f32, text: String| {
-            pid(format!("track.row.{ix}.{name}"), flex_cell(grow).flex().child(txt(&th, MONO_DATA, text).color(th.muted).no_tracking().ellipsis()))
+                });
+        let cell = |grow: f32, text: String| {
+            flex_cell(grow).flex().child(txt(&th, MONO_DATA, text).color(th.muted).no_tracking().ellipsis())
         };
-        let right = |name: &str, w: f32, s: String| pid(format!("track.row.{ix}.{name}"), div().w(px(w)).flex_none().flex().justify_end().child(txt(&th, MONO_DATA, s).color(th.muted)));
+        let right = |w: f32, s: String| div().w(px(w)).flex_none().flex().justify_end().child(txt(&th, MONO_DATA, s).color(th.muted));
         let icon_btn = |id: &'static str, name: &'static str, color: gpui::Hsla, hover: gpui::Hsla| {
             div()
                 .id((id, ix))
@@ -524,20 +501,17 @@ pub fn refresh_visible(&mut self, cx: &mut Context<Self>) {
             row = row.child(div().w(px(14.)).flex_none().text_color(th.muted).cursor(CursorStyle::OpenHand).child(icon("drag", 14., th.muted)));
         }
         row = row
-            .child(flex_cell(tr::TITLE_GROW).flex().child(pid(
-                format!("track.row.{ix}.title"),
-                div().flex().min_w_0().child(txt(&th, BODY_MD, t.title.clone()).color(if active { th.accent_fg } else { th.text }).ellipsis()),
-            )))
-            .child(cell("artist", tr::ARTIST_GROW, t.artist.clone()));
+            .child(flex_cell(tr::TITLE_GROW).flex().child(div().flex().min_w_0().child(txt(&th, BODY_MD, t.title.clone()).color(if active { th.accent_fg } else { th.text }).ellipsis())))
+            .child(cell(tr::ARTIST_GROW, t.artist.clone()));
         if self.cfg.album_column {
-            row = row.child(cell("album", tr::ALBUM_GROW, t.album.clone().unwrap_or_else(|| "—".into())));
+            row = row.child(cell(tr::ALBUM_GROW, t.album.clone().unwrap_or_else(|| "—".into())));
         }
         row = row
-            .when(cols.year, |d| d.child(right("year", tr::YEAR_W, fmt::track_year(&t))))
-            .when(cols.added, |d| d.child(right("added", tr::ADDED_W, t.date_added.as_deref().map(fmt::date_part).unwrap_or("—").to_string())))
-            .child(right("format", tr::FORMAT_W, fmt::format_track_format(&t.format)))
-            .child(right("time", tr::TIME_W, fmt::format_duration(Some(t.duration))))
-            .child(pid(format!("track.row.{ix}.star"), star));
+            .when(cols.year, |d| d.child(right(tr::YEAR_W, fmt::track_year(&t))))
+            .when(cols.added, |d| d.child(right(tr::ADDED_W, t.date_added.as_deref().map(fmt::date_part).unwrap_or("—").to_string())))
+            .child(right(tr::FORMAT_W, fmt::format_track_format(&t.format)))
+            .child(right(tr::TIME_W, fmt::format_duration(Some(t.duration))))
+            .child(star);
         if self.cfg.add_btn {
             let rect = std::rc::Rc::new(std::cell::Cell::new(gpui::Bounds::<Pixels>::default()));
             let probe = crate::flow::bounds_probe(rect.clone());
@@ -554,7 +528,7 @@ pub fn refresh_visible(&mut self, cx: &mut Context<Self>) {
             })));
         }
         row = row
-            .child(pid(format!("track.row.{ix}.more"), more))
+            .child(more)
             .when(active, |d| d.child(div().absolute().left_0().top_0().bottom_0().w(px(tr::ACTIVE_BAR_W)).bg(th.accent_fg)))
             .when(selected, |d| d.child(div().absolute().top_0().left_0().size_full().border_1().border_color(th.accent_fg)))
             .on_click(cx.listener(move |this, ev: &ClickEvent, window, cx| {
@@ -590,7 +564,7 @@ pub fn refresh_visible(&mut self, cx: &mut Context<Self>) {
                 .drag_over::<DragRow>(move |s, _, _, _| s.border_t_2().border_color(th.accent_fg))
                 .on_drop(cx.listener(move |_, d: &DragRow, _, cx| cx.emit(TableEvent::Reorder { from: d.0, to: ix })));
         }
-        pid(format!("track.row.{ix}"), row).into_any_element()
+        row.into_any_element()
     }
 }
 
@@ -608,7 +582,7 @@ impl Render for Table {
         let cols = self.cols(window);
         let total = self.total();
         let bounds = self.body_bounds.clone();
-        // Chromium shows the 10 px scrollbar only when the rows overflow the viewport (VirtualList .viewport)
+        // the 10 px scrollbar shows only when the rows overflow the viewport
         let bh = f32::from(self.body_bounds.get().size.height);
         let overflow = scrollbar::overflow_or_last("lists-table", (bh > 0.0 && total > 0).then_some(total as f32 * tr::ROW_H > bh + 0.5));
         let bounds_for_canvas = bounds.clone();
@@ -625,7 +599,7 @@ impl Render for Table {
         .size_full();
 
         let body: AnyElement = if total == 0 && !self.loaded() {
-            // native-only: skeleton rows at the real row height instead of a "Loading…" line
+            // skeleton rows at the real row height instead of a "Loading…" line
             let mut rows_v = div().flex().flex_col().size_full().overflow_hidden();
             for _ in 0..40 {
                 rows_v = rows_v.child(crate::widgets::skeleton::row(&th, tr::ROW_H));
@@ -663,7 +637,7 @@ impl Render for Table {
                     }
                 }))
                 .on_action(cx.listener(|this, _: &OpenMenuKey, _, cx| {
-                    // `tryOpenMenuFromKeydown`: only when a row is aria-selected
+                    // the menu key opens the menu only when a row is selected
                     if let Some(c) = this.sel.cursor().filter(|c| this.sel.contains(*c)) {
                         this.open_menu_at_row(c, cx);
                     }

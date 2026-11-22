@@ -1,11 +1,10 @@
-//! Skeleton placeholders for pages whose data arrives after the first frame. Native-only (the web shows a one-line
-//! `LOADING …` status): a page paints the geometry of the loaded page with these fills, so arrival only fills content
-//! in and nothing moves (docs/PARITY.md, "Layout-stable skeletons"). Static like the web's `.skeleton-*` rules
-//! (no animation), so a loading page never keeps the frame loop alive.
+//! Skeleton placeholders for pages whose data arrives after the first frame: a page paints the geometry of the loaded
+//! page with these fills, so arrival only fills content in and nothing moves. Static (no animation), so a loading
+//! page never keeps the frame loop alive.
 use crate::theme::Theme;
 use gpui::{Div, ParentElement, Styled, div, px};
 
-/// `.skeleton-line`: `surface-mid` at 60 % opacity, `h` px tall, full width unless narrowed by the caller.
+/// A skeleton line: the mid surface at 60 % opacity, `h` px tall, full width unless narrowed by the caller.
 pub fn line(th: &Theme, h: f32) -> Div {
     div().h(px(h)).bg(th.mid).opacity(0.6)
 }
@@ -15,7 +14,7 @@ pub fn block(th: &Theme, w: f32, h: f32) -> Div {
     div().w(px(w)).h(px(h)).flex_none().bg(th.mid).opacity(0.6)
 }
 
-/// `.skeleton-row`: a `h` px list row with a 1 px bottom rule and a bar over its first 40 %.
+/// A skeleton list row: `h` px list row with a 1 px bottom rule and a bar over its first 40 %.
 pub fn row(th: &Theme, h: f32) -> Div {
     div().relative().h(px(h)).border_b_1().border_color(th.mid).opacity(0.5).child(div().absolute().left_0().top_0().bottom_0().w(gpui::relative(0.4)).bg(th.mid))
 }

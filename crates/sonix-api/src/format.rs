@@ -1,4 +1,4 @@
-//! Display formatting shared by every view (mirrors `src/lib/format.ts`).
+//! Display formatting shared by every view.
 use crate::types::{FlowArc, FlowCoverage, FlowReason};
 use crate::types::{OutputMode, PlayerState, Track, TrackFormat};
 
@@ -47,7 +47,7 @@ pub fn fmt_int(n: u64) -> String {
     out
 }
 
-/// Top-bar compact count (`short()` in TopBar.svelte): full below 10k, else `51.9K`.
+/// Top-bar compact count: full below 10k, else `51.9K`.
 pub fn short_count(n: u64) -> String {
     if n < 10_000 {
         return fmt_int(n);
@@ -80,7 +80,7 @@ pub fn output_short(ps: &PlayerState, fallback: &str) -> String {
     format!("{mode} {depth}/{}", (sr as f64 / 1000.0).round() as u32)
 }
 
-/// JS `Number(x.toFixed(1))`: one decimal, no trailing ".0".
+/// Rounded to one decimal, no trailing ".0".
 fn trim_float(x: f64) -> String {
     let r = (x * 10.0).round() / 10.0;
     if r.fract() == 0.0 { format!("{}", r as i64) } else { format!("{r}") }
@@ -120,7 +120,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn readouts_match_the_svelte_formatters() {
+    fn readouts_format_as_expected() {
         let mut ps = PlayerState::idle();
         assert_eq!(output_readout(&ps, "OUTPUT: —"), "OUTPUT: —");
         ps.sample_rate = Some(48000);
@@ -162,10 +162,10 @@ mod tests {
     }
 }
 
-// ------------------------------------------------------------ local time (History, `format.ts`)
+// ------------------------------------------------------------ local time (History)
 
 /// `(year, month, day, hour, minute, weekday 0=Sun)` of a unix-ms timestamp in the OS time zone
-/// (DST applied per timestamp, like JS `new Date(ms).getHours()`; UTC off Windows).
+/// (DST applied per timestamp; UTC off Windows).
 pub fn local_parts(ms: i64) -> (i32, u32, u32, u32, u32, u32) {
     #[cfg(windows)]
     {
@@ -320,7 +320,7 @@ pub fn utc_iso(ms: i64) -> String {
     let s = ms.div_euclid(1000).rem_euclid(60);
     format!("{y:04}-{mo:02}-{d:02}T{h:02}:{mi:02}:{s:02}.{:03}Z", ms.rem_euclid(1000))
 }
-// ---- Flow text helpers (`lib/flowText.ts`): real numbers only
+// ---- Flow text helpers: real numbers only
 
 fn pct(n: u32, total: u32) -> String {
     if n == 0 || total == 0 {

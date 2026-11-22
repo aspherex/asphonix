@@ -1,4 +1,4 @@
-//! Embeds the SONIX icon (the WebView app's `src-tauri/icons/icon.ico`) as resource 1, which GPUI uses for the
+//! Embeds the SONIX icon (`res/sonix.ico`) as resource 1, which GPUI uses for the
 //! window, taskbar and Alt+Tab icon; Explorer shows it for the exe.
 fn main() {
     println!("cargo:rerun-if-changed=res/app.rc");

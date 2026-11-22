@@ -1,16 +1,12 @@
 //! Discovery features: genre browsing, the richer artist page (popular
 //! tracks, biography, similar artists) and listening history.
 //!
-//! Kept in its own module (types + `#[tauri::command]`s together) so the
-//! shared `ipc.rs` only needed a one-line `SourceKind::Genre`. The TS
-//! mirror lives in the "Discovery" blocks of `src/lib/ipc/types.ts`/
-//! `commands.ts`; `docs/IPC.md` has the contract. DB work is in
-//! `library/discovery.rs`.
+//! Wire types and helpers live here; DB work is in `library/discovery.rs`.
 
 use serde::{Deserialize, Serialize};
 
 use crate::ipc::{Artist, FlowArc, IpcError, IpcErrorCode, Track};
-#[allow(unused_imports)] // used by the reference's genre `#[tauri::command]`s, which are not vendored
+#[allow(unused_imports)]
 use crate::ipc::{IpcResult, Paged, SourceKind};
 
 // ---------------------------------------------------------------------------
@@ -149,8 +145,8 @@ pub fn resolve_top(server_ids: &[String], local: Vec<Track>, most_played: Vec<Tr
 /// Returns plain text: tags stripped, `<br>`/`</p>` become newlines,
 /// `<script>`/`<style>` bodies dropped, the read-more anchor removed (other
 /// anchors keep their text), common entities decoded. `None` when nothing
-/// readable is left. The external link is deliberately not surfaced (no
-/// opener available; raw external URLs never go into the WebView).
+/// readable is left. The external link is deliberately not surfaced (raw
+/// external URLs are never rendered as links).
 pub fn sanitize_bio(html: &str) -> Option<String> {
     let mut out = String::with_capacity(html.len());
     let mut anchor: Option<String> = None;
@@ -298,7 +294,7 @@ pub(crate) fn now_ms() -> i64 {
 }
 
 
-#[allow(dead_code)] // reference: used by `browse_get_genre` / `player_play_genre` (Tauri commands, not vendored)
+#[allow(dead_code)]
 fn not_found(msg: String) -> IpcError {
     IpcError { code: IpcErrorCode::NotFound, message: msg }
 }

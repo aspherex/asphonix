@@ -5,10 +5,10 @@
 //! touching the keychain; the password itself is **never** written to a
 //! plain file, only to the OS keychain entry.
 //!
-//! Service name is the app identifier (`tauri.conf.json` `identifier`, set
-//! once at startup via [`set_service_name`]) so SONIX never reads or
-//! clobbers another app's keychain entries — and a dev/test build run with
-//! an overridden identifier never touches the installed app's credentials.
+//! Service name is the app identifier (set once at startup via
+//! [`set_service_name`]) so SONIX never reads or clobbers another app's
+//! keychain entries — and a dev/test build run with an overridden
+//! identifier never touches the regular build's credentials.
 
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -21,7 +21,7 @@ pub mod profiles;
 
 /// Fallback when [`set_service_name`] was never called (unit/integration
 /// tests); equals the shipped identifier.
-const DEFAULT_SERVICE_NAME: &str = "dev.sonix.native";
+const DEFAULT_SERVICE_NAME: &str = "dev.sonix.app";
 static SERVICE_NAME: std::sync::OnceLock<String> = std::sync::OnceLock::new();
 
 /// Sets the keychain service name (the app identifier). First call wins.
@@ -53,8 +53,7 @@ pub struct ConnectionConfig {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Settings {
     /// Submit "now playing"/scrobbles to the connected Subsonic server (see
-    /// `scrobble::`). Defaults OFF in the native port (the WebView app defaults on): a self-hosted Navidrome's own play
-    /// history/counts are the whole point of connecting it.
+    /// `scrobble::`). Defaults OFF: network-visible features are opt-in.
     #[serde(default)]
     pub scrobbling_enabled: bool,
     /// "Spread artists in shuffle": nudge a real shuffle so the same artist
@@ -70,27 +69,27 @@ pub struct Settings {
     #[serde(default = "default_queue_window_size")]
     pub queue_window_size: u32,
     // --- continuity ---
-    /// "Autoplay similar music when the queue ends". Defaults OFF in the native port.
+    /// "Autoplay similar music when the queue ends". Defaults OFF.
     #[serde(default)]
     pub autoplay_enabled: bool,
-    /// "Sync play queue with server" (`savePlayQueue`). Defaults OFF in the native port.
+    /// "Sync play queue with server" (`savePlayQueue`). Defaults OFF.
     #[serde(default)]
     pub sync_play_queue: bool,
     /// "Volume normalization (ReplayGain)". Defaults off.
     #[serde(default)]
     pub replay_gain_mode: crate::audio::replaygain::ReplayGainMode,
-    /// "Check for updates automatically" (`updates::`). Defaults OFF in the native port.
+    /// "Check for updates automatically" (`updates::`). Defaults OFF.
     #[serde(default)]
     pub auto_check_updates: bool,
     /// "Count a play after" N seconds of real listening, for both listening
     /// history and scrobbles (`scrobble::threshold`). Defaults to 30.
     #[serde(default = "default_play_threshold_sec")]
     pub play_threshold_sec: u32,
-    /// "Show track preview" (`overlay::`): the corner card on a track change
+    /// "Show track preview": the corner card on a track change
     /// while SONIX isn't focused. Defaults on.
     #[serde(default = "default_true")]
     pub track_overlay: bool,
-    /// "Free memory when minimized" (`bgmode::`): close the webview after the
+    /// "Free memory when minimized": release the UI's resources after the
     /// window was minimized for 30 s. Defaults on.
     #[serde(default = "default_true")]
     pub free_memory_when_minimized: bool,

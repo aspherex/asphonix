@@ -1,7 +1,7 @@
 //! Wire types + parsing for lyrics: OpenSubsonic `getLyricsBySongId`
 //! (structured, optionally time-synced) and classic `getLyrics` (plain text
-//! by artist/title). Normalized into [`ParsedLyrics`] here so the IPC layer
-//! only deals with one shape.
+//! by artist/title). Normalized into [`ParsedLyrics`] here so callers
+//! only deal with one shape.
 #![allow(dead_code)]
 
 use serde::Deserialize;

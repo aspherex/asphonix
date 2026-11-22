@@ -1,9 +1,10 @@
-// Makes the bundled TTFs resolvable by weight. @fontsource's static instances name the 500/600 faces "<Family> Medium" /
-// "<Family> SemiBold" (legacy nameID 1, subfamily "Regular"), so DirectWrite files them under *separate* families and a
-// request for `Space Grotesk` at weight 600 silently gets the Bold face (500 gets Regular). Chromium reads the weight from
-// the @font-face rule instead. This rewrites nameID 1 to the plain family and nameID 2 to Regular/Bold, drops the
+// Makes the bundled TTFs (assets/fonts, latin subsets of the @fontsource static instances) resolvable by weight.
+// Those files name the 500/600 faces "<Family> Medium" / "<Family> SemiBold" (legacy nameID 1, subfamily "Regular"),
+// so DirectWrite files them under *separate* families and a request for `Space Grotesk` at weight 600 silently gets
+// the Bold face (500 gets Regular). This rewrites nameID 1 to the plain family and nameID 2 to Regular/Bold, drops the
 // typographic/WWS names (16, 17, 21, 22) and keeps OS/2 usWeightClass, so one family holds 400/500/600/700.
-// Idempotent. Usage: node scripts/fix-font-families.mjs   (run after scripts/gen-fonts.mjs)
+// The committed fonts are already fixed; run it again only after replacing them. Idempotent.
+// Usage: node scripts/fix-font-families.mjs
 import fs from "node:fs";
 import path from "node:path";
 const dir = path.join(path.dirname(new URL(import.meta.url).pathname.replace(/^\//, "")), "..", "assets", "fonts");

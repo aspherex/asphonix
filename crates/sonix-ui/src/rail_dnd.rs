@@ -1,7 +1,7 @@
-//! Pure maths of the queue rail's drag and drop (`QueueRail.svelte`: `gapAt`, `moveBlock`, the "single row dropped
-//! next to itself" no-op) plus the placement of the native-only grey gap.
+//! Pure maths of the queue rail's drag and drop (the gap under the pointer, block moves, the "single row dropped
+//! next to itself" no-op) plus the placement of the grey gap.
 //!
-//! Everything is in absolute play-order indices (the web's `data-qabs`). A [`Gap`] is "before play-order position `at`"
+//! Everything is in absolute play-order indices. A [`Gap`] is "before play-order position `at`"
 //! (`total` = the end of the queue); `user` says which list shows it when `at` is the boundary between the "Next in
 //! queue" run and the source rows (`at == user_start + user_count`).
 
@@ -30,7 +30,7 @@ pub enum Hit {
     Gap(Gap),
 }
 
-/// `gapAt`: the row under `y` decides the gap (upper half = before it, lower half = after it); `ph` = the open
+/// The row under `y` decides the gap (upper half = before it, lower half = after it); `ph` = the open
 /// placeholder's `(top, bottom)`. `None` = no row there (the caller falls back to the list / section background).
 pub fn hit(y: f32, rows: &[RowBox], ph: Option<(f32, f32)>) -> Option<Hit> {
     if ph.is_some_and(|(t, b)| y >= t && y < b) {
@@ -44,7 +44,7 @@ pub fn in_user_section(g: Gap, ustart: usize, ucount: usize) -> bool {
     ucount > 0 && g.at >= ustart && (g.at < ustart + ucount || (g.at == ustart + ucount && g.user))
 }
 
-/// Where an external drop really lands (`queue.rs enqueue_next` / `enqueue_end`): Play next = right after the current
+/// Where an external drop really lands (the backend's enqueue rules): Play next = right after the current
 /// track, i.e. the front of the "Next in queue" run; Add to queue with a source = the end of that run, still ahead of
 /// every source row; without a source (a static queue) = the literal end.
 pub fn external_gap(next: bool, has_source: bool, ustart: usize, ucount: usize, total: usize) -> Gap {
@@ -57,7 +57,7 @@ pub fn external_gap(next: bool, has_source: bool, ustart: usize, ucount: usize, 
     }
 }
 
-/// The contiguous run of user-queued rows right after the current one (`QueueRail.svelte userRunStart/userRunEnd`):
+/// The contiguous run of user-queued rows right after the current one:
 /// `(start, count)` over `origins` (`true` = user-queued) that start at play-order index `base`.
 pub fn user_run(base: usize, origins: &[bool], current: i64) -> (usize, usize) {
     let start = (current + 1).max(0) as usize;
@@ -65,12 +65,12 @@ pub fn user_run(base: usize, origins: &[bool], current: i64) -> (usize, usize) {
     (start, count)
 }
 
-/// `onWindowPointerUp`: a single row dropped right before or after itself moves nothing.
+/// A single row dropped right before or after itself moves nothing.
 pub fn is_noop(moving: &[usize], gap: usize) -> bool {
     moving.len() == 1 && (gap == moving[0] || gap == moving[0] + 1)
 }
 
-/// `moveBlock`: the `(from, to)` `player_reorder_queue` calls that move the entries at `moving` (kept in their relative
+/// The `(from, to)` `player_reorder_queue` calls that move the entries at `moving` (kept in their relative
 /// order) into the gap before play-order position `gap` (`total` = the end). Each `to` is a position after the removal
 /// (the engine's remove-then-insert semantics), simulated on a local index array.
 pub fn move_block(total: usize, moving: &[usize], gap: usize) -> Vec<(usize, usize)> {
@@ -180,7 +180,7 @@ mod tests {
     }
 
     #[test]
-    fn move_block_matches_the_web_simulation() {
+    fn move_block_moves_entries_into_the_gap() {
         assert_eq!(apply(6, &move_block(6, &[2], 6)), [0, 1, 3, 4, 5, 2]);
         assert_eq!(apply(6, &move_block(6, &[4], 0)), [4, 0, 1, 2, 3, 5]);
         assert_eq!(apply(6, &move_block(6, &[4], 2)), [0, 1, 4, 2, 3, 5]);

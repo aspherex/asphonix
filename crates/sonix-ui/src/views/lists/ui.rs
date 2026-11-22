@@ -1,5 +1,5 @@
-//! Shared building blocks of the list routes: the page header buttons (`.play-btn`, `.btn-secondary`,
-//! `.btn-icon`), the text field of `Input.svelte`, the `Panel.svelte` frame and status lines.
+//! Shared building blocks of the list routes: the page header buttons (play, secondary, 40 px icon),
+//! the text field, the panel frame and status lines.
 use crate::metrics::{controls as ctl, lists as lm};
 use crate::text::txt;
 use crate::theme::Theme;
@@ -9,8 +9,8 @@ use crate::widgets::icon;
 use crate::widgets::text_input::TextInput;
 use gpui::{AnyElement, App, CursorStyle, Div, ElementId, Entity, IntoElement, SharedString, Stateful, Window, div, prelude::*, px};
 
-/// `.play-btn type-headline-sm`: accent fill, hard shadow, 40 px high, "PLAY" in the display face.
-/// Native-only: when this page's source is the loaded one (`pst.active()`) the button is an outline with a pause icon.
+/// Play button (`HEADLINE_SM`): accent fill, hard shadow, 40 px high, "PLAY" in the display face.
+/// When this page's source is the loaded one (`pst.active()`) the button is an outline with a pause icon.
 pub fn play_btn(id: impl Into<ElementId>, th: &Theme, label: &str, disabled: bool, pst: crate::app::PlayState) -> Stateful<Div> {
     let th = *th;
     let act = pst.active();
@@ -34,7 +34,7 @@ pub fn play_btn(id: impl Into<ElementId>, th: &Theme, label: &str, disabled: boo
     b
 }
 
-/// `.btn-secondary`: mid fill, 1 px frame (focus colour on hover), icon + body-font label.
+/// Secondary button: mid fill, 1 px frame (focus colour on hover), icon + body-font label.
 pub fn sec_btn(id: impl Into<ElementId>, th: &Theme, icon_name: &str, label: &str, disabled: bool) -> Stateful<Div> {
     let th = *th;
     let mut b = div()
@@ -56,7 +56,7 @@ pub fn sec_btn(id: impl Into<ElementId>, th: &Theme, icon_name: &str, label: &st
     b
 }
 
-/// `.btn-icon`: 40x40, same frame as `.btn-secondary`.
+/// Icon button: 40x40, same frame as [`sec_btn`].
 pub fn icon_btn40(id: impl Into<ElementId>, th: &Theme, icon_name: &str, disabled: bool) -> Stateful<Div> {
     let th = *th;
     let mut b = div()
@@ -75,12 +75,12 @@ pub fn icon_btn40(id: impl Into<ElementId>, th: &Theme, icon_name: &str, disable
     b
 }
 
-/// `.status` line (`LOADING PLAYLIST…`, `PLAYLIST UNAVAILABLE.`).
+/// Status line (`LOADING PLAYLIST…`, `PLAYLIST UNAVAILABLE.`).
 pub fn status_line(th: &Theme, text: &str, error: bool) -> Div {
     div().p(px(lm::STATUS_PAD)).child(txt(th, MONO_CODE, text.to_string()).color(if error { th.clip } else { th.muted }))
 }
 
-/// `Input.svelte:.field`: 36 px, `//` prefix, focus ring + hard shadow, placeholder when empty.
+/// Text field: 36 px, `//` prefix, focus ring + hard shadow, placeholder when empty.
 pub fn field(th: &Theme, input: &Entity<TextInput>, prefix: Option<&str>, placeholder: &str, window: &Window, cx: &App) -> Div {
     let th = *th;
     let focused = input.read(cx).focus_handle.is_focused(window);
@@ -121,7 +121,7 @@ fn prefix_w(p: &str) -> f32 {
     p.chars().count() as f32 * (7.2 + 0.24) + crate::metrics::space::XS
 }
 
-/// `Panel.svelte`: frame + header (title in mono-data caps, optional meta) + body slot.
+/// Panel: frame + header (title in `MONO_DATA` caps, optional meta) + body slot.
 pub fn panel(th: &Theme, title: &str, body: impl IntoElement) -> Div {
     let th = *th;
     div()
@@ -149,7 +149,7 @@ pub fn panel(th: &Theme, title: &str, body: impl IntoElement) -> Div {
 }
 
 
-/// A page that scrolls inside the stage (`.stage { overflow-y: auto }` with the shared 10 px scrollbar):
+/// A page that scrolls inside the stage (with the shared 10 px scrollbar):
 /// `build(overflow)` gets whether the scrollbar currently takes its gutter (known from the previous layout).
 pub fn scroll_page(th: Theme, id: &'static str, h: &gpui::ScrollHandle, key: usize, window: &mut Window, build: impl FnOnce(bool, &mut Window) -> AnyElement) -> AnyElement {
     let (bar, overflow) = crate::widgets::scrollbar::passive(th, h);
@@ -159,7 +159,7 @@ pub fn scroll_page(th: Theme, id: &'static str, h: &gpui::ScrollHandle, key: usi
         .size_full()
         .child(div().id(id).track_scroll(h).size_full().overflow_y_scroll().when(overflow, |d| d.pr(px(crate::metrics::tracks::SCROLLBAR_W))).child(content))
         .child(bar)
-        // wheel notches animate like Chromium (`widgets::smooth`); `key` = the address of the view's handle field
+        // wheel notches animate smoothly (`widgets::smooth`); `key` = the address of the view's handle field
         .child(crate::widgets::smooth::drive(window, crate::widgets::smooth::Scrollable::div(key, h)))
         .into_any_element()
 }
@@ -171,7 +171,7 @@ pub fn page_content_width(window: &Window, overflow: bool) -> f32 {
     vw - super::super::shell::Shell::sidebar_width(vw) - rail - 2.0 * crate::metrics::lists::PAGE_PAD - if overflow { crate::metrics::tracks::SCROLLBAR_W } else { 0.0 }
 }
 
-/// Greedy word wrap of `white-space: normal` text into `width` px with the font of `spec` (block-box text).
+/// Greedy word wrap of text (spaces collapse) into `width` px with the font of `spec` (block-box text).
 pub fn wrap_text(th: &Theme, window: &Window, text: &str, spec: crate::tracking::TypeSpec, width: f32) -> Vec<String> {
     let fam = spec.family.name(th.body_font);
     let w = |t: &str| crate::text::natural_width(window, t, fam, spec.size, spec.weight, spec.tracking_px());
@@ -190,7 +190,7 @@ pub fn wrap_text(th: &Theme, window: &Window, text: &str, spec: crate::tracking:
     lines
 }
 
-/// Chromium's `<select>` arrow: a 1.6 px chevron in the text colour, centred in a 20 px slot.
+/// Select-box arrow: a 1.6 px chevron in the text colour, centred in a 20 px slot.
 pub fn select_arrow(color: gpui::Hsla) -> impl IntoElement {
     gpui::canvas(
         |_, _, _| (),

@@ -25,7 +25,7 @@ use crate::ipc::{IpcError, IpcErrorCode};
 const PROFILES_FILE_NAME: &str = "profiles.json";
 
 /// Serializes read-modify-write cycles on `profiles.json` (connect, switch,
-/// remove and logout can run concurrently as separate IPC calls).
+/// remove and logout can run concurrently as separate commands).
 static PROFILES_LOCK: Mutex<()> = Mutex::new(());
 
 /// One saved account as persisted in `profiles.json`.

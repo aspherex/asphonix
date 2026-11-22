@@ -1,7 +1,7 @@
 //! A-B loop state machine (Now Playing's loop button). Pure logic, no I/O:
 //! the engine feeds it the audible position and performs the actual seek
 //! (`Engine::seek`, the in-place path) when [`AbLoop::due`] says so, so the
-//! loop is exact to the engine tick rather than to a frontend timer.
+//! loop is exact to the engine tick rather than to a UI timer.
 //!
 //! One button cycles: set A at the current position -> set B -> clear.
 //! Cleared on every track change (the engine compares the audible id).

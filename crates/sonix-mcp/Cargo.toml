@@ -4,9 +4,10 @@ version.workspace = true
 description = "MCP (Model Context Protocol) stdio bridge to a running SONIX app"
 edition = "2021"
 publish.workspace = true
+license.workspace = true
+repository.workspace = true
 
-# Vendored from SoniX tools/sonix-mcp @ 642db10 (see ../sonix-core/VENDORED.md); the app side is
-# `sonix-core/src/mcp_bridge`. Only change: APP_IDENTIFIER = dev.sonix.native.
+# The app side of the bridge is `sonix-core/src/mcp_bridge`.
 
 [lib]
 name = "sonix_mcp"

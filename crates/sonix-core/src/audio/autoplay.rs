@@ -15,7 +15,7 @@ use std::collections::VecDeque;
 
 /// Similar-track lookup (the production impl reuses `radio_start`'s logic:
 /// `getSimilarSongs` + local fallback + 1-star filtering, see
-/// `ipc::radio_candidates`). Blocking; only ever called off the engine thread.
+/// `continuity::radio_pool`). Blocking; only ever called off the engine thread.
 pub trait AutoplaySource: Send + Sync + 'static {
     /// `(track id, artist)` of tracks similar to `seed_track_id`, in relevance
     /// order, already restricted to tracks the local library knows. May be empty.

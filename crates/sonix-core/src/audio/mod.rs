@@ -2,8 +2,8 @@
 //! decode -> ring buffer -> native output.
 //!
 //! Output is WASAPI exclusive, event-driven mode on Windows and a `cpal`
-//! shared-mode fallback on other platforms (CoreAudio hog mode is
-//! post-MVP — see `PLAN.md`), both bypassing OS mixing and resampling in
+//! shared-mode fallback on other platforms (no CoreAudio hog mode yet),
+//! both bypassing OS mixing and resampling in
 //! exclusive mode so the DAC receives the file's native rate/depth
 //! unmodified. The active mode is always reported truthfully to the UI via
 //! `ipc::OutputStatus`/`ipc::PlayerState` — never fabricated.
@@ -15,7 +15,7 @@
 //! (`engine::Engine::prefetch_next`).
 //!
 //! Spectrum data is computed on its own thread (`spectrum::SpectrumAnalyzer`)
-//! and pushed to the frontend as a small `u8` array (see
+//! and pushed to the UI as a small `u8` array (see
 //! `ipc::SpectrumFrame`) — the render thread only does a cheap lock-free
 //! push of downmixed samples into a secondary ring, never the FFT itself.
 //!
@@ -28,7 +28,7 @@
 //! - `queue`    — pure queue/shuffle/repeat logic (ids only).
 //! - `spectrum` — FFT spectrum analyzer.
 //! - `engine`   — orchestrates all of the above; owns the `player_*`/
-//!   `output_*` IPC command bodies' actual behaviour via `EngineHandle`.
+//!   `output_*` commands' actual behaviour via `EngineHandle`.
 
 pub mod abloop;
 pub mod autoplay;
@@ -51,14 +51,5 @@ pub use prefs::Prefs;
 pub use session::SessionStore;
 pub use source::{HttpTrackSource, SubsonicTrackSource, TrackSource};
 
-/// Re-exported so `examples/play.rs` (an external crate against
-/// `sonix_lib`) can name it without `crate::ipc` needing to be `pub` — the
-/// IPC module stays an internal implementation detail otherwise.
+/// Re-exported so engine callers can name the player/output types from `audio::`.
 pub use crate::ipc::{OutputMode, OutputStatus, PlaybackStatus, PlayerState, SpectrumFrame};
-
-// `default_track_source()` (which read `.env.local` directly) is gone: the
-// real app always streams via `source::SubsonicTrackSource`, built in
-// `lib.rs`'s `setup()` from the same live `Arc<RwLock<Option<Client>>>` that
-// `auth_connect`/`auth_logout` update — see `state::AppState::client`. Env
-// var dev-server config now only exists in `examples/` (each example reads
-// `.env.local`/the env itself; see `examples/engine_test.rs`).

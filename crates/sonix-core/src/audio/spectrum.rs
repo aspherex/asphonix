@@ -1,5 +1,5 @@
 //! Spectrum analyzer: mono-downmixed PCM -> log-spaced magnitude bands sent
-//! to the frontend as `SpectrumFrame { bands: Vec<u8> }` at ~20fps.
+//! to the UI as `SpectrumFrame { bands: Vec<u8> }` at ~20fps.
 //!
 //! All FFT buffers (input, complex output, scratch, window table, band bin
 //! ranges) are allocated once in [`SpectrumAnalyzer::new`] and reused for
@@ -17,7 +17,7 @@ use std::sync::Arc;
 /// budget (50ms).
 const FFT_SIZE: usize = 2048;
 pub const NUM_BANDS: usize = 28;
-/// Frames per second sent to the UI (the frontend draws time-based decay and
+/// Frames per second sent to the UI (the UI draws time-based decay and
 /// peak hold, so the rate only sets how often the targets update).
 const SPECTRUM_FPS: usize = 20;
 

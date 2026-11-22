@@ -1,6 +1,6 @@
 //! Styled, draggable scrollbar for `uniform_list` (GPUI has none): 10 px track on
-//! `surface-low`, thumb `surface-high` with a 2 px track-coloured border (base.css
-//! `::-webkit-scrollbar`), `text-muted` on hover. Drag uses window-level mouse listeners.
+//! the low surface, thumb on the high surface with a 2 px track-coloured border,
+//! muted text colour on hover. Drag uses window-level mouse listeners.
 use crate::theme::Theme;
 use gpui::{
     AnyElement, App, Bounds, DispatchPhase, MouseButton, MouseDownEvent, MouseMoveEvent, MouseUpEvent, Pixels, UniformListScrollHandle, Window,
@@ -110,8 +110,8 @@ pub fn scrollbar(id: &'static str, th: Theme, list: &UniformListScrollHandle, st
         .into_any_element()
 }
 
-/// Passive scrollbar for plain scroll containers (`overflow-y: auto` + `track_scroll(handle)`): the same 10 px
-/// track/thumb look as [`scrollbar`], drawn only when the content overflows (as Chromium does). Returns the
+/// Passive scrollbar for plain scroll containers (`overflow_y_scroll` + `track_scroll(handle)`): the same 10 px
+/// track/thumb look as [`scrollbar`], drawn only when the content overflows. Returns the
 /// element and whether it overflows (callers reserve [`WIDTH`] on the right of their content in that case).
 pub fn passive(th: Theme, h: &gpui::ScrollHandle) -> (AnyElement, bool) {
     let max = f32::from(h.max_offset().height);
@@ -174,8 +174,8 @@ thread_local! {
     static LAST_OVERFLOW: std::cell::RefCell<std::collections::HashMap<&'static str, bool>> = std::cell::RefCell::new(std::collections::HashMap::new());
 }
 
-/// Gutter decision for a list that is created on navigation. Chromium decides the scrollbar gutter in the same
-/// layout pass that adds the rows; natively the overflow is only known after a layout, so a fresh list would draw
+/// Gutter decision for a list that is created on navigation. The gutter should appear in the same
+/// frame as the rows, but the overflow is only known after a layout, so a fresh list would draw
 /// one frame without the 10 px gutter and then shift every column. `measured` is `None` while that is not known
 /// yet (container not laid out, rows not loaded): then the state this list (`key`) had last time is used.
 pub fn overflow_or_last(key: &'static str, measured: Option<bool>) -> bool {

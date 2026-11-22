@@ -1,6 +1,6 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
-//! SONIX native: the GPUI desktop UI. Phase 1 runs against `sonix-mock` through the
-//! `sonix_api::Backend` seam; phase 2 swaps in a real backend built on `sonix-core`.
+//! SONIX: the GPUI desktop app. The UI talks to the library, player and server only through the
+//! `sonix_api::Backend` trait, implemented by `sonix-real` on top of `sonix-core`.
 mod anim;
 mod app;
 mod art;
@@ -22,10 +22,7 @@ mod part;
 mod rail_dnd;
 mod rcount;
 mod ticker;
-#[cfg(feature = "parity")]
-mod parity;
 mod perf;
-mod probe;
 mod router;
 mod selection;
 mod settings;
@@ -65,12 +62,9 @@ pub fn log(msg: &str) {
     }
 }
 
-/// `%LOCALAPPDATA%\dev.sonix.native\logs\crash.log` (the main window's app id).
+/// `logs/crash.log` in the app's data dir (`%LOCALAPPDATA%\dev.sonix.app` on Windows).
 fn crash_log_path() -> Option<std::path::PathBuf> {
-    let base = std::env::var_os("LOCALAPPDATA")
-        .map(std::path::PathBuf::from)
-        .or_else(|| std::env::var_os("HOME").map(|h| std::path::PathBuf::from(h).join(".local/share")))?;
-    Some(base.join("dev.sonix.native").join("logs").join("crash.log"))
+    Some(sonix_real::data_dir().join("logs").join("crash.log"))
 }
 
 /// Panics abort the process (`panic = "abort"`, GUI subsystem: no console, stderr goes nowhere), so this hook is
@@ -141,18 +135,8 @@ fn main() {
     log("main_start");
     #[cfg(feature = "memprof")]
     memprof::start();
-    #[cfg(not(feature = "parity"))]
     let prefs = settings::load();
-    #[cfg(feature = "parity")]
-    let prefs = settings::UiPrefs { light: false };
-    #[cfg(not(feature = "parity"))]
-    let backend: Arc<dyn Backend> = if std::env::args().any(|a| a == "--mock") || std::env::var_os("SONIX_MOCK").is_some() { Arc::new(sonix_mock::MockBackend::new()) } else { Arc::new(sonix_real::RealBackend::open()) };
-    // Parity harness: deterministic mock (fixed seed, manual clock) when the runner asks for it.
-    #[cfg(feature = "parity")]
-    let backend: Arc<dyn Backend> = {
-        let manual = Arc::new(sonix_mock::MockBackend::new_manual());
-        if parity::start(manual.clone()) { manual } else { Arc::new(sonix_mock::MockBackend::new()) }
-    };
+    let backend: Arc<dyn Backend> = Arc::new(sonix_real::RealBackend::open());
     log("backend_ready");
 
     Application::new().with_assets(Assets).run(move |cx: &mut App| {
@@ -163,12 +147,9 @@ fn main() {
                 "space-grotesk-400", "space-grotesk-500", "space-grotesk-600", "space-grotesk-700"
             ))
             .expect("fonts");
-        // first run (no stored choice): follow the Windows app theme like the web's `prefers-color-scheme` fallback
-        #[cfg(not(feature = "parity"))]
+        // first run (no stored choice): follow the OS app theme
         let os_light = !settings::has_stored() && matches!(cx.window_appearance(), gpui::WindowAppearance::Light | gpui::WindowAppearance::VibrantLight);
-        #[cfg(feature = "parity")]
-        let os_light = false;
-        cx.set_global(if prefs.light || os_light || std::env::var("SONIX_LIGHT").is_ok() { theme::Theme::light() } else { theme::Theme::dark() });
+        cx.set_global(if prefs.light || os_light { theme::Theme::light() } else { theme::Theme::dark() });
         cx.set_global(app::Services { backend, art: art::new_handle(24 * 1024 * 1024) });
         widgets::text_input::bind_keys(cx);
         bind_keys(cx);
@@ -196,17 +177,16 @@ fn bind_keys(cx: &mut App) {
     cx.bind_keys([
         KeyBinding::new("up", shell::SelUp, Some("TrackList")),
         KeyBinding::new("down", shell::SelDown, Some("TrackList")),
-        // the web handler ignores Shift on arrows (plain single-selection move)
+        // Shift+arrows move the single selection like plain arrows (no range extension)
         KeyBinding::new("shift-up", shell::SelUp, Some("TrackList")),
         KeyBinding::new("shift-down", shell::SelDown, Some("TrackList")),
         KeyBinding::new("enter", shell::PlaySelected, Some("TrackList")),
-        // `trackList.ts: trackListKeydown`: Up/Down move a single selection, Enter plays, Shift+Enter enqueues. The Tracks
-        // route passes no `selectAll`, so Ctrl+A, Shift+arrows, Home/End and Page keys do nothing there (parity-verified).
+        // Up/Down move a single selection, Enter plays, Shift+Enter enqueues. Home/End and Page keys are not bound.
         KeyBinding::new("shift-enter", shell::EnqueueSelected, Some("TrackList")),
-        // `trackListKeydown`'s `selectAll` (Album detail passes it; the Tracks route does not and ignores the action)
+        // select all: Album detail handles it; the Tracks route ignores the action
         KeyBinding::new("ctrl-a", shell::SelectAll, Some("TrackList")),
         KeyBinding::new("cmd-a", shell::SelectAll, Some("TrackList")),
-        // album/artist cards (`tabindex=0`, Enter/Space open, Menu / Shift+F10 the context menu) and Tab traversal
+        // album/artist cards (Tab stops; Enter/Space open, Menu / Shift+F10 the context menu) and Tab traversal
         KeyBinding::new("enter", views::library::cards::CardOpen, Some("Card")),
         KeyBinding::new("space", views::library::cards::CardOpen, Some("Card")),
         KeyBinding::new("menu", views::library::cards::CardMenu, Some("Card")),
@@ -216,25 +196,21 @@ fn bind_keys(cx: &mut App) {
         KeyBinding::new("menu", shell::OpenMenuKey, Some("TrackList")),
         KeyBinding::new("shift-f10", shell::OpenMenuKey, Some("TrackList")),
         KeyBinding::new("space", shell::PlayPause, Some("Root && !TextInput && !ContextMenu && !Dialog")),
-        // `shortcuts.ts` matches both "l" and "L": Shift+L likes too
+        // Shift+L likes too
         KeyBinding::new("shift-l", views::shell_keys::LikeCurrent, Some("Root && !TextInput && !ContextMenu && !Dialog")),
-        // plain N (Now Playing) lives in `shell_keys::feel_key_down`: the web ignores key repeat, a binding cannot see it
+        // N (Now Playing) lives in `shell_keys::feel_key_down`: it ignores key repeat, which a binding cannot see
         KeyBinding::new("escape", shell::Escape, Some("Root")),
         KeyBinding::new("ctrl-t", shell::ToggleTheme, Some("Root")),
         KeyBinding::new("ctrl-k", shell::FocusSearch, Some("Root")),
         KeyBinding::new("alt-left", shell::NavBack, Some("Root")),
         KeyBinding::new("alt-right", shell::NavForward, Some("Root")),
-        // `shortcuts.ts`: plain L = like/unlike the current track (global, not while typing)
+        // L = like/unlike the current track (global, not while typing)
         KeyBinding::new("l", views::shell_keys::LikeCurrent, Some("Root && !TextInput && !ContextMenu && !Dialog")),
     ]);
 }
 
 fn open_main(cx: &mut App) {
-    let (w, h) = std::env::var("SONIX_SIZE")
-        .ok()
-        .and_then(|s| s.split_once('x').and_then(|(a, b)| Some((a.parse::<f32>().ok()?, b.parse::<f32>().ok()?))))
-        .unwrap_or((1440.0, 900.0));
-    let bounds = Bounds::centered(None, size(px(w), px(h)), cx);
+    let bounds = Bounds::centered(None, size(px(1440.), px(900.)), cx);
     cx.open_window(
         WindowOptions {
             window_bounds: Some(WindowBounds::Windowed(bounds)),
@@ -243,13 +219,13 @@ fn open_main(cx: &mut App) {
             focus: true,
             window_background: WindowBackgroundAppearance::Opaque,
             window_min_size: Some(size(px(1024.), px(640.))),
-            app_id: Some("dev.sonix.native".into()),
+            app_id: Some(sonix_real::IDENTIFIER.into()),
             ..Default::default()
         },
         |window, cx| {
             log("window_created");
-            // OS media controls (SMTC): registered on this (the window's) thread like the reference's
-            // `run_on_main_thread`, 1.5 s after creation so it never competes with the first show.
+            // OS media controls (SMTC): registered on this (the window's) thread, 1.5 s after creation so it never
+            // competes with the first show.
             #[cfg(windows)]
             if let Some(hwnd) = winffi::hwnd_of(window) {
                 let backend = cx.global::<app::Services>().backend.clone();

@@ -1,4 +1,4 @@
-//! Live playback preferences shared between the Settings IPC commands and the
+//! Live playback preferences shared between the settings commands and the
 //! engine thread: plain atomics, so a toggle is visible to the engine on its
 //! next loop iteration without a command round-trip (and without spawning the
 //! lazily started engine thread just to store a flag).
@@ -12,7 +12,7 @@ pub struct Prefs {
     autoplay: AtomicBool,
     sync_play_queue: AtomicBool,
     replay_gain: AtomicU8,
-    /// Whether any webview currently shows the spectrum/peak meters. Shared
+    /// Whether any view currently shows the spectrum/peak meters. Shared
     /// with the render callbacks and the spectrum thread (they skip the
     /// downmix / FFT / emit while false). Off until a subscriber appears.
     spectrum_active: Arc<AtomicBool>,
@@ -22,7 +22,7 @@ pub struct Prefs {
 }
 
 impl Default for Prefs {
-    /// Same defaults as the native `secrets::Settings`: autoplay OFF, server queue sync OFF (network-visible features
+    /// Same defaults as `secrets::Settings`: autoplay OFF, server queue sync OFF (network-visible features
     /// are opt-in; a careless `Prefs::default()` must never opt in),
     /// ReplayGain off.
     fn default() -> Self {

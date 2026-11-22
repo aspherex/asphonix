@@ -1,7 +1,7 @@
-//! `EntityLink.svelte`: an artist/album name that opens that entity's page. Plain text when there is no id or
+//! Entity links: an artist/album name that opens that entity's page. Plain text when there is no id or
 //! the link would lead to the page already open. Not a tab stop; click/dblclick do not propagate, so the
 //! enclosing row/card neither selects, plays nor opens. Hover: colour -> stark over 0.1 s + underline
-//! (`text-underline-offset: 2px`).
+//! 2 px below the baseline.
 use crate::widgets::tooltip::Tip;
 use crate::anim;
 use crate::router::Route;
@@ -21,12 +21,12 @@ thread_local! {
     static CURRENT: RefCell<Route> = const { RefCell::new(Route::Home) };
 }
 
-/// The shell tells us which route is open (`router.current` in the Svelte component).
+/// The shell tells us which route is open.
 pub fn set_current(r: &Route) {
     CURRENT.with(|c| *c.borrow_mut() = r.clone());
 }
 
-/// `linked`: `!!id && !(router.current.name === kind && router.current.params.id === id)`.
+/// A name links when it has an id and its page is not the one already open.
 pub fn is_linked(kind: Kind, id: Option<&str>) -> bool {
     let Some(id) = id else { return false };
     CURRENT.with(|c| match (&*c.borrow(), kind) {
@@ -49,8 +49,8 @@ fn key_of(kind: Kind, id: &str, salt: &str) -> usize {
     h.finish() as usize
 }
 
-/// The name as an `EntityLink` inside a slot of type `spec` / colour `base`. `salt` distinguishes several links to the
-/// same entity on screen (hover state is keyed by it). Inside the web's `button` the inherited letter-spacing is reset.
+/// The name as an entity link inside a slot of type `spec` / colour `base`. `salt` distinguishes several links to the
+/// same entity on screen (hover state is keyed by it). A linked name drops the letter-spacing.
 pub fn entity_link(th: &Theme, (kind, id): (Kind, Option<&str>), text: &str, spec: TypeSpec, base: Hsla, salt: &str, window: &mut Window) -> AnyElement {
     let th = *th;
     if !is_linked(kind, id) {

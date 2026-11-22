@@ -1,6 +1,5 @@
 //! Counting plays (local listening history + server scrobble) and "now playing" reports, driven by the engine's
-//! in-process `watch<PlayerState>`. Vendored from the reference `scrobble/mod.rs`; `tauri::AppHandle`/`AppState`
-//! replaced by [`ScrobbleCtx`] (the same shared `Arc`s). Gating is identical: history is always recorded,
+//! in-process `watch<PlayerState>`. Shared state comes in through [`ScrobbleCtx`]. Gating: history is always recorded,
 //! every network call checks `scrobbling` first.
 
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -18,7 +17,7 @@ use crate::subsonic::{Client, PlaybackReportState};
 /// How often the retry queue is drained (scrobbles aren't time-critical).
 const RETRY_INTERVAL: Duration = Duration::from_secs(45);
 
-/// Shared state the scrobble tasks need (what the reference reads from `AppState`).
+/// Shared state the scrobble tasks need (the same `Arc`s the backend holds).
 #[derive(Clone)]
 pub struct ScrobbleCtx {
     pub client: Arc<RwLock<Option<Client>>>,

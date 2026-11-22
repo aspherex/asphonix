@@ -1,15 +1,11 @@
 //! Track sources: where the compressed bytes for a track id come from, and
 //! how they get onto disk.
 //!
-//! Per the module contract (see `audio/mod.rs`): this crate defines its own
-//! minimal [`TrackSource`] trait rather than depending on `crate::subsonic`
-//! (built in parallel by another agent). [`HttpTrackSource`] is a generic
+//! This module defines its own minimal [`TrackSource`] trait so the engine
+//! does not depend on a concrete client. [`HttpTrackSource`] is a generic
 //! HTTP implementation that takes a URL-builder closure returning [`Url`],
-//! matching the Phase 1 `subsonic::TrackSource` trait shape
-//! (`fn stream_url(&self, id: &str) -> Url`) so wiring in the real client
-//! later is a one-liner: `HttpTrackSource::new(move |id|
-//! client.stream_url(id))` where `client: subsonic::Client` (cheap to
-//! clone, per Phase 1's design — captured directly by the closure).
+//! e.g. `HttpTrackSource::new(move |id| client.stream_url(id))` with a
+//! (cheaply cloned) `subsonic::Client` captured by the closure.
 //!
 //! Download is progressive and disk-backed (never buffered whole in RAM):
 //! [`ProgressiveDownload`] streams the HTTP response straight to a temp
@@ -150,8 +146,7 @@ where
 }
 
 /// A `TrackSource` that treats the "track id" as a local filesystem path —
-/// used when no dev-server credentials are configured, so local testing
-/// (and the `examples/play.rs` dev example) work without a Subsonic server.
+/// for local testing without a Subsonic server.
 pub struct LocalFileSource;
 
 impl TrackSource for LocalFileSource {
@@ -164,18 +159,17 @@ impl TrackSource for LocalFileSource {
     }
 }
 
-/// The real app's `TrackSource`: streams from whichever `subsonic::Client`
-/// is currently logged in, read live out of a lock shared with
-/// `state::AppState::client` (same `Arc`, set by `auth_connect`, cleared by
-/// `auth_logout`). This is the one place `audio/` depends on `crate::subsonic`
-/// — intentional in this integration phase: the engine must track
+/// The app's `TrackSource`: streams from whichever `subsonic::Client`
+/// is currently logged in, read live out of a lock shared with the backend
+/// (same `Arc`, set by `auth_connect`, cleared by `auth_logout`). This is the
+/// one place `audio/` depends on `crate::subsonic`: the engine must track
 /// login/logout/account-switch without restarting.
 ///
 /// `open()` reads the lock once (a cheap `Option<Client>::clone`, never held
 /// across the HTTP request) to build the fully-authenticated stream URL, then
 /// starts a [`ProgressiveDownload`] exactly like [`HttpTrackSource`]. If
 /// nobody is logged in, it fails fast with `ErrorKind::NotConnected` instead
-/// of issuing a request — `lib.rs` also stops the engine synchronously on
+/// of issuing a request — the backend also stops the engine synchronously on
 /// logout, so this path is a defence in depth, not the primary mechanism.
 pub struct SubsonicTrackSource {
     client: std::sync::Arc<std::sync::RwLock<Option<crate::subsonic::Client>>>,

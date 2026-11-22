@@ -11,11 +11,10 @@
 use gpui::{AnyElement, AnyView, Context, Entity, IntoElement, Render, StyleRefinement, Subscription, WeakEntity, Window};
 
 /// `view` as a cached child of the given outer style (it must reproduce the view's own root sizing: the placeholder
-/// node takes this style in the parent's layout, then the view lays out inside the resulting bounds). Parity builds
-/// render uncached: `pid()` probes record their boxes during prepaint, which a reused view skips.
+/// node takes this style in the parent's layout, then the view lays out inside the resulting bounds).
 pub fn cached(view: impl Into<AnyView>, style: StyleRefinement) -> AnyView {
     let v: AnyView = view.into();
-    if cfg!(feature = "parity") { v } else { v.cached(style) }
+    v.cached(style)
 }
 
 /// The common outer style: fill the parent (`size_full`).

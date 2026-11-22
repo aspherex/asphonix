@@ -1,5 +1,5 @@
-//! `AlbumDetail.svelte`: header (cover, name, artist link, stats, play/shuffle/star/menu), the 640 px "Track Vectors"
-//! table (`TrackRow` rows, multi-select, keyboard, context menu) and the 280 px telemetry panel with the artist's other albums.
+//! The album page: header (cover, name, artist link, stats, play/shuffle/star/menu), the 640 px "Track Vectors"
+//! table (track rows, multi-select, keyboard, context menu) and the 280 px telemetry panel with the artist's other albums.
 use super::cards::{anchor_cell, open_menu_at};
 use super::entity_link::set_current;
 use super::fmtx;
@@ -9,7 +9,6 @@ use super::{Ctx, LibEvent, menus, navigate};
 use crate::app::{self, PlayerEvent};
 use crate::columns::visible_columns;
 use crate::metrics::{library as m, tracks as tr};
-use crate::probe::pid;
 use crate::router::Route;
 use crate::text::{natural_width, txt};
 use crate::theme::{MONO, Theme};
@@ -28,7 +27,7 @@ use std::collections::BTreeSet;
 use std::ops::Range;
 use std::rc::Rc;
 
-/// `TrackSelection` (set + anchor) plus the keyboard cursor `selectedIndex` of `AlbumDetail.svelte` (two separate things there).
+/// Row selection (set + anchor) plus the keyboard cursor; the two are tracked separately.
 #[derive(Default)]
 pub struct DetailSelection {
     set: BTreeSet<usize>,
@@ -43,7 +42,7 @@ impl DetailSelection {
     pub fn len(&self) -> usize {
         self.set.len()
     }
-    /// `handleClick` + `selectRow`: shift extends from the anchor, ctrl toggles, plain selects just this row.
+    /// Shift extends from the anchor, ctrl toggles, plain selects just this row.
     pub fn click(&mut self, i: usize, ctrl: bool, shift: bool) {
         if shift {
             let from = self.anchor.unwrap_or(i);
@@ -62,7 +61,7 @@ impl DetailSelection {
     pub fn select_all(&mut self, n: usize) {
         self.set = (0..n).collect();
     }
-    /// `forContextMenu`: keep the selection when `i` is in it, else just `i`.
+    /// Keeps the selection when `i` is in it, else just `i`.
     pub fn for_context_menu(&mut self, i: usize) -> Vec<usize> {
         if !self.set.contains(&i) {
             self.set = BTreeSet::from([i]);
@@ -73,7 +72,7 @@ impl DetailSelection {
     }
 }
 
-/// Ctrl/Cmd+A in a `[data-tracklist]` list (`trackListKeydown`'s `selectAll`): one action for every list.
+/// Ctrl/Cmd+A in a track list: one action for every list.
 use crate::views::shell::SelectAll as SelectAllRows;
 
 pub struct AlbumDetailView {
@@ -198,7 +197,7 @@ impl AlbumDetailView {
         cx.notify();
     }
 
-    /// The "+" button: `openAddToPlaylistMenu(anchor, t.id)` (`pos` = the button's bottom-right corner).
+    /// The "+" button: opens the add-to-playlist menu (`pos` = the button's bottom-right corner).
     fn open_add_menu(&mut self, ix: usize, pos: Point<Pixels>, _window: &mut Window, cx: &mut Context<Self>) {
         let Some(t) = self.tracks().get(ix) else { return };
         crate::overlays::add_to_playlist(cx, vec![t.id.clone()], pos);
@@ -206,7 +205,7 @@ impl AlbumDetailView {
 
     fn select_row(&mut self, ix: usize) {
         self.sel.cursor = Some(ix);
-        // `VirtualList.scrollToIndex`: the minimum scroll that brings the row fully into view
+        // the minimum scroll that brings the row fully into view
         if ix < self.vis.start {
             self.list.scroll_to_item(ix, ScrollStrategy::Top);
         } else if ix + 1 >= self.vis.end {
@@ -250,9 +249,9 @@ impl AlbumDetailView {
                 let _ = t_play.update(cx, |t, cx| t.play_from(ix, cx));
             }),
         };
-        // `dragIds={() => selection.forContextMenu(index)…}`: a selected row drags the whole selection
+        // a selected row drags the whole selection
         let drag_ids: Vec<String> = if self.sel.has(ix) { self.sel.set.iter().copied().filter_map(|i| self.tracks().get(i).map(|t| t.id.clone())).collect() } else { vec![t.id.clone()] };
-        let r = rows::row(&th, &t, &st, o, tr::ROW_H, Some(format!("track.row.{}", self.web_row(ix))), cb, window)
+        let r = rows::row(&th, &t, &st, o, tr::ROW_H, cb, window)
             .on_drag(crate::dnd::SonixDrag(crate::dnd::DragPayload::Tracks(drag_ids)), crate::dnd::ghost(th))
             .on_click(cx.listener(move |this, ev: &ClickEvent, window, cx| {
                 if ev.click_count() >= 2 {
@@ -272,14 +271,7 @@ impl AlbumDetailView {
                     cx.stop_propagation();
                 }),
             );
-        pid(format!("track.row.{}", self.web_row(ix)), r).into_any_element()
-    }
-
-    /// Index of the row among the web's rendered window (`VirtualList` renders from `floor(scrollTop / 36) - 6`).
-    fn web_row(&self, ix: usize) -> usize {
-        let top = -f32::from(self.list.0.borrow().base_handle.offset().y);
-        let start = ((top / tr::ROW_H).floor() as i64 - 6).max(0) as usize;
-        ix.saturating_sub(start)
+        r.into_any_element()
     }
 
     fn header(&mut self, th: &Theme, d: &AlbumDetail, window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
@@ -288,7 +280,7 @@ impl AlbumDetailView {
         let fsum = fmtx::summarize_formats(&d.tracks);
         let id = self.id.clone();
         let (id2, artist_id, genre) = (self.id.clone(), album.artist_id.clone(), album.genre.clone());
-        let art = pid("album.art", art_slot(&th, &self.ctx.art, &self.ctx.backend, album.cover_art.as_deref(), m::ALBUM_ART, true, 320, "album", 40.0, window, cx));
+        let art = art_slot(&th, &self.ctx.art, &self.ctx.backend, album.cover_art.as_deref(), m::ALBUM_ART, true, 320, "album", 40.0, window, cx);
         let sep = |th: &Theme| txt(th, MONO_DATA, "·").color(th.muted);
         let mut stats = div().flex().flex_row().gap(px(crate::metrics::space::XS)).child(txt(&th, MONO_DATA, album.year.map(|y| y.to_string()).unwrap_or_else(|| "—".into())).color(th.muted));
         stats = stats.child(sep(&th)).child(txt(&th, MONO_DATA, format!("{} TRACKS", album.song_count)).color(th.muted)).child(sep(&th)).child(txt(&th, MONO_DATA, fmtx::total_duration(album.duration)).color(th.muted));
@@ -304,7 +296,7 @@ impl AlbumDetailView {
         let anchor2 = anchor.clone();
         let ctx = self.ctx.clone();
         let album_c = album.clone();
-        // native-only: the loaded album's button shows the active state (outline, pause icon, click pauses / resumes)
+        // the loaded album's button shows the active state (outline, pause icon, click pauses / resumes)
         let pst = self.ctx.player.read(cx).play_state(&crate::app::PlayTarget::Album { id: self.id.clone(), tracks: album.song_count });
         let fg = if pst.active() { th.accent_fg } else { th.accent_text };
         let play_btn = div()
@@ -386,31 +378,28 @@ impl AlbumDetailView {
             .items_center()
             .gap(px(crate::metrics::space::SM))
             .mt(px(crate::metrics::space::SM))
-            .child(pid("album.btn.play", play_btn))
-            .child(pid("album.btn.shuffle", secondary))
-            .child(pid("album.btn.star", star_btn))
-            .child(pid("album.btn.more", more_btn));
+            .child(play_btn)
+            .child(secondary)
+            .child(star_btn)
+            .child(more_btn);
         let info = div()
             .flex()
             .flex_col()
             .gap(px(crate::metrics::space::XS))
             .justify_end()
             .min_w_0()
-            .child(pid("album.name", div().flex().child(txt(&th, HEADLINE_LG, album.name.clone()).color(th.text))))
-            .child(div().flex().flex_row().child(pid(
-                "album.artist",
-                text_link(&th, "artist-link", album.artist.clone(), HEADLINE_SM, (th.accent_fg, th.accent_fg), false, move |_, cx| {
+            .child(div().flex().child(txt(&th, HEADLINE_LG, album.name.clone()).color(th.text)))
+            .child(div().flex().flex_row().child(text_link(&th, "artist-link", album.artist.clone(), HEADLINE_SM, (th.accent_fg, th.accent_fg), false, move |_, cx| {
                     if let Some(a) = artist_id.clone() {
                         navigate(cx, Route::Artist(a));
                     }
-                }),
-            )))
-            .child(pid("album.stats", stats))
-            .child(pid("album.actions", actions));
-        pid("album.header", div().flex().flex_row().gap(px(m::PAGE_PAD)).flex_none().child(art).child(pid("album.info", info))).into_any_element()
+                })))
+            .child(stats)
+            .child(actions);
+        div().flex().flex_row().gap(px(m::PAGE_PAD)).flex_none().child(art).child(info).into_any_element()
     }
 
-    /// Native-only loading page: the loaded page's geometry (header, fixed-height track panel, meta column) with
+    /// Loading page: the loaded page's geometry (header, fixed-height track panel, meta column) with
     /// placeholders, so the arrival only fills content in.
     fn skeleton_page(&mut self, th: &Theme, window: &mut Window) -> AnyElement {
         use crate::widgets::skeleton as sk;
@@ -425,22 +414,22 @@ impl AlbumDetailView {
             .items_center()
             .gap(px(crate::metrics::space::SM))
             .mt(px(crate::metrics::space::SM))
-            .child(pid("album.btn.play", btn(crate::metrics::space::LG, 16.0, false, HEADLINE_SM, "PLAY ALBUM")))
-            .child(pid("album.btn.shuffle", btn(crate::metrics::space::MD, 15.0, true, BODY_MD, "SHUFFLE")))
-            .child(pid("album.btn.star", sk::block(&th, m::BTN_H, m::BTN_H)))
-            .child(pid("album.btn.more", sk::block(&th, m::BTN_H, m::BTN_H)));
+            .child(btn(crate::metrics::space::LG, 16.0, false, HEADLINE_SM, "PLAY ALBUM"))
+            .child(btn(crate::metrics::space::MD, 15.0, true, BODY_MD, "SHUFFLE"))
+            .child(sk::block(&th, m::BTN_H, m::BTN_H))
+            .child(sk::block(&th, m::BTN_H, m::BTN_H));
         let info = div()
             .flex()
             .flex_col()
             .gap(px(crate::metrics::space::XS))
             .justify_end()
             .min_w_0()
-            .child(pid("album.name", sk::text_slot(&th, HEADLINE_LG.line, 24.0, 1.0).w(px(320.))))
+            .child(sk::text_slot(&th, HEADLINE_LG.line, 24.0, 1.0).w(px(320.)))
             .child(sk::text_slot(&th, HEADLINE_SM.line, 16.0, 1.0).w(px(180.)))
-            .child(pid("album.stats", sk::text_slot(&th, MONO_DATA.line, 12.0, 1.0).w(px(260.))))
-            .child(pid("album.actions", actions));
-        let art = pid("album.art", div().size(px(m::ALBUM_ART)).flex_none().bg(th.high).border_1().border_color(th.border));
-        let header = pid("album.header", div().flex().flex_row().gap(px(m::PAGE_PAD)).flex_none().child(art).child(pid("album.info", info)));
+            .child(sk::text_slot(&th, MONO_DATA.line, 12.0, 1.0).w(px(260.)))
+            .child(actions);
+        let art = div().size(px(m::ALBUM_ART)).flex_none().bg(th.high).border_1().border_color(th.border);
+        let header = div().flex().flex_row().gap(px(m::PAGE_PAD)).flex_none().child(art).child(info);
 
         let o = RowOpts { show_artist: true, cols: visible_columns(self.panel_w.get()), actions: 3 };
         let head = div()
@@ -460,9 +449,7 @@ impl AlbumDetailView {
         for _ in 0..(m::TRACKS_PANEL_H / tr::ROW_H) as usize {
             body = body.child(sk::row(&th, tr::ROW_H));
         }
-        let panel = pid(
-            "album.panel",
-            div()
+        let panel = div()
                 .relative()
                 .flex_1()
                 .min_w_0()
@@ -473,10 +460,9 @@ impl AlbumDetailView {
                 .border_color(th.border)
                 .bg(th.low)
                 .child(measure(&self.panel_w))
-                .child(pid("album.panel.header", head))
-                .child(rows::head(&th, o, "album.panel"))
-                .child(div().flex_1().min_h_0().child(body)),
-        );
+                .child(head)
+                .child(rows::head(&th, o))
+                .child(div().flex_1().min_h_0().child(body));
         let vw = f32::from(window.viewport_size().width);
         let w = if vw < crate::metrics::bp::COMPACT_BELOW { m::META_PANEL_W_COMPACT } else { m::META_PANEL_W };
         let mut b = div().flex().flex_col().gap(px(crate::metrics::space::SM)).p(px(crate::metrics::space::MD)).bg(th.low).border_1().border_color(th.border);
@@ -485,7 +471,7 @@ impl AlbumDetailView {
         for _ in 0..7 {
             dl = dl.child(sk::text_slot(&th, MONO_DATA.line, 11.0, 1.0));
         }
-        let meta = pid("album.meta", div().w(px(w)).flex_none().flex().flex_col().gap(px(crate::metrics::space::MD)).child(pid("album.meta.block.0", b.child(dl))));
+        let meta = div().w(px(w)).flex_none().flex().flex_col().gap(px(crate::metrics::space::MD)).child(b.child(dl));
         div()
             .w_full()
             .flex_none()
@@ -561,9 +547,7 @@ impl AlbumDetailView {
             .child(scrollbar::scrollbar("album-scrollbar", th, &self.list, &self.sb))
             .child(crate::widgets::smooth::drive(window, crate::widgets::smooth::Scrollable::list(&self.list)));
         let _ = window;
-        pid(
-            "album.panel",
-            div()
+        div()
                 .relative()
                 .flex_1()
                 .min_w_0()
@@ -574,10 +558,9 @@ impl AlbumDetailView {
                 .border_color(th.border)
                 .bg(th.low)
                 .child(measure(&self.panel_w))
-                .child(pid("album.panel.header", head))
-                .child(rows::head(&th, o, "album.panel"))
-                .child(div().flex_1().min_h_0().child(body)),
-        )
+                .child(head)
+                .child(rows::head(&th, o))
+                .child(div().flex_1().min_h_0().child(body))
         .into_any_element()
     }
 
@@ -588,7 +571,7 @@ impl AlbumDetailView {
         let w = if vw < crate::metrics::bp::COMPACT_BELOW { m::META_PANEL_W_COMPACT } else { m::META_PANEL_W };
         let fsum = fmtx::summarize_formats(&d.tracks);
         let mut rows_v: Vec<(&'static str, AnyElement)> = Vec::new();
-        // `grid-template-columns: auto 1fr`: the label column is as wide as the widest label; a value too long for the rest wraps
+        // two columns: the label column is as wide as the widest label; a value too long for the rest wraps
         let mut labels = vec!["Format", "Genre", "Year", "Tracks", "Duration"];
         if album.play_count.is_some() {
             labels.push("Plays");
@@ -644,10 +627,7 @@ impl AlbumDetailView {
             }
             b
         };
-        let mut panel = div().w(px(w)).flex_none().flex().flex_col().gap(px(crate::metrics::space::MD)).child(pid(
-            "album.meta.block.0",
-            block(vec![div().flex().child(txt(&th, LABEL_CAPS, "Album Telemetry").color(th.muted)).into_any_element(), dl.into_any_element()]),
-        ));
+        let mut panel = div().w(px(w)).flex_none().flex().flex_col().gap(px(crate::metrics::space::MD)).child(block(vec![div().flex().child(txt(&th, LABEL_CAPS, "Album Telemetry").color(th.muted)).into_any_element(), dl.into_any_element()]));
         if !self.other.is_empty() {
             let mut list = div().flex().flex_col().gap(px(crate::metrics::space::XS));
             let others: Vec<Album> = self.other.iter().take(6).cloned().collect();
@@ -677,12 +657,9 @@ impl AlbumDetailView {
                         .on_click(move |_, _, cx| navigate(cx, Route::Album(oid.clone()))),
                 );
             }
-            panel = panel.child(pid(
-                "album.meta.block.1",
-                block(vec![div().flex().child(txt(&th, LABEL_CAPS, format!("{} in Vault", album.artist)).color(th.muted)).into_any_element(), list.into_any_element()]),
-            ));
+            panel = panel.child(block(vec![div().flex().child(txt(&th, LABEL_CAPS, format!("{} in Vault", album.artist)).color(th.muted)).into_any_element(), list.into_any_element()]));
         }
-        pid("album.meta", panel).into_any_element()
+        panel.into_any_element()
     }
 }
 
@@ -725,7 +702,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn selection_follows_track_selection_svelte() {
+    fn detail_selection_click_and_context_menu() {
         let mut s = DetailSelection::default();
         s.click(2, false, false);
         s.click(4, true, false);

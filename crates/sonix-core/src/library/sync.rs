@@ -36,8 +36,8 @@ use crate::subsonic::{Client, RawAlbum, RawArtist, RawPlaylist, RawSong, ScanSta
 use super::queries::HomeSectionKind;
 use super::{set_meta_tx, Db};
 
-/// Receives sync progress. Implemented in `lib.rs` to forward to the
-/// frontend as `sync-progress` events; a no-op implementation is used by
+/// Receives sync progress. The backend forwards it to the
+/// UI as sync-progress events; a no-op implementation is used by
 /// integration tests.
 pub trait SyncProgressSink: Send + Sync {
     fn progress(&self, phase: SyncPhase, current: u64, total: u64, message: Option<&str>);
@@ -729,7 +729,7 @@ pub(crate) mod tests {
     }
 
     // -----------------------------------------------------------------
-    // Integration against the real dev server. Run with:
+    // Integration against a real Subsonic server (`SONIX_DEV_*` env vars). Run with:
     //   cargo test -- --ignored --nocapture integration_
     // Read-only against the server (sync never writes); writes only to a
     // throwaway temp SQLite DB, which is removed afterwards.

@@ -1,4 +1,4 @@
-//! Horizontal slider / fader (`Fader.svelte`): a 24 px hit area around a 4 px rail,
+//! Horizontal slider / fader: a 24 px hit area around a 4 px rail,
 //! accent fill, optional buffered bar, 10x18 cap. Drag is tracked with window-level
 //! mouse listeners registered while dragging, so it keeps working outside the element.
 use crate::metrics::fader as fd;

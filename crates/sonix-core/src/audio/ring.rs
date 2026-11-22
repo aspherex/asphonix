@@ -8,8 +8,8 @@
 
 use rtrb::{Consumer, Producer, RingBuffer};
 
-/// Target amount of buffered PCM, per the memory budget in `PLAN.md`
-/// ("decoded PCM only in a ring buffer of ~1-2s").
+/// Target amount of buffered PCM (memory budget:
+/// "decoded PCM only in a ring buffer of ~1-2s").
 pub const TARGET_BUFFER_SECONDS: f64 = 1.5;
 
 /// Creates a new PCM ring buffer sized for `bytes_per_frame` at `sample_rate`,

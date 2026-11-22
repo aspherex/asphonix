@@ -1010,8 +1010,8 @@ fn write_frames(
         tap.peaks.record((pl * volume).min(1.0), (pr * volume).min(1.0));
     }
 
-    // Unity volume (the common case) never touches a byte here — bit-perfect
-    // per `PLAN.md`. Applied to the whole popped region (the padded silence
+    // Unity volume (the common case) never touches a byte here, so the
+    // output stays bit-perfect. Applied to the whole popped region (the padded silence
     // tail, if any, is already zero and unaffected by a multiply).
     if (volume - 1.0).abs() > f32::EPSILON {
         super::apply_gain_in_place(&mut buf[..popped_len], format.container, volume);
@@ -1215,7 +1215,7 @@ mod tests {
 
     #[test]
     fn unsupported_format_message_names_what_the_device_takes() {
-        // The beyerdynamic LL adapter on the dev machine: 48 kHz / 16-bit only.
+        // A USB adapter that only takes 48 kHz / 16-bit.
         let beyer = [(48_000, 16)];
         assert_eq!(
             unsupported_format_message("Speakers (beyerdynamic LL Adapter)", 44_100, Some(16), &beyer),

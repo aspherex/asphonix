@@ -9,11 +9,11 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
 
-/// How long logout / account switch / exit wait for the listen writer (reference `LISTEN_FLUSH_TIMEOUT`).
+/// How long logout / account switch / exit wait for the listen writer.
 pub(crate) const LISTEN_FLUSH_TIMEOUT: Duration = Duration::from_secs(2);
-/// Final session write bound at exit (reference lib.rs `persist_now(4 s)`).
+/// Final session write bound at exit.
 pub(crate) const EXIT_PERSIST_TIMEOUT: Duration = Duration::from_secs(4);
-/// Delay before a saved-on MCP bridge starts listening (reference `spawn_if_enabled`).
+/// Delay before a saved-on MCP bridge starts listening.
 const MCP_START_DELAY: Duration = Duration::from_secs(3);
 
 /// Per-service state held by `Inner`.
@@ -39,7 +39,7 @@ impl Default for Services {
 
 impl RealBackend {
     /// Stop playback and wait (bounded) until the listen session `Stop` closed, and any still queued,
-    /// are in the DB. Must run BEFORE `Db::clear_all` on logout / account switch (reference c777bc0).
+    /// are in the DB. Must run BEFORE `Db::clear_all` on logout / account switch, so the closing listen row belongs to the old account.
     pub(crate) fn flush_listen(&self) {
         self.0.rt.block_on(self.0.engine.stop_and_flush_listen(LISTEN_FLUSH_TIMEOUT));
     }
@@ -47,14 +47,14 @@ impl RealBackend {
     /// App exit: final session write (also records the `quit` listen row), then service teardown.
     pub fn shutdown(&self) {
         self.0.engine.persist_now(EXIT_PERSIST_TIMEOUT);
-        // No stale endpoint/token once the app is gone (reference `remove_discovery_on_exit`).
+        // No stale endpoint/token once the app is gone.
         sonix_core::mcp_bridge::remove_discovery_on_exit(&self.0.dir);
     }
 
     // --- Windows media controls (SMTC / media keys) ---------------------------------------------
 
     /// Registers the main window (Win32 HWND) with the OS media controls. Call it on the window's thread, delayed past
-    /// the first show (reference `run_on_main_thread` after 1.5 s). The same window again is a no-op; a new window
+    /// the first show (about 1.5 s). The same window again is a no-op; a new window
     /// re-registers and retires the previous update loop. A no-op off Windows.
     pub fn attach_media_window(&self, hwnd: isize) {
         if self.0.svc.media_hwnd.swap(hwnd, Ordering::SeqCst) == hwnd {
@@ -166,7 +166,7 @@ impl MediaHost for RealMedia {
 }
 
 // --- Claude (MCP) bridge ---------------------------------------------------------------------------
-// Contract: docs/MCP.md of the reference. OFF by default: nothing listens and no `mcp.json` exists until
+// OFF by default: nothing listens and no `mcp.json` exists until
 // `set_mcp_enabled(true)`; `settings_set` and `apply_service_settings` (startup) drive these methods.
 
 /// Tool calls run against the backend's own library DB / engine; both gates are re-read on every call.
@@ -204,8 +204,7 @@ impl RealBackend {
             allow_control: s.mcp_allow_control.load(Ordering::Relaxed),
             listening: s.mcp.is_listening(),
             bridge_exists: path.as_ref().is_some_and(|p| p.exists()),
-            // `sonix-native`, not `sonix`: the installed WebView app registers itself as `sonix`.
-            register_command: path.as_ref().map(|p| format!("claude mcp add sonix-native -- \"{}\"", p.display())),
+            register_command: path.as_ref().map(|p| format!("claude mcp add sonix -- \"{}\"", p.display())),
             bridge_path: path.map(|p| p.display().to_string()),
             last_error: s.mcp.last_error(),
         })
@@ -228,8 +227,8 @@ impl RealBackend {
         self.mcp_status_impl()
     }
 
-    /// Startup: applies the persisted service flags before anything else runs (reference `lib.rs` setup: the flags are
-    /// stored at once, the MCP listener starts 3 s later and only if still enabled, `spawn_if_enabled`).
+    /// Startup: applies the persisted service flags before anything else runs (the flags are
+    /// stored at once; the MCP listener starts 3 s later and only if still enabled).
     pub(crate) fn apply_service_settings(&self, s: &sonix_core::secrets::Settings) {
         self.set_auto_check_updates(s.auto_check_updates);
         self.0.svc.mcp_allow_control.store(s.mcp_allow_control, Ordering::Relaxed);
@@ -268,7 +267,7 @@ mod tests {
     fn auto_check_on_with_the_empty_channel_starts_nothing() {
         static SEQ: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
         let seq = SEQ.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-        let dir = std::path::PathBuf::from("<build-dir>/tmp").join(format!("sonix-svc-auto-{}-{seq}", std::process::id()));
+        let dir = std::env::var_os("SONIX_TEST_TMP").map(std::path::PathBuf::from).unwrap_or_else(std::env::temp_dir).join(format!("sonix-svc-auto-{}-{seq}", std::process::id()));
         {
             let b = RealBackend::open_in(dir.join("config"), dir.join("data"));
             assert!(sonix_core::updates::UPDATE_ENDPOINT.is_empty() && !b.0.svc.updater.is_enabled());

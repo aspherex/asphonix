@@ -1,4 +1,4 @@
-//! Button variants (`Button.svelte`: primary / secondary / danger / icon) and the
+//! Button variants (primary / secondary / danger / icon) and the
 //! flat "ghost" icon button used by the top bar, dock and rows.
 use super::{hard_shadow, icon, icon_g};
 use crate::anim;
@@ -15,7 +15,7 @@ pub enum Variant {
     Danger,
 }
 
-/// A text button, optionally with a leading icon (`Button.svelte`). Attach `.on_click(...)` on the result.
+/// A text button, optionally with a leading icon. Attach `.on_click(...)` on the result.
 /// Primary/danger: Space Grotesk 13/18 700 caps; secondary: body font 13/18 500.
 pub fn button(id: impl Into<ElementId>, th: Theme, variant: Variant, label: &str, icon_name: Option<&str>, disabled: bool, window: &mut Window) -> Stateful<Div> {
     let (mut bg, fg, mut border, display) = match variant {
@@ -23,7 +23,7 @@ pub fn button(id: impl Into<ElementId>, th: Theme, variant: Variant, label: &str
         Variant::Secondary => (th.mid, th.text, th.border, false),
         Variant::Danger => (th.clip, th.text, gpui::transparent_black(), true),
     };
-    // `.btn { transition: border-color 0.1s, background-color 0.1s }` (hover colours below), eased with CSS `ease`
+    // border and background fade to the hover colours below in 0.1 s, eased with `ease`
     let key = {
         use std::hash::{Hash, Hasher};
         let mut h = std::collections::hash_map::DefaultHasher::new();
@@ -60,7 +60,7 @@ pub fn button(id: impl Into<ElementId>, th: Theme, variant: Variant, label: &str
     if disabled {
         b = b.opacity(0.5).cursor(CursorStyle::OperationNotAllowed);
     } else {
-        // `<button>` is a tab stop (document order = paint order); keyboard focus shows the hover border
+        // a tab stop (tab order = paint order); keyboard focus shows the hover border
         b = b.tab_index(0).focus(move |s| if super::key_nav() { s.border_color(th.focus) } else { s }).cursor(CursorStyle::PointingHand).on_hover(move |h, window, _| {
             anim::set_hovered(key, *h);
             window.refresh();
@@ -73,14 +73,14 @@ pub fn button(id: impl Into<ElementId>, th: Theme, variant: Variant, label: &str
     b
 }
 
-/// Flat icon button (`.icon-link` / dock `.t-btn`): muted, accent on hover, accent when `on`.
+/// Flat icon button (top bar, dock): muted, accent on hover, accent when `on`.
 /// The svg inherits the parent text colour, so the hover tint is just a style on the box.
 pub fn ghost_icon(id: impl Into<ElementId>, th: Theme, name: &str, icon_size: f32, box_size: f32, on: bool, disabled: bool) -> Stateful<Div> {
     ghost_icon_with(id, th, name, icon_size, box_size, on, disabled, th.border)
 }
 
-/// `ghost_icon` with the colour a disabled button gets (`.icon-link:disabled`: border-idle; `.t-btn:disabled`:
-/// muted). Both also carry `base.css button:disabled { opacity: 0.5 }`.
+/// `ghost_icon` with the colour a disabled button gets (the idle border colour for most, muted in the dock);
+/// disabled buttons are also drawn at 50 % opacity.
 // flat parameter list on purpose: every call site is a one-line icon button
 #[allow(clippy::too_many_arguments)]
 pub fn ghost_icon_with(id: impl Into<ElementId>, th: Theme, name: &str, icon_size: f32, box_size: f32, on: bool, disabled: bool, disabled_col: gpui::Hsla) -> Stateful<Div> {

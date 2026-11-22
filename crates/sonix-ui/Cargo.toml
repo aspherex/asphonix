@@ -3,14 +3,15 @@ name = "sonix-ui"
 version.workspace = true
 edition.workspace = true
 publish.workspace = true
+license.workspace = true
+repository.workspace = true
 
 [[bin]]
-name = "sonix-native"
+name = "sonix"
 path = "src/main.rs"
 
 [dependencies]
 sonix-api = { path = "../sonix-api" }
-sonix-mock = { path = "../sonix-mock" }
 sonix-real = { path = "../sonix-real" }
 gpui.workspace = true
 serde.workspace = true
@@ -22,9 +23,6 @@ log = "0.4"
 image = { version = "0.25.1", default-features = false, features = ["png"] }
 
 [features]
-# Parity automation hook (local control channel, test clock, bounds/state dump, PNG capture).
-# NEVER enabled in release builds; see docs/PARITY.md.
-parity = []
 # Heap accounting for memory work (counting allocator + big-allocation backtraces). Never in a release build.
 memprof = []
 

@@ -1,11 +1,10 @@
-//! `Favorites.svelte` ("Starred Crates"): starred albums in the library routes' `VirtualGrid` of `AlbumCard`s
-//! (`minCellWidth 140, textHeight 40, gap 16`, pages of 60 via `browse_get_albums({ starredOnly })`), with a link to
-//! Liked Songs. Remounted on every visit like the Svelte route (the shell drops the entity when the route changes).
+//! The favorites page ("Starred Crates"): starred albums in the library routes' `VirtualGrid` of album cards
+//! (min cell width 140, text height 40, gap 16, pages of 60 via `browse_get_albums` with `starred_only`), with a link
+//! to Liked Songs. Remounted on every visit (the shell drops the entity when the route changes).
 use super::ListsEvent;
 use crate::app;
 use crate::metrics::{lists as lm, space};
 use crate::pager::PAGE;
-use crate::probe::pid;
 use crate::router::Route;
 use crate::text::txt;
 use crate::tracking::{BODY_SM, HEADLINE_MD, LABEL_CAPS, MONO_CODE};
@@ -57,12 +56,11 @@ impl GridHost<Album> for FavoritesView {
     fn grid(&mut self) -> &mut GridState<Album> {
         &mut self.grid
     }
-    fn cell(&mut self, ix: usize, item: Option<Album>, geo: Geo, window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
+    fn cell(&mut self, item: Option<Album>, geo: Geo, window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
         let th = app::theme(cx);
-        // `{#if !album}<div class="loading">`
+        // the page is still loading: a plain block
         let Some(a) = item else { return div().w(px(geo.cell_w)).h(px(geo.cell_h)).flex_none().bg(th.low).into_any_element() };
-        let ids = crate::views::library::pages::web_index(&self.grid, ix, geo).filter(|n| *n < 8).map(|n| format!("lib.card.{n}"));
-        card(&self.ctx.clone(), &th, CardItem::Album(&a), geo.cell_w, Some(geo.cell_h), ids, window, cx)
+        card(&self.ctx.clone(), &th, CardItem::Album(&a), geo.cell_w, Some(geo.cell_h), window, cx)
     }
     fn request(&mut self, page: usize, cx: &mut Context<Self>) {
         if self.grid.pager.want(page) {
@@ -81,7 +79,7 @@ impl Render for FavoritesView {
             .items_center()
             .justify_between()
             .flex_none()
-            .child(pid("page.title", txt(&th, HEADLINE_MD, "Starred Crates").color(th.text)))
+            .child(txt(&th, HEADLINE_MD, "Starred Crates").color(th.text))
             .child(
                 div()
                     .flex()
@@ -97,14 +95,14 @@ impl Render for FavoritesView {
                             .child(txt(&th, LABEL_CAPS, "Starred tracks → Liked Songs"))
                             .on_click(cx.listener(|_, _, _, cx| cx.emit(ListsEvent::Navigate(Route::Liked)))),
                     )
-                    .child(pid("page.count", txt(&th, MONO_CODE, format!("{total} ALBUMS")).color(th.muted))),
+                    .child(txt(&th, MONO_CODE, format!("{total} ALBUMS")).color(th.muted)),
             );
         let body: AnyElement = if total == 0 && self.grid.loaded {
             let m = "No starred albums yet — tap the star on any album or track.";
             div().child(txt(&th, BODY_SM, m).color(th.muted)).into_any_element()
         } else {
-            pid("lib.gridwrap", div().flex_1().min_h_0().child(grid_element(self, th, window, cx))).into_any_element()
+            div().flex_1().min_h_0().child(grid_element(self, th, window, cx)).into_any_element()
         };
-        pid("page", div().size_full().flex().flex_col().gap(px(space::MD)).p(px(lm::PAGE_PAD)).child(header).child(body))
+        div().size_full().flex().flex_col().gap(px(space::MD)).p(px(lm::PAGE_PAD)).child(header).child(body)
     }
 }

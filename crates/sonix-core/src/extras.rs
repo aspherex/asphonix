@@ -1,8 +1,5 @@
 //! Read-only discovery and player extras: lyrics, artist top tracks / info (the radio pool is `continuity::radio_pool`).
-//!
-//! Vendored from SoniX @ 642db10: `fullplayer.rs` (lyrics part), `discovery.rs` (`browse_get_artist_top_tracks`,
-//! `browse_get_artist_info`) (the radio error helper). The `#[tauri::command]` wrappers are replaced by plain
-//! async functions over `(&Db, Option<Client>)`; behaviour, cache keys and TTLs are unchanged.
+//! Plain async functions over `(&Db, Option<Client>)`.
 //! Everything here only reads from the server (`getLyrics*`, `getTopSongs`, `getArtistInfo2`, `getSimilarSongs*`).
 
 use std::sync::Mutex;
@@ -19,7 +16,7 @@ use crate::subsonic::Client;
 
 
 // ---------------------------------------------------------------------------
-// Lyrics (fullplayer.rs)
+// Lyrics
 // ---------------------------------------------------------------------------
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -200,10 +197,10 @@ pub async fn artist_info(db: &Db, client: Option<Client>, id: &str) -> IpcResult
 }
 
 // ---------------------------------------------------------------------------
-// Radio: the pool is `crate::continuity::radio_pool` (the single copy of `ipc::radio_pool`)
+// Radio: the pool is `crate::continuity::radio_pool`
 // ---------------------------------------------------------------------------
 
-/// `radio_start`'s error when the pool is empty (reference `ipc.rs`).
+/// `radio_start`'s error when the pool is empty.
 pub fn no_similar() -> IpcError {
     IpcError { code: IpcErrorCode::NotFound, message: "no similar tracks found for this radio seed".into() }
 }

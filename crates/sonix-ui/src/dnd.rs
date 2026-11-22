@@ -1,5 +1,5 @@
-//! Drag and drop (`lib/dnd.ts`): a drag carries tracks, an album or an artist; targets (sidebar playlists, the queue rail)
-//! resolve it to track ids at drop time, exactly like `resolveDragTrackIds`. Built on GPUI's `on_drag` / `on_drop` /
+//! Drag and drop: a drag carries tracks, an album or an artist; targets (sidebar playlists, the queue rail)
+//! resolve it to track ids at drop time ([`resolve_ids`]). Built on GPUI's `on_drag` / `on_drop` /
 //! `drag_over`; the drag image is the tiny accent chip with the label ("3 tracks"), not a snapshot of the row.
 use crate::theme::Theme;
 use crate::text::txt;
@@ -10,17 +10,17 @@ use sonix_api::Backend;
 #[derive(Clone, Debug)]
 pub enum DragPayload {
     Tracks(Vec<String>),
-    /// `AlbumCard` / a Search album row
+    /// An album card / a Search album row
     Album { id: String, name: String },
-    /// `ArtistCard` / a Search artist row
+    /// An artist card / a Search artist row
     Artist { id: String, name: String },
 }
 
-/// The dragged value (what `application/x-sonix-tracks` carries on the web).
+/// The dragged value.
 #[derive(Clone, Debug)]
 pub struct SonixDrag(pub DragPayload);
 
-/// `describeDrag`
+/// Text of a drag with `count` resolved tracks ("3 tracks", "Name (12 tracks)").
 pub fn describe(p: &DragPayload, count: usize) -> String {
     let n = if count == 1 { "track" } else { "tracks" };
     match p {
@@ -29,7 +29,7 @@ pub fn describe(p: &DragPayload, count: usize) -> String {
     }
 }
 
-/// `resolveDragTrackIds`: blocking (call from the background executor).
+/// The track ids a drag stands for. Blocking (call from the background executor).
 pub fn resolve_ids(p: &DragPayload, b: &dyn Backend) -> Vec<String> {
     match p {
         DragPayload::Tracks(ids) => ids.clone(),
@@ -38,7 +38,7 @@ pub fn resolve_ids(p: &DragPayload, b: &dyn Backend) -> Vec<String> {
     }
 }
 
-/// `setGhost`: `padding: 4px 8px; background: accent; color: accent-text; font: 700 12px/16px mono; uppercase`.
+/// The drag chip: 4/8 px padding, accent fill, accent-text bold mono label.
 pub struct Ghost {
     pub label: SharedString,
     pub th: Theme,
@@ -50,7 +50,7 @@ impl Render for Ghost {
     }
 }
 
-/// Label of a track drag: the web's drag image text ("3 tracks" / "album: Name").
+/// Label of the drag chip ("3 tracks" / "album: Name").
 pub fn ghost_label(p: &DragPayload) -> String {
     match p {
         DragPayload::Tracks(ids) => describe(p, ids.len()),

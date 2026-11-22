@@ -1,5 +1,5 @@
-//! Plain-text styling from the type scale. Text that needs tracking goes through
-//! `tracking::tracked`; everything else (row cells, ellipsised titles) uses these.
+//! Plain-text styling from the type scale (font only: no tracking, no caps). Single-line text that needs
+//! letter-spacing or ellipsis goes through `text::txt`.
 use crate::theme::Theme;
 use crate::tracking::TypeSpec;
 use gpui::{Div, FontWeight, div, prelude::*, px};

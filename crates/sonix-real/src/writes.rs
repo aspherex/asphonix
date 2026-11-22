@@ -1,6 +1,5 @@
 //! Library write paths: stars, ratings, server playlists (write-through, then mirror into the local DB),
 //! local smart playlists, and the Flow coverage hint.
-//! Ports `ipc.rs` (playlists_*, star_*, rating_set), `smart_ipc.rs` and `flow_ipc.rs` of the WebView app.
 use crate::reads::conv;
 use crate::{err, RealBackend};
 use sonix_api::*;
@@ -28,7 +27,7 @@ impl RealBackend {
         self.0.session.lock().unwrap().cfg.as_ref().map(|c| c.username.clone())
     }
 
-    /// Smart/read-only flags (`ipc::apply_playlist_access`).
+    /// Smart/read-only flags (same rule as `mcp_bridge::sources::apply_playlist_access`).
     fn access(&self, p: &mut core::Playlist) {
         let me = self.current_username();
         let (smart, read_only) = library::playlist_access_flags(p.server_read_only, p.owner.as_deref(), me.as_deref());
@@ -36,7 +35,7 @@ impl RealBackend {
         p.read_only = read_only;
     }
 
-    /// Backend guard behind the UI's disabled controls (`ipc::ensure_playlist_writable`).
+    /// Backend guard behind the UI's disabled controls.
     fn ensure_writable(&self, id: &str) -> ApiResult<()> {
         if let Some((owner, server_ro)) = library::playlist_access(&self.0.db, id).map_err(err)? {
             let me = self.current_username();
@@ -93,7 +92,7 @@ impl PlaylistsApi for RealBackend {
                 Ok::<_, core::IpcError>(raw)
             })
             .map_err(err)?;
-        // The native UI can create from a selection (`trackIds`); the WebView command only takes a name.
+        // A playlist can be created from a selection (`trackIds`) or empty (name only).
         // The playlist exists on the server now, so whatever happens next the mirror is refreshed and the UI told.
         let added = if req.track_ids.is_empty() {
             Ok(())

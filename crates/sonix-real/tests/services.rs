@@ -4,13 +4,13 @@ use sonix_api::*;
 use sonix_real::RealBackend;
 use std::time::{Duration, Instant};
 
-/// Own config/data dirs under `<build-dir>/tmp` (opened with `open_in`, no env vars), removed on drop.
+/// Own config/data dirs under the system temp dir (override: `SONIX_TEST_TMP`) (opened with `open_in`, no env vars), removed on drop.
 struct Sandbox(std::path::PathBuf);
 impl Sandbox {
     fn new(tag: &str) -> Self {
         static SEQ: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
         let seq = SEQ.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-        let base = if std::path::Path::new("<build-dir>").exists() { std::path::PathBuf::from("<build-dir>/tmp") } else { std::env::temp_dir() };
+        let base = std::env::var_os("SONIX_TEST_TMP").map(std::path::PathBuf::from).unwrap_or_else(std::env::temp_dir);
         let dir = base.join(format!("sonix-services-{tag}-{}-{seq}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
@@ -68,13 +68,13 @@ fn mcp_is_off_by_default_and_enable_disable_manage_the_discovery_file() {
     let st = b.mcp_status().unwrap();
     assert!(!st.enabled && !st.allow_control && !st.listening, "off by default: {st:?}");
     assert!(!discovery.exists(), "nothing written until enabled");
-    assert!(st.register_command.as_deref().is_some_and(|c| c.starts_with("claude mcp add sonix-native -- ")));
+    assert!(st.register_command.as_deref().is_some_and(|c| c.starts_with("claude mcp add sonix -- ")));
 
     let st = b.set_mcp_enabled(true).unwrap();
     assert!(st.enabled && st.listening && !st.allow_control);
     let text = std::fs::read_to_string(&discovery).expect("mcp.json written on enable");
     let d: serde_json::Value = serde_json::from_str(&text).unwrap();
-    assert!(d["endpoint"].as_str().unwrap().starts_with(r"\\.\pipe\sonix-native-mcp-"), "own pipe name, not the installed app's");
+    assert!(d["endpoint"].as_str().unwrap().starts_with(r"\\.\pipe\sonix-mcp-"), "pipe name carries the app prefix");
     assert_eq!(d["token"].as_str().unwrap().len(), 64);
     assert!(b.mcp_status().unwrap().enabled);
 
@@ -85,7 +85,7 @@ fn mcp_is_off_by_default_and_enable_disable_manage_the_discovery_file() {
     assert!(!st.enabled && !st.listening);
     assert!(!discovery.exists(), "mcp.json removed on disable");
 
-    // Exit removes the discovery file too (reference `remove_discovery_on_exit`).
+    // Exit removes the discovery file too.
     b.set_mcp_enabled(true).unwrap();
     assert!(discovery.exists());
     b.shutdown();

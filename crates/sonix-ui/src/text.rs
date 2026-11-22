@@ -1,13 +1,12 @@
-//! The one single-line text primitive of the app: CSS-faithful `letter-spacing`, `text-transform:
-//! uppercase`, `text-overflow: ellipsis`, fixed `line-height` boxes and a CSS-like baseline.
+//! The one single-line text primitive of the app: letter-spacing, uppercase, ellipsis truncation,
+//! fixed line-height boxes and a pixel-rounded baseline.
 //!
 //! GPUI 0.2 has no letter-spacing and its `text_ellipsis` cannot be combined with per-glyph
 //! painting, so [`Txt`] is a small custom element: it asks the layout engine for a *measured* node
-//! whose width is `min(natural width, available width)` (like an inline-block with
-//! `overflow: hidden; text-overflow: ellipsis` inside a flex row), shapes the line once through
+//! whose width is `min(natural width, available width)`, shapes the line once through
 //! the public text system and paints every glyph with `Window::paint_glyph` at
 //! `x + i * tracking`. When the text does not fit it keeps the longest glyph prefix that leaves
-//! room for "…" (the same rule Chromium applies).
+//! room for "…".
 use crate::theme::Theme;
 use crate::tracking::TypeSpec;
 use gpui::{
@@ -40,8 +39,7 @@ impl Txt {
         self.color = Some(c);
         self
     }
-    /// `letter-spacing: normal`: UA buttons (e.g. the `EntityLink` / `sort-btn` buttons inside a styled span) reset the
-    /// inherited tracking, so their text is not letter-spaced even when the surrounding class says so.
+    /// No letter-spacing, whatever the type spec says: used for button text (entity links, sort buttons, segments).
     pub fn no_tracking(mut self) -> Self {
         self.tracking = 0.0;
         self
@@ -50,7 +48,7 @@ impl Txt {
         self.weight = w;
         self
     }
-    /// `overflow: hidden; text-overflow: ellipsis; min-width: 0` (the box shrinks, the text is cut with "…").
+    /// The box may shrink below the natural width; the text is then cut with "…".
     /// Without it the box is always the natural width and never shrinks (taffy's intrinsic-size pass
     /// over-counts shrinkable measured leaves in `flex-shrink: 0` containers, e.g. the top bar pill).
     pub fn ellipsis(mut self) -> Self {
@@ -59,8 +57,8 @@ impl Txt {
     }
 }
 
-/// GPUI snaps flex allocations to device pixels (1.5 per CSS px here), Chromium rounds intrinsic widths up:
-/// an allocation up to one CSS px short of the natural width is not an overflow.
+/// GPUI snaps flex allocations to device pixels (1.5 per logical px at 150 %), so an allocation up to one logical
+/// px short of the natural width is not an overflow.
 const SNAP: f32 = 1.0;
 
 fn run_for(text: &str, family: &'static str, weight: f32, color: Hsla) -> TextRun {
@@ -153,7 +151,7 @@ impl Element for Txt {
             }
             ell = Some(el);
         }
-        // CSS baseline: font metrics are rounded to whole device pixels, half-leading splits the rest.
+        // baseline: font metrics are rounded to whole device pixels, half-leading splits the rest.
         let s = window.scale_factor();
         let asc = (f32::from(layout.ascent) * s).round();
         let desc = (f32::from(layout.descent) * s).round();
@@ -184,8 +182,8 @@ impl Element for Txt {
     }
 }
 
-/// Chromium shapes with the font's `kern` (GPOS pair kerning) on; DirectWrite via GPUI leaves it off unless the
-/// feature is requested explicitly ("AV", "AY", "PLAY" were 2-6 % wider natively). Every face we create goes through this.
+/// Turns on the font's `kern` feature (GPOS pair kerning): DirectWrite via GPUI leaves it off unless the
+/// feature is requested explicitly ("AV", "AY", "PLAY" are 2-6 % wider without it). Every face we create goes through this.
 pub fn css_font(family: &'static str, weight: f32) -> gpui::Font {
     let mut f = font(family);
     f.weight = FontWeight(weight);

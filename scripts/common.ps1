@@ -1,6 +1,5 @@
-# Shared helpers for the SONIX.native harness. Reuses the measurement method of
-# scripts/perf/sample.ps1 (GetProcessMemoryInfo -> PrivateWorkingSetSize summed
-# over the process tree rooted at OUR pid). Processes are only ever stopped by the
+# Shared helpers for the perf harness: private working set (GetProcessMemoryInfo ->
+# PrivateWorkingSetSize) summed over the process tree rooted at OUR pid. Processes are only ever stopped by the
 # exact PID this harness started.
 Add-Type -TypeDefinition @'
 using System;
@@ -104,7 +103,6 @@ function Start-Sonix([string]$Exe, [hashtable]$EnvVars = @{}, [string]$Log = $nu
     foreach ($k in $EnvVars.Keys) { Set-Item -Path "Env:$k" -Value $EnvVars[$k] | Out-Null }
     if ($Log) { Remove-Item $Log -ErrorAction SilentlyContinue; $env:SONIX_LOG = $Log }
     $sw = [Diagnostics.Stopwatch]::StartNew()
-    $env:SONIX_MOCK = "1"  # perf/shot scripts always use the mock backend
     $p = Start-Process -FilePath $Exe -PassThru
     foreach ($k in $EnvVars.Keys) { Remove-Item -Path "Env:$k" -ErrorAction SilentlyContinue }
     return @{ Proc = $p; Sw = $sw }

@@ -123,7 +123,7 @@ struct Tmp(PathBuf);
 
 impl Tmp {
     fn new(tag: &str) -> Tmp {
-        let base = PathBuf::from(std::env::var("SONIX_TEST_TMP").unwrap_or_else(|_| "<build-dir>/tmp".into()));
+        let base = std::env::var_os("SONIX_TEST_TMP").map(std::path::PathBuf::from).unwrap_or_else(std::env::temp_dir);
         let p = base.join(format!("art-perf-{tag}-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&p);
         std::fs::create_dir_all(&p).unwrap();
@@ -374,7 +374,7 @@ fn undecodable_master_falls_back_to_a_sized_request_once() {
 }
 
 #[test]
-fn sniffing_accepts_the_reference_formats() {
+fn sniffing_accepts_the_supported_formats() {
     assert!(looks_like_image(&[0xFF, 0xD8, 0xFF, 0xE0, 0]));
     assert!(looks_like_image(&[0x89, b'P', b'N', b'G', 0, 0]));
     assert!(looks_like_image(b"GIF89a......"));

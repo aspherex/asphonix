@@ -1,6 +1,5 @@
-//! Global single-key shortcuts of `shortcuts.ts` that the shell did not bind yet: L (like the current track), J/K (scroll the page),
-//! `/` (focus search), mouse side buttons (history back/forward). Kept in their own module so `shell.rs` only
-//! gains a few additive `on_action` / listener lines.
+//! Global single-key shortcuts: L (like the current track), J/K (scroll the page),
+//! `/` (focus search), mouse side buttons (history back/forward).
 use super::shell::Shell;
 use crate::app;
 use gpui::{Context, Window, actions};
@@ -9,12 +8,12 @@ use sonix_api::{StarRequest, StarTargetType};
 actions!(sonix_keys, [LikeCurrent, SlashSearch]);
 
 impl Shell {
-    /// `shortcuts.ts: overlayOpen()` + menus: a shell-level popover/modal owns single keys while open.
+    /// A shell-level popover/modal or menu owns single keys while open.
     pub(crate) fn overlay_open(&self, cx: &gpui::App) -> bool {
         self.overlays.read(cx).is_open() || self.menu.read(cx).is_open() || self.lists_editor_open(cx)
     }
 
-    /// L: `like.ts: toggleLikeCurrent` (star/unstar the playing track; no-op without one).
+    /// L: star/unstar the playing track (no-op without one).
     pub(crate) fn like_current(&mut self, cx: &mut Context<Self>) {
         if self.overlay_open(cx) {
             return;
@@ -36,14 +35,14 @@ impl Shell {
     }
 }
 
-/// `shortcuts.ts: isTyping || inOverlay`: focus is in a text field, a context menu or a dialog.
+/// Focus is in a text field, a context menu or a dialog.
 pub(crate) fn typing_or_in_overlay(window: &Window) -> bool {
     window.context_stack().iter().any(|c| c.contains("TextInput") || c.contains("ContextMenu") || c.contains("Dialog"))
 }
 
 impl Shell {
     /// Root key-down hook for keys whose `key` name depends on the keyboard layout: `/` is Shift+7 on a German
-    /// layout, so match the produced character (`KeyboardEvent.key === "/"` in the web) instead of a binding.
+    /// layout, so match the produced character instead of a binding.
     pub(crate) fn feel_key_down(&mut self, ev: &gpui::KeyDownEvent, window: &mut Window, cx: &mut Context<Self>) {
         let m = ev.keystroke.modifiers;
         if m.control || m.alt || m.platform {
@@ -57,7 +56,7 @@ impl Shell {
             cx.stop_propagation();
             return;
         }
-        // N / Shift+N: toggle Now Playing, not on key repeat, not over an open menu/dialog (`shortcuts.ts`)
+        // N / Shift+N: toggle Now Playing, not on key repeat, not over an open menu/dialog
         if ev.keystroke.key == "n" {
             if !ev.is_held && !self.overlay_open(cx) {
                 self.toggle_now_playing(cx);
@@ -65,7 +64,7 @@ impl Shell {
             }
             return;
         }
-        // `scrollStage(±120)`: J/K scroll the page everywhere but Now Playing (there they skip -10/+10 s); held keys repeat
+        // J/K scroll the page by 120 px everywhere but Now Playing (there they skip -10/+10 s); held keys repeat
         let dy = match ev.keystroke.key.as_str() {
             "j" => 120.0,
             "k" => -120.0,
@@ -86,7 +85,7 @@ mod tests {
     use gpui::{KeyBindingContextPredicate, KeyContext};
 
     /// The single-key predicate used in `main.rs` (Space, N, L): active on the shell, inert inside a text field,
-    /// a context menu or a dialog (`shortcuts.ts: isTyping / inOverlay`).
+    /// a context menu or a dialog.
     #[test]
     fn single_key_predicate_skips_inputs_menus_and_dialogs() {
         let p = KeyBindingContextPredicate::parse("Root && !TextInput && !ContextMenu && !Dialog").unwrap();

@@ -1,6 +1,5 @@
 //! Wire types of the list routes (history, liked, smart playlists, settings extras).
-//! Mirrors `src/lib/ipc/types.ts` (see each type's TS name). Kept in its own file so the
-//! branch that ports Playlists/Liked/History/Search/Settings merges additively.
+//! Kept in its own file so the core `types.rs` stays small.
 use crate::types::{FlowArc, Track};
 use serde::{Deserialize, Serialize};
 
@@ -12,7 +11,7 @@ pub struct LikedSummary {
     pub duration: f64,
 }
 
-/// `HistoryItem`: a day header row or a played track (`kind` tag, like the TS union).
+/// `HistoryItem`: a day header row or a played track (tagged by `kind`).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "camelCase")]
 pub enum HistoryItem {
@@ -138,7 +137,7 @@ pub struct PlaySourceRequest {
     pub start_track_id: Option<String>,
     #[serde(default)]
     pub seed: u32,
-    /// Flow: play as a Flow source with this arc (overrides shuffle; `modeOf` in mock.ts).
+    /// Flow: play as a Flow source with this arc (overrides shuffle).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub flow: Option<FlowArc>,
 }
@@ -201,7 +200,7 @@ pub struct ArtCacheStatus {
     pub bytes: u64,
 }
 
-/// One `settings_set_*` command (the TS names are `settings.setX`): the mock/backends apply it.
+/// One `settings_set_*` command; the backend applies it.
 #[derive(Debug, Clone, PartialEq)]
 pub enum SettingChange {
     Scrobbling(bool),

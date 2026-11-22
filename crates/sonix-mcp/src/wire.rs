@@ -26,8 +26,8 @@ pub const BRIDGE_VERSION: u64 = 2;
 /// Domain separation for the server proof (used for nothing else).
 pub const PROOF_LABEL: &[u8] = b"sonix-mcp server proof v2\0";
 pub const HELLO: &str = "sonix-mcp";
-/// The native app's identifier (`sonix_real::IDENTIFIER`): names its config dir (NOT the installed app's `dev.sonix.app`).
-pub const APP_IDENTIFIER: &str = "dev.sonix.native";
+/// The app's identifier (`sonix_real::IDENTIFIER`): names its config dir.
+pub const APP_IDENTIFIER: &str = "dev.sonix.app";
 /// Written by the app while "Claude (MCP)" is enabled, removed when disabled.
 pub const DISCOVERY_FILE: &str = "mcp.json";
 /// Largest line the app accepts from a client (hello or request).
@@ -35,10 +35,10 @@ pub const MAX_REQUEST_LINE: usize = 1 << 20;
 /// Largest answer line the bridge accepts from the app.
 pub const MAX_RESPONSE_LINE: usize = 8 << 20;
 
-/// Where the app keeps `mcp.json`: `SONIX_NATIVE_MCP_CONFIG_DIR`, else the
+/// Where the app keeps `mcp.json`: `SONIX_MCP_CONFIG_DIR`, else the
 /// per-OS equivalent of `%APPDATA%` for [`APP_IDENTIFIER`].
 pub fn config_dir() -> Option<PathBuf> {
-    if let Some(d) = std::env::var_os("SONIX_NATIVE_MCP_CONFIG_DIR").filter(|d| !d.is_empty()) {
+    if let Some(d) = std::env::var_os("SONIX_MCP_CONFIG_DIR").filter(|d| !d.is_empty()) {
         return Some(PathBuf::from(d));
     }
     #[cfg(windows)]

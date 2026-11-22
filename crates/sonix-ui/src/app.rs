@@ -54,7 +54,7 @@ pub struct PlayerModel {
 /// A thing with a "play it" button: the active state of that button asks the player whether it is the one loaded.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum PlayTarget {
-    /// Albums play as a static queue (`playQueue`, no source identity): the album is "playing" when the static queue
+    /// Albums play as a static queue (`player_play_queue`, no source identity): the album is "playing" when the static queue
     /// is exactly that album (every row from it, `tracks` of them) - not when one of its tracks plays from a search.
     Album { id: String, tracks: u32 },
     Playlist(String),

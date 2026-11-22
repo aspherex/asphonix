@@ -1,7 +1,7 @@
 //! Measurement support for `scripts/perf.ps1`: frame-interval statistics (time between
-//! consecutive root `render()` calls, like the spike) and the scripted timeline
-//! (`SONIX_SCRIPT=1`): idle, an end-to-end scroll of the 54k list, Now Playing for
-//! 60 s, then back to Tracks. The harness reads the `phase ...` lines from `$SONIX_LOG`.
+//! consecutive root `render()` calls) and the scripted timeline (`SONIX_SCRIPT=1`):
+//! idle, an end-to-end scroll of the Tracks list, Now Playing, then back to Tracks.
+//! The harness reads the `phase ...` lines from `$SONIX_LOG`.
 use std::time::Instant;
 
 #[derive(Default)]

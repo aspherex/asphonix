@@ -1,7 +1,6 @@
-//! Shell-level overlays: the promise-less ports of `Dialog.svelte` (confirm / prompt), `TrackInfoDialog.svelte`,
-//! `Toast.svelte` and `AddToPlaylistMenu.svelte`. One `Overlays` entity is mounted last in the shell; any view opens
-//! them through the free functions below (the equivalent of `dialog.svelte.ts` / `toast.svelte.ts` / `trackInfo.svelte.ts` /
-//! `addToPlaylist.svelte.ts`), so routes never own a dialog.
+//! Shell-level overlays: the confirm / prompt dialogs, the track info and update dialogs, toasts and the
+//! add-to-playlist popover. One `Overlays` entity is mounted last in the shell; any view opens them through the free
+//! functions below (callbacks instead of awaited results), so routes never own a dialog.
 use crate::app;
 use crate::theme::{MONO, Theme};
 use crate::text::txt;
@@ -22,7 +21,7 @@ pub type PromptDone = Box<dyn FnOnce(String, &mut App)>;
 pub struct OverlayHandle(pub Entity<Overlays>);
 impl Global for OverlayHandle {}
 
-/// `box-shadow: Npx Npx 0 var(--shadow-hot*)`: lime in dark, the panel ink in light.
+/// Hard offset shadow of the overlays: lime in dark, the panel ink in light.
 fn hot_shadow(th: &Theme, off: f32) -> Vec<BoxShadow> {
     let c = if th.light { th.shadow } else { th.accent };
     vec![BoxShadow { color: c, offset: point(px(off), px(off)), blur_radius: px(0.), spread_radius: px(0.) }]
@@ -35,7 +34,7 @@ enum Modal {
     Update,
 }
 
-/// `updates.svelte.ts` UpdateStore: the pending release and the install progress.
+/// Update state: the pending release and the install progress.
 #[derive(Default)]
 struct UpdState {
     info: Option<UpdateInfo>,
@@ -48,7 +47,7 @@ struct UpdState {
 
 struct AddMenu {
     ids: Vec<String>,
-    /// bottom-right of the anchor (CSS: `top = rect.bottom + 4`, `left = max(8, rect.right - 220)`)
+    /// bottom-right of the anchor; the popover opens 4 px below it, right-aligned (left edge at least 8 px)
     anchor: Point<Pixels>,
     list: Vec<Playlist>,
 }
@@ -56,7 +55,7 @@ struct AddMenu {
 pub struct Overlays {
     modal: Option<Modal>,
     add_menu: Option<AddMenu>,
-    /// the popover's list (`max-height: 280px; overflow-y: auto`), wheel-animated by `widgets::smooth`
+    /// the popover's list (280 px max, scrolls), wheel-animated by `widgets::smooth`
     add_scroll: gpui::ScrollHandle,
     toast: Option<SharedString>,
     toast_gen: u64,
@@ -70,7 +69,7 @@ impl Overlays {
         Self { modal: None, add_menu: None, add_scroll: gpui::ScrollHandle::new(), toast: None, toast_gen: 0, focus: cx.focus_handle(), want_focus: false, upd: UpdState::default() }
     }
 
-    /// A modal or the Add-to-playlist popover is open (`shortcuts.ts: overlayOpen`).
+    /// A modal or the Add-to-playlist popover is open.
     pub fn is_open(&self) -> bool {
         self.modal.is_some() || self.add_menu.is_some()
     }
@@ -195,14 +194,14 @@ impl Overlays {
     }
 }
 
-// ---- the free-function API (what `dialog.svelte.ts`, `toast.svelte.ts`, ... export)
+// ---- the free-function API
 
 fn with<R>(cx: &mut App, f: impl FnOnce(&mut Overlays, &mut Context<Overlays>) -> R) -> R {
     let e = cx.global::<OverlayHandle>().0.clone();
     e.update(cx, f)
 }
 
-/// `confirmAction`
+/// A confirm dialog; `on_ok` runs when the user confirms.
 pub fn confirm(cx: &mut App, title: &str, message: &str, confirm_label: &str, danger: bool, on_ok: impl FnOnce(&mut App) + 'static) {
     let (title, message, confirm_label): (SharedString, SharedString, SharedString) = (title.to_string().into(), message.to_string().into(), confirm_label.to_string().into());
     with(cx, move |o, cx| {
@@ -211,17 +210,17 @@ pub fn confirm(cx: &mut App, title: &str, message: &str, confirm_label: &str, da
         cx.notify();
     });
 }
-/// `promptText` (playlist create/rename, the add-to-playlist popover's "New playlist…"): `on_ok` gets the trimmed, non-empty value.
+/// A text prompt (playlist create/rename, the add-to-playlist popover's "New playlist…"): `on_ok` gets the trimmed, non-empty value.
 pub fn prompt(cx: &mut App, title: &str, placeholder: &str, confirm_label: &str, value: &str, on_ok: impl FnOnce(String, &mut App) + 'static) {
     let (t, p, c, v) = (title.to_string(), placeholder.to_string(), confirm_label.to_string(), value.to_string());
     with(cx, move |o, cx| o.open_prompt(t.into(), p.into(), c.into(), v, Box::new(on_ok), cx));
 }
-/// `showToast` (2.6 s)
+/// A toast that stays 2.6 s.
 pub fn show_toast(cx: &mut App, msg: &str) {
     let m: SharedString = msg.to_string().into();
     with(cx, move |o, cx| o.show_toast(m, 2600, cx));
 }
-/// `showTrackInfo`
+/// The track info dialog.
 pub fn track_info(cx: &mut App, t: Track) {
     with(cx, move |o, cx| {
         o.modal = Some(Modal::TrackInfo(Box::new(t)));
@@ -229,7 +228,7 @@ pub fn track_info(cx: &mut App, t: Track) {
         cx.notify();
     });
 }
-/// `openAddToPlaylistMenu`: `anchor_br` is the bottom-right corner of the anchor element.
+/// The add-to-playlist popover: `anchor_br` is the bottom-right corner of the anchor element.
 pub fn add_to_playlist(cx: &mut App, ids: Vec<String>, anchor_br: Point<Pixels>) {
     with(cx, move |o, cx| o.open_add_menu(ids, anchor_br, cx));
 }
@@ -240,7 +239,7 @@ impl Focusable for Overlays {
     }
 }
 
-/// `Panel.svelte`: low surface, 1 px rule, mid header strip with title (mono-data 700 caps) and meta.
+/// A panel: low surface, 1 px rule, mid header strip with title (mono-data 700 caps) and meta.
 fn panel(th: &Theme, title: &str, meta: Option<&str>, body: impl IntoElement) -> gpui::Div {
     div()
         .flex()
@@ -351,7 +350,7 @@ impl Render for Overlays {
                             cx.notify();
                         }
                     }));
-                    let install = crate::probe::pid("upd.install", button("upd-install", th, Variant::Primary, "Install & restart", None, u.installing, window).on_click(cx.listener(|this, _, _, cx| this.install_update(cx))));
+                    let install = button("upd-install", th, Variant::Primary, "Install & restart", None, u.installing, window).on_click(cx.listener(|this, _, _, cx| this.install_update(cx)));
                     let versions = div()
                         .flex()
                         .flex_row()
@@ -359,7 +358,7 @@ impl Render for Overlays {
                         .child(txt(&th, MONO_DATA, format!("v{}", info.version.clone().unwrap_or_default())).color(th.accent_fg));
                     let mut body = div().flex().flex_col().gap(px(12.)).p(px(12.)).child(versions);
                     if let Some(n) = &info.notes {
-                        // plain text only (never markup), `pre-wrap`
+                        // plain text only (never markup), line breaks kept
                         body = body.child(
                             div()
                                 .max_h(px(220.))
@@ -456,8 +455,7 @@ impl Render for Overlays {
                     this.modal = None;
                     cx.notify();
                 }))
-                .child(crate::probe::pid("dlg.box",
-                    div()
+                .child(div()
                         .id("dialog-box")
                         .track_focus(&self.focus)
                         .key_context("Dialog")
@@ -481,8 +479,7 @@ impl Render for Overlays {
                                 _ => {}
                             }
                         }))
-                        .child(inner),
-                ))
+                        .child(inner))
         });
         root = root.children(modal);
 
@@ -503,16 +500,14 @@ impl Render for Overlays {
                 .flex()
                 .flex_col()
                 .py(px(4.))
-                .child(crate::probe::pid("menu.child.0", div().px(px(12.)).py(px(4.)).child(txt(&th, LABEL_CAPS, header).color(th.muted))))
-                .child(crate::probe::pid("menu.child.1", item("add-new".into()).child(icon("add", 13., th.text)).child(txt(&th, BODY_SM, "New playlist…")).on_click(cx.listener(|this, _: &ClickEvent, _, cx| this.create_and_add(cx)))))
-                .children((!m.list.is_empty()).then(|| crate::probe::pid("menu.child.2", div().h(px(1.)).bg(th.border).my(px(4.)))))
+                .child(div().px(px(12.)).py(px(4.)).child(txt(&th, LABEL_CAPS, header).color(th.muted)))
+                .child(item("add-new".into()).child(icon("add", 13., th.text)).child(txt(&th, BODY_SM, "New playlist…")).on_click(cx.listener(|this, _: &ClickEvent, _, cx| this.create_and_add(cx))))
+                .children((!m.list.is_empty()).then(|| div().h(px(1.)).bg(th.border).my(px(4.))))
                 .children(m.list.iter().enumerate().map(|(i, p)| {
                     let id = p.id.clone();
-                    crate::probe::pid(format!("menu.child.{}", i + 3), item(("add-pl", i).into()).child(txt(&th, BODY_SM, p.name.clone())).on_click(cx.listener(move |this, _: &ClickEvent, _, cx| this.add_to(id.clone(), cx))))
+                    item(("add-pl", i).into()).child(txt(&th, BODY_SM, p.name.clone())).on_click(cx.listener(move |this, _: &ClickEvent, _, cx| this.add_to(id.clone(), cx)))
                 }));
-            let menu = crate::probe::pid(
-                "menu",
-                div()
+            let menu = div()
                     .absolute()
                     .top(px(top.min(vh - 40.)))
                     .left(px(left.min(vw - 228.)))
@@ -524,8 +519,7 @@ impl Render for Overlays {
                     .occlude()
                     .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
                     .child(list)
-                    .child(crate::widgets::smooth::drive(window, crate::widgets::smooth::Scrollable::div(std::ptr::addr_of!(self.add_scroll) as usize, &self.add_scroll))),
-            );
+                    .child(crate::widgets::smooth::drive(window, crate::widgets::smooth::Scrollable::div(std::ptr::addr_of!(self.add_scroll) as usize, &self.add_scroll)));
             root = root.child(
                 div().absolute().top_0().left_0().size_full().on_mouse_down(MouseButton::Left, cx.listener(|this, _, _, cx| {
                     this.add_menu = None;
@@ -556,13 +550,13 @@ impl Render for Overlays {
 }
 
 fn fmt_khz(hz: u32) -> String {
-    // JS `(hz / 1000).toLocaleString()`: up to 3 fraction digits, grouping
+    // kHz with up to 3 fraction digits, trailing zeros trimmed
     let k = hz as f64 / 1000.0;
     let s = format!("{:.3}", k);
     s.trim_end_matches('0').trim_end_matches('.').to_string()
 }
 
-/// `format.ts formatBytes`
+/// Byte count as B / KB / MB / GB (2 decimals below 10, else 1).
 fn format_bytes(b: f64) -> String {
     if b < 1024.0 {
         return format!("{} B", b as u64);
@@ -577,7 +571,7 @@ fn format_bytes(b: f64) -> String {
 }
 
 impl Overlays {
-    /// `installUpdate`: explicit user action only; on success the real app restarts (the mock just stays at 100 %).
+    /// Explicit user action only; on success the app restarts.
     fn install_update(&mut self, cx: &mut Context<Self>) {
         if self.upd.installing {
             return;
@@ -602,7 +596,7 @@ impl Overlays {
     }
 }
 
-/// `openUpdateDialog` (title-bar badge click): `playing` adds the "Playback will stop" warning.
+/// The update dialog (title-bar badge click): `playing` adds the "Playback will stop" warning.
 pub fn open_update(cx: &mut App, info: UpdateInfo, playing: bool) {
     with(cx, move |o, cx| {
         o.upd.info = Some(info);
@@ -614,7 +608,7 @@ pub fn open_update(cx: &mut App, info: UpdateInfo, playing: bool) {
     });
 }
 
-/// `update-progress` event.
+/// Download progress of an update install.
 pub fn update_progress(cx: &mut App, p: UpdateProgress) {
     with(cx, move |o, cx| {
         o.upd.downloaded = p.downloaded;

@@ -1,61 +1,88 @@
-# SoniX.native
+# SONIX
 
-A native (GPUI) desktop UI for SONIX, the bit-perfect Navidrome/Subsonic player. It is a
-separate project from the Tauri + Svelte app (`SoniX`, which keeps shipping unchanged); in a later
-phase it will share the Rust core with it.
+A fast, bit-perfect desktop music player for [Navidrome](https://www.navidrome.org/) and other
+Subsonic/OpenSubsonic servers, built in Rust with [GPUI](https://www.gpui.rs/).
 
-**Why:** the WebView build needs ~120-185 MB private working set and ~380 ms to a visible
-window. The GPUI spike measured ~30-40 MB, ~300 ms, 120 Hz scrolling/animation and a restore from
-minimize in ~15 ms. This repo turns the spike into a structured app that looks like the web app.
+- **Bit-perfect playback**: original files are streamed untouched, decoded in Rust (symphonia) and sent to the
+  device in WASAPI exclusive mode at their native sample rate, gapless. A shared-mode fallback is shown as such.
+- **Lean**: ~30-40 MB private working set in normal use, a few MB when minimized, ~300 ms to a visible window,
+  scrolling and animation at the display's refresh rate (budgets in [docs/PERF.md](docs/PERF.md)).
+- **Library**: local SQLite (FTS5) mirror of the server library for instant browsing and search across Home,
+  Albums, Artists, Tracks, Genres, History, playlists, Liked Songs and local smart playlists.
+- **Now Playing**: waveform seek, spectrum and peak meters, synced lyrics, A-B loop, ratings.
+- **Queue**: rolling queue window, shuffle with artist spread, Flow ordering (tempo/key/genre), autoplay/radio,
+  drag-and-drop reordering, session resume and optional server play-queue sync.
+- **Desktop integration**: Windows media controls (SMTC) and media keys, scrobbling, ReplayGain (optional),
+  light and dark theme, multiple server profiles, a track-change card while the app is in the background.
+- **Claude / MCP bridge** (off by default): `sonix-mcp` lets an MCP client such as Claude Code browse the library
+  and, if you allow it, control playback.
 
-**Status (phase 1):** shell, Tracks (54,515 paged rows), dock, Now Playing, minimal queue rail,
-widget layer, minimize/restore behaviour, perf harness, all against a deterministic **mock**
-backend (the title bar says `MOCK`). Everything else is tracked in `docs/PORTING.md`;
-what does not match the web app yet is listed in `docs/PARITY.md`.
+## Status
 
-## Parity with the web app (measured)
+CI builds SONIX for Windows (x64), macOS (Apple Silicon) and Linux (x64); tagged versions are published as
+GitHub releases (unsigned: SmartScreen / Gatekeeper warn on first launch).
 
-`parity/` drives the web app (mock backend, headless Edge over CDP) and this app (a `parity`-feature build with a local control
-channel) through the same scenarios and diffs boxes, pixels, animation frames, behaviour and text rendering. Results and
-method: `docs/PARITY.md`.
+| | Windows 10/11 | macOS | Linux |
+|---|---|---|---|
+| Output | WASAPI exclusive (bit-perfect), shared fallback | shared mode (cpal) | shared mode (cpal / ALSA) |
+| Media keys / OS now-playing | SMTC | – | – |
+| Password storage | Credential Manager | Keychain | Secret Service (GNOME Keyring, KWallet) |
+| Minimize handling (cache drop, working-set trim) | yes | – | – |
+
+Windows is the primary platform; macOS and Linux run the same UI and backend but have seen far less testing.
+
+GPUI currently has no accessibility support, so screen readers see an unlabeled window
+(see [docs/GPUI-GAPS.md](docs/GPUI-GAPS.md)).
+
+## Build
+
+Requirements: a recent stable Rust toolchain (edition 2024), plus
+- Windows: the MSVC build tools;
+- macOS: Xcode command line tools;
+- Linux (Debian/Ubuntu package names): `pkg-config libasound2-dev libdbus-1-dev libfontconfig1-dev
+  libfreetype6-dev libwayland-dev libxkbcommon-dev libxkbcommon-x11-dev libx11-xcb-dev libxcb1-dev libvulkan-dev
+  libzstd-dev`.
 
 ```
-npm ci   # once, in the web reference worktree (D:Codesonix-parity-ref)
-cargo build --profile fast --features parity -p sonix-ui   # never a release build
-cargo build --release -p sonix-parity                      # image metrics
-node parity/run.mjs [--only <substring>]    # scenarios -> parity/out/<scenario>/{web,native,diff}.png, boxes.json, metrics.json
-node parity/run.mjs --behavior              # scripted input, state dumps compared per step
-node parity/textfidelity.mjs                # text crops, LCD vs grayscale web
-node parity/report.mjs                      # regenerate the tables in docs/PARITY.md
+cargo run -p sonix-ui --release        # or: cargo build --release -> target/release/sonix(.exe)
+cargo test
+cargo clippy --all-targets -- -D warnings
 ```
+
+`cargo build --release` also produces `sonix-mcp`; keep it next to `sonix` for the MCP bridge.
+
+On first start SONIX asks for a server URL, user name and password. The password is stored in the OS keychain,
+never in a file. On Windows, settings, the session and the library database live under `%APPDATA%\dev.sonix.app`
+and `%LOCALAPPDATA%\dev.sonix.app` (the platform config/data dirs elsewhere).
+
+### MCP bridge
+
+Enable it in Settings > Claude (MCP); the page shows the exact command to register it, e.g.
+
+```
+claude mcp add sonix -- "C:\path\to\sonix-mcp.exe"
+```
+
+The bridge talks to the running app over a local named pipe with a per-session token; playback control is a
+separate opt-in.
 
 ## Layout
 
 ```
-crates/sonix-api   the command contract as Rust (types + `Backend` trait + events)
-crates/sonix-mock  deterministic mock backend (bit-exact port of mock.ts generators)
-crates/sonix-ui    the GPUI app, binary `sonix-native` (`--features parity`: automation hook, never in release)
-crates/sonix-parity image diff / text-crop metrics for the parity runner (`parity-diff`)
-parity/            Node runner (CDP + control channel), scenarios, behaviours, selector map
-assets/            fonts (TTF), icons (split from the SoniX sprite), pre-rendered backdrops
-scripts/           perf.ps1, shot.ps1, gen-icons.mjs
-docs/              PERF, PORTING, PARITY, GPUI-GAPS, screenshots
+crates/sonix-api    the Backend trait the UI talks to (types, commands, events)
+crates/sonix-core   Subsonic client, library DB + sync, audio engine, scrobbling, session, MCP bridge, updater
+crates/sonix-real   Backend implementation on top of sonix-core (+ cover-art cache)
+crates/sonix-ui     the GPUI app, binary `sonix`
+crates/sonix-mcp    MCP stdio server `sonix-mcp` that connects to a running SONIX
+assets/             fonts (TTF, SIL OFL), icons (SVG), pre-rendered backdrops
+scripts/            perf harness and memory tools (docs/PERF.md), font fix-up script
+docs/               PERF, GPUI-GAPS, UPDATES
 ```
 
-## Run
+The UI never talks to the server or the audio engine directly; everything goes through `sonix_api::Backend`.
+Contributor notes are in [CLAUDE.md](CLAUDE.md).
 
-```
-cargo run -p sonix-ui --release           # or: cargo build --release -> target/release/sonix-native.exe
-cargo test                                # 50 tests
-cargo clippy --all-targets -- -D warnings
-powershell -File scripts/perf.ps1 -Runs 3 # needs a release build; writes perf-out/
-powershell -File scripts/shot.ps1 -Name tracks-dark -Play [-Light] [-Route nowplaying] [-Size 1024x640] [-Menu 3]
-cargo run -p sonix-ui --example gen_backdrop   # regenerate assets/bg/*.png
-```
+## License
 
-Env hooks (screenshots/perf only): `SONIX_ROUTE`, `SONIX_LIGHT`, `SONIX_SIZE=WxH`, `SONIX_PLAY`,
-`SONIX_MENU=<row>`, `SONIX_SCRIPT`, `SONIX_FPSLOG`, `SONIX_LOG=<file>`.
-Theme choice is stored in `%APPDATA%\SoniX.native\ui.json`.
-
-Windows only for now (the minimize hook and working-set trim are `cfg(windows)`; everything else
-is cross-platform Rust). GPUI 0.2.2 from crates.io, unmodified.
+MIT, see [LICENSE](LICENSE). The bundled fonts (Inter, JetBrains Mono, Space Grotesk) are under the SIL Open Font
+License 1.1, see `assets/fonts/OFL-*.txt`.
