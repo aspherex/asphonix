@@ -77,6 +77,8 @@ struct Inner {
     scrobbling: Arc<std::sync::atomic::AtomicBool>,
     /// Session persistence + server play-queue push (gated by `Prefs::sync_play_queue`).
     store: Arc<sonix_core::audio::SessionStore>,
+    /// Track id + status of the last `PlayerState` event (`emit` drops position-only ticks while suspended).
+    last_ui_state: Mutex<Option<(Option<String>, PlaybackStatus)>>,
 }
 
 #[derive(Clone)]
@@ -169,6 +171,7 @@ impl RealBackend {
             settings: Mutex::new(settings),
             scrobbling,
             store,
+            last_ui_state: Mutex::new(None),
         }));
         // Persisted service flags first (all default OFF), before any background task or the reconnect starts.
         {
@@ -277,6 +280,21 @@ impl RealBackend {
     }
 
     pub(crate) fn emit(&self, ev: Event) {
+        // Minimized (`set_suspended`): nobody renders the 4 Hz position ticks, and every one wakes the UI threads and
+        // re-touches pages the trim just released. Only a track/status change is forwarded (the UI re-reads
+        // `player_get_state` on restore anyway).
+        if let Event::PlayerState(s) = &ev {
+            let key = (s.track.as_ref().map(|t| t.id.clone()), s.status);
+            let mut last = self.0.last_ui_state.lock().unwrap_or_else(|p| p.into_inner());
+            let same = last.as_ref() == Some(&key);
+            *last = Some(key);
+            if same && self.0.art.suspended.load(std::sync::atomic::Ordering::SeqCst) {
+                return;
+            }
+        }
+        if matches!(ev, Event::Spectrum(_)) && self.0.art.suspended.load(std::sync::atomic::Ordering::SeqCst) {
+            return;
+        }
         self.0.subs.lock().unwrap().retain(|s| s.send(ev.clone()).is_ok());
     }
 

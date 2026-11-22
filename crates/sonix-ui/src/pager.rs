@@ -60,7 +60,9 @@ impl<T> Pager<T> {
         self.pages.insert(p, rows);
         while self.pages.len() > MAX_PAGES {
             let centre = (centre_row / PAGE) as i64;
-            let far = self.pages.keys().copied().max_by_key(|k| (*k as i64 - centre).abs()).unwrap();
+            // never the page just inserted, nor page 0: every `uniform_list` renders item 0 each frame to measure it, so with the
+            // viewport far from the top page 0 would be evicted at once (or by the next deep insert) and re-queried again and again.
+            let far = self.pages.keys().copied().filter(|k| *k != p && *k != 0).max_by_key(|k| (*k as i64 - centre).abs()).unwrap();
             self.pages.remove(&far);
         }
         true
@@ -112,6 +114,29 @@ mod tests {
     }
 
     #[test]
+    fn a_page_far_from_the_viewport_is_kept_once_inserted() {
+        // Tracks renders row 0 every frame (the list measures item 0): with the viewport at page 19 and the cache full, that
+        // insert used to evict page 0 itself, so the next frame fetched it again, forever.
+        let mut p: Pager<u32> = Pager { total: 2_071, ..Pager::default() };
+        for page in 4..=19 {
+            let e = p.epoch;
+            p.insert(e, page, rows(100), 19 * PAGE);
+        }
+        assert!(p.want(0));
+        let e = p.epoch;
+        p.insert(e, 0, rows(100), 19 * PAGE);
+        assert!(p.has_page(0) && !p.want(0), "row 0 stays resident, no re-request");
+        assert_eq!(p.resident_pages(), MAX_PAGES);
+        assert!(p.has_page(19) && !p.has_page(4), "the farthest other page went");
+        // scrolling on: the next deep page evicts the farthest non-zero page, never page 0 (no page-0 re-fetch per new page)
+        assert!(p.want(20));
+        let e = p.epoch;
+        p.insert(e, 20, rows(100), 20 * PAGE);
+        assert!(p.has_page(0) && p.has_page(20) && !p.has_page(5));
+        assert_eq!(p.resident_pages(), MAX_PAGES);
+    }
+
+    #[test]
     fn never_more_than_16_pages_and_farthest_goes_first() {
         let mut p: Pager<u32> = Pager { total: 54_515, ..Pager::default() };
         for page in 0..40 {
@@ -119,8 +144,9 @@ mod tests {
             p.insert(e, page, rows(100), 39 * PAGE);
         }
         assert_eq!(p.resident_pages(), MAX_PAGES);
-        assert!(p.has_page(39) && p.has_page(24));
-        assert!(!p.has_page(0));
+        // page 0 stays pinned (the list measures row 0 every frame); the other 15 are the ones nearest the viewport
+        assert!(p.has_page(39) && p.has_page(25) && p.has_page(0));
+        assert!(!p.has_page(24) && !p.has_page(1));
         p.release();
         assert_eq!(p.resident_pages(), 0);
         assert_eq!(p.total, 54_515);
