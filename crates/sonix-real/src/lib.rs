@@ -79,6 +79,9 @@ struct Inner {
     store: Arc<sonix_core::audio::SessionStore>,
     /// Track id + status of the last `PlayerState` event (`emit` drops position-only ticks while suspended).
     last_ui_state: Mutex<Option<(Option<String>, PlaybackStatus)>>,
+    /// True until the first successful library sync of this run has re-offered the saved session to the engine
+    /// (`settings.rs: after_first_sync`).
+    restore_retry: std::sync::atomic::AtomicBool,
 }
 
 #[derive(Clone)]
@@ -172,6 +175,7 @@ impl RealBackend {
             scrobbling,
             store,
             last_ui_state: Mutex::new(None),
+            restore_retry: std::sync::atomic::AtomicBool::new(true),
         }));
         // Persisted service flags first (all default OFF), before any background task or the reconnect starts.
         {
@@ -274,6 +278,9 @@ impl RealBackend {
             }
             me.emit(Event::LibraryChanged);
             if res.is_ok() {
+                if me.0.epoch.load(SeqCst) == epoch {
+                    me.after_first_sync();
+                }
                 me.schedule_art_prefetch(epoch);
             }
         });
