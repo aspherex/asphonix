@@ -32,6 +32,7 @@ pub(crate) fn apply_change(s: &mut secrets::Settings, change: &SettingChange) ->
         SettingChange::FreeMemoryWhenMinimized(v) => s.free_memory_when_minimized = *v,
         SettingChange::McpEnabled(v) => s.mcp_enabled = *v,
         SettingChange::McpAllowControl(v) => s.mcp_allow_control = *v,
+        SettingChange::VerboseLogging(v) => s.verbose_logging = *v,
     }
     Ok(())
 }
@@ -51,6 +52,7 @@ pub(crate) fn wire(s: &secrets::Settings) -> ApiResult<Settings> {
         track_overlay_corner: conv(s.track_overlay_corner)?,
         mcp_enabled: s.mcp_enabled,
         mcp_allow_control: s.mcp_allow_control,
+        verbose_logging: s.verbose_logging,
     })
 }
 
@@ -85,6 +87,7 @@ impl SettingsApi for RealBackend {
             SettingChange::McpAllowControl(_) => {
                 self.set_mcp_allow_control(s.mcp_allow_control)?;
             }
+            SettingChange::VerboseLogging(_) => sonix_logging::set_verbose(s.verbose_logging),
             // Applied above, before the lock.
             SettingChange::McpEnabled(_) => {}
             // Stored only: the overlay and background-mode services are not wired yet.

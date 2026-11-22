@@ -1091,6 +1091,8 @@ pub struct Settings {
     pub mcp_enabled: bool,
     /// "Allow playback control" for MCP clients (default off).
     pub mcp_allow_control: bool,
+    /// "Verbose logging" (default off): debug-level events in the log file.
+    pub verbose_logging: bool,
 }
 
 #[derive(Debug, Clone, Deserialize)]

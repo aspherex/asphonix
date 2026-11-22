@@ -101,6 +101,7 @@ impl SettingsView {
                 track_overlay_corner: OverlayCorner::TopLeft,
                 mcp_enabled: false,
                 mcp_allow_control: false,
+                verbose_logging: false,
             },
             mcp: None,
             status: None,
@@ -161,6 +162,7 @@ impl SettingsView {
             SettingChange::FreeMemoryWhenMinimized(v) => self.s.free_memory_when_minimized = *v,
             SettingChange::McpEnabled(v) => self.s.mcp_enabled = *v,
             SettingChange::McpAllowControl(v) => self.s.mcp_allow_control = *v,
+            SettingChange::VerboseLogging(v) => self.s.verbose_logging = *v,
         }
         if matches!(ch, SettingChange::TrackOverlay(_) | SettingChange::TrackOverlayCorner(_)) {
             cx.emit(ListsEvent::TrackOverlay(self.s.track_overlay, self.s.track_overlay_corner));
@@ -468,6 +470,8 @@ impl Render for SettingsView {
                 Self::row(&th, "Check for updates automatically", self.toggle(&th, "set-autoupd", self.s.auto_check_updates, SettingChange::AutoCheckUpdates, cx)).into_any_element(),
                 upd_row.into_any_element(),
             ];
+            // ---- Diagnostics
+            let diagnostics = vec![Self::row(&th, "Verbose logging", self.toggle(&th, "set-verbose-log", self.s.verbose_logging, SettingChange::VerboseLogging, cx)).into_any_element()];
             // ---- MCP
             let mut mcp_rows: Vec<AnyElement> = vec![
                 Self::hint(
@@ -555,6 +559,7 @@ impl Render for SettingsView {
                 .child(Self::panel(&th, "Playback", playback))
                 .child(Self::panel(&th, "Server", server))
                 .child(Self::panel(&th, "Updates", updates))
+                .child(Self::panel(&th, "Diagnostics", diagnostics))
                 .child(Self::panel(&th, "Claude (MCP)", mcp_rows))
                 .child(div().flex().flex_row().child(logout))
                 .into_any_element()

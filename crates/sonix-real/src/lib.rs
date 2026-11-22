@@ -156,6 +156,9 @@ impl RealBackend {
         let db = Arc::new(Db::open(&data).expect("library db"));
         let client: Arc<std::sync::RwLock<Option<Client>>> = Arc::new(std::sync::RwLock::new(None));
         let settings = secrets::load_settings(&dir);
+        if settings.verbose_logging {
+            sonix_logging::set_verbose(true); // the stored "Verbose logging" setting (no-op before `sonix_logging::init`)
+        }
         let prefs = Arc::new(sonix_core::audio::Prefs::new(settings.autoplay_enabled, settings.sync_play_queue, settings.replay_gain_mode));
         prefs.set_play_threshold_sec(settings.play_threshold_sec);
         let scrobbling = Arc::new(std::sync::atomic::AtomicBool::new(settings.scrobbling_enabled));

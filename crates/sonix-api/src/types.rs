@@ -711,6 +711,8 @@ pub struct Settings {
     pub mcp_enabled: bool,
     #[serde(default)]
     pub mcp_allow_control: bool,
+    #[serde(default)]
+    pub verbose_logging: bool,
 }
 
 // --------------------------------------------------------------- art

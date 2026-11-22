@@ -183,6 +183,7 @@ fn defaults_are_off_and_every_field_roundtrips_and_persists() {
         SettingChange::FreeMemoryWhenMinimized(false),
         SettingChange::McpEnabled(true),
         SettingChange::McpAllowControl(true),
+        SettingChange::VerboseLogging(true),
     ];
     for c in changes {
         b.settings_set(c).unwrap();
@@ -205,6 +206,7 @@ fn defaults_are_off_and_every_field_roundtrips_and_persists() {
         track_overlay_corner: OverlayCorner::BottomRight,
         mcp_enabled: true,
         mcp_allow_control: true,
+        verbose_logging: true,
     };
     assert_eq!(b.settings_get().unwrap(), want);
     // live effects
