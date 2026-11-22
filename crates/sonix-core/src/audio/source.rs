@@ -865,11 +865,17 @@ impl MediaSource for ProgressiveDownload {
 }
 
 /// A second, read-only reader over a [`ProgressiveDownload`]'s temp file
-/// (its own OS handle and cursor), for analysis. It never issues a request:
-/// reads block until the playback download has written the bytes, a seek
-/// only moves the cursor, and it reads EOF once the download is abandoned
-/// (playback moved on) or when the cursor sits in a gap (a playback seek
-/// restarted the download further ahead).
+/// (its own OS handle and cursor), for analysis. Reads block until the
+/// playback download has written the bytes and a seek only moves the cursor;
+/// it reads EOF once the download is abandoned (playback moved on).
+///
+/// When a playback seek restarted the download further ahead, the bytes in
+/// between (`[valid_prefix, base_offset)`) are a gap nobody downloads. The
+/// reader then fetches exactly that missing range itself (one `Range`
+/// request, into a private anonymous temp file, never the playback one),
+/// so a track playback resumed mid-way (a restored session, an early seek)
+/// still gets its whole waveform. The reader never loops on a gap: a failed
+/// fetch is an I/O error, which ends the scan with what it has.
 pub struct SharedReader {
     file: File,
     pos: u64,
@@ -878,6 +884,123 @@ pub struct SharedReader {
     cancel: Arc<AtomicBool>,
     /// Keeps the temp file on disk while this reader needs it.
     _temp: Arc<TempPath>,
+    client: reqwest::Client,
+    url: String,
+    gap: Option<GapFill>,
+}
+
+/// Where the next [`SharedReader::wait_for`] answer says to read from.
+enum Avail {
+    /// `n` bytes at the cursor are in the playback file (0 = EOF).
+    Main(u64),
+    /// The cursor is in a gap that ends at this offset.
+    Gap(u64),
+}
+
+/// Progress of one private range fetch.
+#[derive(Default)]
+struct GapProgress {
+    written: u64,
+    done: bool,
+}
+
+/// `[start, end)` fetched into `file` (offset 0 of the file = byte `start`).
+struct GapFill {
+    start: u64,
+    end: u64,
+    file: File,
+    progress: Arc<(Mutex<GapProgress>, Condvar)>,
+    stop: Arc<AtomicBool>,
+}
+
+impl Drop for GapFill {
+    fn drop(&mut self) {
+        self.stop.store(true, Ordering::Relaxed);
+    }
+}
+
+impl GapFill {
+    fn start(client: reqwest::Client, url: String, start: u64, end: u64) -> io::Result<Self> {
+        // `sonix-stream-*.tmp`: the stale sweep reaps it after a crash; no path in the error.
+        let mut named =
+            tempfile::Builder::new().prefix("sonix-stream-gap-").suffix(".tmp").tempfile().map_err(|e| temp_file_error(&e))?;
+        let file = File::open(named.path())?; // own cursor: the writer and the reader must not share one
+
+        let progress: Arc<(Mutex<GapProgress>, Condvar)> = Arc::default();
+        let stop = Arc::new(AtomicBool::new(false));
+        let (p, s) = (progress.clone(), stop.clone());
+        std::thread::Builder::new().name("sonix-waveform-gap".into()).spawn(move || {
+            use futures_util::StreamExt;
+            use std::io::Write;
+            let finish = |p: &(Mutex<GapProgress>, Condvar)| {
+                let mut g = p.0.lock().unwrap_or_else(|e| e.into_inner());
+                g.done = true;
+                p.1.notify_all();
+            };
+            let Ok(rt) = tokio::runtime::Builder::new_current_thread().enable_all().build() else { return finish(&p) };
+            rt.block_on(async {
+                let req = client.get(&url).header(reqwest::header::RANGE, format!("bytes={start}-{}", end - 1)).send();
+                let resp = until_stopped(req, &s).await?.ok()?;
+
+                // 206 = the range; a 200 would be the whole file from byte 0 (server ignores Range): not usable.
+                if resp.status() != reqwest::StatusCode::PARTIAL_CONTENT {
+                    return None;
+                }
+                let mut stream = resp.bytes_stream();
+                while let Some(chunk) = until_stopped(stream.next(), &s).await? {
+                    if s.load(Ordering::Relaxed) {
+                        return None;
+                    }
+                    let chunk = chunk.ok()?;
+                    named.write_all(&chunk).ok()?;
+                    let mut g = p.0.lock().unwrap_or_else(|e| e.into_inner());
+                    g.written += chunk.len() as u64;
+                    p.1.notify_all();
+                    if g.written >= end - start {
+                        break;
+                    }
+                }
+                Some(())
+            });
+            finish(&p);
+        })?;
+        Ok(Self { start, end, file, progress, stop })
+    }
+
+    /// Bytes available at `offset` (blocks until some arrive).
+    fn read(&mut self, offset: u64, buf: &mut [u8], cancel: &AtomicBool) -> io::Result<usize> {
+        let rel = offset - self.start;
+        let want = (buf.len() as u64).min(self.end - offset);
+        let mut g = self.progress.0.lock().unwrap_or_else(|e| e.into_inner());
+        while g.written <= rel {
+            if cancel.load(Ordering::Relaxed) {
+                return Err(io::Error::other("analysis cancelled"));
+            }
+            if g.done {
+                return Err(io::Error::other("could not fetch the missing part of the track"));
+            }
+            g = self.progress.1.wait_timeout(g, Duration::from_millis(200)).unwrap_or_else(|e| e.into_inner()).0;
+        }
+        let n = (g.written - rel).min(want) as usize;
+        drop(g);
+        self.file.seek(SeekFrom::Start(rel))?;
+        self.file.read(&mut buf[..n])
+    }
+}
+
+/// `fut`'s output, or `None` once `stop` is set (the scan is gone: checked
+/// every 200 ms, so a cancelled fill drops its connection promptly) or after
+/// [`READ_IDLE_TIMEOUT`] without an answer (also bounds the response headers,
+/// which the client's `connect_timeout` does not).
+async fn until_stopped<F: std::future::Future>(fut: F, stop: &AtomicBool) -> Option<F::Output> {
+    let mut fut = std::pin::pin!(fut);
+    let t0 = Instant::now();
+    while !stop.load(Ordering::Relaxed) && t0.elapsed() < READ_IDLE_TIMEOUT {
+        if let Ok(v) = tokio::time::timeout(Duration::from_millis(200), &mut fut).await {
+            return Some(v);
+        }
+    }
+    None
 }
 
 impl SharedReader {
@@ -890,23 +1013,38 @@ impl SharedReader {
             cond: shared.cond.clone(),
             cancel,
             _temp: shared.temp.clone(),
+            client: shared.client.clone(),
+            url: shared.url.clone(),
+            gap: None,
         })
     }
 
-    /// Bytes readable at `offset` right now (0 = EOF), waiting for the
-    /// download while they are still to come.
-    fn wait_for(&self, offset: u64, len: u64) -> io::Result<u64> {
+    /// Bytes readable at `offset` right now, waiting for the download while
+    /// they are still to come.
+    fn wait_for(&self, offset: u64, len: u64) -> io::Result<Avail> {
         let mut g = self.state.lock().unwrap_or_else(|p| p.into_inner());
         loop {
             if self.cancel.load(Ordering::Relaxed) {
-                return Err(io::Error::new(io::ErrorKind::Interrupted, "analysis cancelled"));
+                return Err(io::Error::other("analysis cancelled"));
             }
-            let Some(end) = g.readable_until(offset) else { return Ok(0) };
-            if end > offset {
-                return Ok((end - offset).min(len));
+            match g.readable_until(offset) {
+                Some(end) if end > offset => return Ok(Avail::Main((end - offset).min(len))),
+                Some(_) => {}
+                // A gap: it ends where the current request starts. It is fetched only once playback's own
+                // request has finished, so the extra request never competes with playback for bandwidth
+                // (right after a resume/seek its buffer is thinnest). Playback gone, or its download failed:
+                // an error, never `Ok(0)` (which symphonia's FLAC reader re-reads forever) and never a fetch.
+                None if g.abandoned || g.error.is_some() => {
+                    return Err(io::Error::other("the rest of the track is not being downloaded"));
+                }
+                None if g.finished => return Ok(Avail::Gap(g.base_offset)),
+                None => {
+                    g = self.cond.wait_timeout(g, Duration::from_millis(200)).unwrap_or_else(|p| p.into_inner()).0;
+                    continue;
+                }
             }
             if g.finished || g.abandoned {
-                return Ok(0);
+                return Ok(Avail::Main(0));
             }
             if let Some(err) = &g.error {
                 return Err(io::Error::other(err.clone()));
@@ -921,14 +1059,25 @@ impl Read for SharedReader {
         if buf.is_empty() {
             return Ok(0);
         }
-        let avail = self.wait_for(self.pos, buf.len() as u64)?;
-        if avail == 0 {
-            return Ok(0);
+        match self.wait_for(self.pos, buf.len() as u64)? {
+            Avail::Main(0) => Ok(0),
+            Avail::Main(avail) => {
+                self.file.seek(SeekFrom::Start(self.pos))?;
+
+                let n = self.file.read(&mut buf[..avail as usize])?;
+                self.pos += n as u64;
+                Ok(n)
+            }
+            Avail::Gap(end) => {
+                if !self.gap.as_ref().is_some_and(|g| (g.start..g.end).contains(&self.pos)) {
+                    self.gap = Some(GapFill::start(self.client.clone(), self.url.clone(), self.pos, end)?);
+                }
+
+                let n = self.gap.as_mut().expect("just set").read(self.pos, buf, &self.cancel)?;
+                self.pos += n as u64;
+                Ok(n)
+            }
         }
-        self.file.seek(SeekFrom::Start(self.pos))?;
-        let n = self.file.read(&mut buf[..avail as usize])?;
-        self.pos += n as u64;
-        Ok(n)
     }
 }
 
@@ -1142,7 +1291,7 @@ mod tests {
 
         cancelled.seek(SeekFrom::Start(20)).unwrap(); // past the data: would wait
         cancel.store(true, Ordering::SeqCst);
-        assert_eq!(cancelled.read(&mut buf).unwrap_err().kind(), io::ErrorKind::Interrupted);
+        assert_eq!(cancelled.read(&mut buf).unwrap_err().kind(), io::ErrorKind::Other, "not Interrupted: symphonia retries that");
         drop((reader, cancelled));
         assert!(!path.exists());
         server.join().unwrap();
@@ -1246,14 +1395,16 @@ mod tests {
                                 }
                             }
                             let text = String::from_utf8_lossy(&req).to_ascii_lowercase();
-                            let start: usize = text
-                                .lines()
-                                .find_map(|l| l.strip_prefix("range: bytes=").map(|r| r.trim_end_matches('-').to_string()))
-                                .and_then(|s| s.parse().ok())
-                                .unwrap_or(0);
+                            let range = text.lines().find_map(|l| l.strip_prefix("range: bytes=").map(str::to_string));
+                            // `a-` (playback) or `a-b` (a bounded gap fetch, answered 206 like a real server).
+                            let (start, last): (usize, Option<usize>) = match range.as_deref().and_then(|r| r.split_once('-')) {
+                                Some((a, b)) => (a.trim().parse().unwrap_or(0), b.trim().parse().ok()),
+                                None => (0, None),
+                            };
                             requests.lock().unwrap().push(start as u64);
-                            let rest = &body[start..];
-                            let header = format!("HTTP/1.1 200 OK\r\nContent-Length: {}\r\n\r\n", rest.len());
+                            let rest = &body[start..last.map_or(body.len(), |l| (l + 1).min(body.len()))];
+                            let status = if last.is_some() { "206 Partial Content" } else { "200 OK" };
+                            let header = format!("HTTP/1.1 {status}\r\nContent-Length: {}\r\n\r\n", rest.len());
                             if stream.write_all(header.as_bytes()).is_err() {
                                 return;
                             }
@@ -1294,6 +1445,35 @@ mod tests {
         let mut out = vec![0u8; n];
         d.read_exact(&mut out).unwrap();
         out
+    }
+
+    #[test]
+    fn shared_reader_fills_the_gap_a_playback_seek_leaves_instead_of_spinning_or_hanging() {
+        // Playback resumes mid-track (restored session / early seek): the download restarts far ahead and
+        // `[prefix, restart)` is never fetched by it. The analysis reader must still see every byte.
+        let body = pattern(3 * 1024 * 1024);
+        let server = RangeServer::start(body.clone(), 16 * 1024, Duration::from_millis(5));
+        let policy = SeekPolicy { min_gap: 256 * 1024, wait_secs: 1.0 };
+        let mut d =
+            ProgressiveDownload::start_inner(reqwest::Client::new(), server.url.clone(), READ_IDLE_TIMEOUT, policy).unwrap();
+        assert_eq!(read_at(&mut d, 0, 16), body[..16]);
+        let far = 2_621_440u64;
+        assert_eq!(read_at(&mut d, far, 16), body[far as usize..far as usize + 16]);
+        assert_eq!(server.requests().len(), 2, "playback restarted the download at the seek target");
+
+        let registry = DownloadRegistry::default();
+        registry.register("t", &d.shared);
+        let mut reader = registry.reader("t", Arc::new(AtomicBool::new(false))).unwrap();
+        let (tx, rx) = std::sync::mpsc::channel();
+        std::thread::spawn(move || {
+            let mut all = Vec::new();
+            let r = read_all(&mut reader).map(|v| all = v);
+            let _ = tx.send((r, all));
+        });
+        let (r, all) = rx.recv_timeout(Duration::from_secs(30)).expect("the analysis reader must not hang or spin on the gap");
+        r.unwrap();
+        assert!(all == body, "the whole file, gap included ({} of {} bytes)", all.len(), body.len());
+        assert_eq!(server.requests().len(), 3, "exactly one extra request, for the gap only");
     }
 
     #[test]
