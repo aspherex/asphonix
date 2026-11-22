@@ -549,7 +549,7 @@ impl QueueRail {
                         .flex_col()
                         .child(div().flex().min_w_0().child(txt(&th, BODY_MD, t.title.clone()).color(th.text).ellipsis()))
                         .child(div().flex().min_w_0().child(entity_link(&th, (LinkKind::Artist, t.artist_id.as_deref()), &t.artist, MONO_CODE, th.muted, &format!("rail{i}"), window)))
-                        .children((flow_rows && it.origin != QueueItemOrigin::User).then(|| div().id(("rail-flow", idx)).tip("Why this track is here", th).flex().min_w_0().h(px(14.)).child(txt(&th, MONO_CODE, fmt::flow_line(it.flow.as_ref())).color(th.accent_fg).ellipsis()))),
+                        .children((flow_rows && it.origin != QueueItemOrigin::User).then(|| div().id(("rail-flow", idx)).tip(tr!(QueueWhyHere), th).flex().min_w_0().h(px(14.)).child(txt(&th, MONO_CODE, fmt::flow_line(it.flow.as_ref())).color(th.accent_fg).ellipsis()))),
                 )
                 .child(div().flex_none().child(txt(&th, MONO_CODE, fmt::format_duration(Some(t.duration))).color(th.muted)))
                 .child(div()

@@ -352,7 +352,7 @@ impl Shell {
                     .danger()
                 })
                 .collect();
-            items.push(MenuItem::submenu("Remove saved profile", subs).icon("trash"));
+            items.push(MenuItem::submenu(tr!(ProfileRemoveSaved), subs).icon("trash"));
         }
         items.push(MenuItem::separator());
         let br_add = br.downgrade();

@@ -320,7 +320,7 @@ impl Render for DockView {
                         .child(icon("volume", dk::ICON_SMALL, th.muted))
                         .child(div().w(px(dk::VOLUME_FADER_W)).child(slider("dock-vol", th, &self.vol, ps.volume as f32, None, vol_cb)))
                         .child(div().min_w(px(dk::DB_MIN_W)).flex_none().flex().justify_end().child(txt(&th, MONO_CODE, vol_label).color(th.muted)))
-                        .children(rg.map(|r| div().id("dock-rg").tip("ReplayGain applied to this track (dB)", th).flex_none().child(txt(&th, MONO_CODE, r).color(th.muted)))))
+                        .children(rg.map(|r| div().id("dock-rg").tip(tr!(DockRgTip), th).flex_none().child(txt(&th, MONO_CODE, r).color(th.muted)))))
                 .child({
                     let q = ps.queue_length;
                     tip(

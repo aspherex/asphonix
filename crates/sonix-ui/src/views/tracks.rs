@@ -644,8 +644,8 @@ impl Render for TracksView {
                                         .child(div().flex_none().child(txt(&th, MONO_DATA, tr!(TracksFilterPlaceholder)).color(th.muted))),
                                 )
                             }))
-                    .child(button("play-all", th, Variant::Secondary, "Play All", Some("play"), total == 0, window).on_click(cx.listener(|this, _, _, cx| this.play_all(false, cx))))
-                    .child(button("shuffle-all", th, Variant::Primary, "Shuffle All", Some("shuffle"), total == 0, window).on_click(cx.listener(|this, _, _, cx| this.play_all(true, cx))))
+                    .child(button("play-all", th, Variant::Secondary, tr!(MenuPlayAll), Some("play"), total == 0, window).on_click(cx.listener(|this, _, _, cx| this.play_all(false, cx))))
+                    .child(button("shuffle-all", th, Variant::Primary, tr!(TracksShuffleAll), Some("shuffle"), total == 0, window).on_click(cx.listener(|this, _, _, cx| this.play_all(true, cx))))
                     // Flow: the Flow menu (coverage hint, Steady/Build/Peak) anchored under the button
                     .child({
                         let cell = self.flow_btn.clone();

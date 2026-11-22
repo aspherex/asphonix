@@ -679,7 +679,7 @@ impl Render for NowPlayingView {
                 .flex_col()
                 .child(self.strip(th, strip_h, None, &ps, compact, cx))
                 .child(
-                    div().flex_1().m(px(16.)).border_1().border_color(th.border).flex().flex_col().items_center().justify_center().gap(px(8.)).child(icon("equalizer", 32., th.muted)).child(txt(&th, HEADLINE_SM, "Nothing playing").color(th.text)).child(txt(&th, BODY_SM, "Pick an album, playlist or track to start the signal chain.").color(th.muted)),
+                    div().flex_1().m(px(16.)).border_1().border_color(th.border).flex().flex_col().items_center().justify_center().gap(px(8.)).child(icon("equalizer", 32., th.muted)).child(txt(&th, HEADLINE_SM, tr!(NpNothingPlaying)).color(th.text)).child(txt(&th, BODY_SM, tr!(NpPickSomething)).color(th.muted)),
                 )
                 .into_any_element();
         };
@@ -1183,7 +1183,7 @@ impl Render for NowPlayingView {
                 )
                 .children((!narrow).then(|| {
                     let dis = self.upcoming.is_empty();
-                    let d = div().id("np-skip").group("hv").m(px(8.)).px(px(12.)).flex().items_center().bg(th.highest).border_1().border_color(th.border).text_color(th.text).child(txt(&th, LABEL_CAPS, "SKIP"));
+                    let d = div().id("np-skip").group("hv").m(px(8.)).px(px(12.)).flex().items_center().bg(th.highest).border_1().border_color(th.border).text_color(th.text).child(txt(&th, LABEL_CAPS, tr!(NpSkip)));
                     if dis {
                         d.opacity(0.5).cursor(CursorStyle::OperationNotAllowed)
                     } else {
@@ -1237,7 +1237,7 @@ impl Render for NowPlayingView {
                                 // Flow line under the row: -6 px top margin, 32 px left / 5 px bottom padding
                                 .children({
                                     let line = fmt::flow_line(u.flow.as_ref());
-                                    (!line.is_empty()).then(|| div().id(("np-qflow", k)).tip("Why this track is next", th).flex().min_w_0().mt(px(-6.)).pb(px(5.)).pl(px(32.)).child(txt(&th, MONO_CODE, line).color(th.accent_fg).ellipsis()))
+                                    (!line.is_empty()).then(|| div().id(("np-qflow", k)).tip(tr!(NpWhyNext), th).flex().min_w_0().mt(px(-6.)).pb(px(5.)).pl(px(32.)).child(txt(&th, MONO_CODE, line).color(th.accent_fg).ellipsis()))
                                 })
                                 .on_click(cx.listener(move |this, _, _, cx| {
                                     this.upnext_open = false;
