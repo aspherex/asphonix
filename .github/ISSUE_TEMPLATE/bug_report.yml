@@ -1,0 +1,124 @@
+name: Bug report
+description: Something does not work as it should.
+title: "[Bug]: "
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for the report. Security problems go through SECURITY.md, not here.
+        Please remove your server URL and user name from anything you paste.
+  - type: checkboxes
+    attributes:
+      label: Before you file
+      options:
+        - label: I searched existing issues and this is not a duplicate.
+          required: true
+        - label: I can reproduce this with the latest release (or current main).
+          required: true
+  - type: input
+    id: version
+    attributes:
+      label: SONIX version
+      description: Shown next to the logo in the title bar, e.g. v0.1.0.
+    validations:
+      required: true
+  - type: dropdown
+    id: os
+    attributes:
+      label: Operating system
+      options:
+        - Windows 11
+        - Windows 10
+        - macOS (Apple Silicon)
+        - Linux
+    validations:
+      required: true
+  - type: input
+    id: os-details
+    attributes:
+      label: OS version / distro and audio stack
+      placeholder: e.g. Windows 11 24H2 / Ubuntu 24.04 with PipeWire
+  - type: dropdown
+    id: install
+    attributes:
+      label: How did you install SONIX?
+      options:
+        - Release archive (zip / dmg / tar.gz)
+        - Built from source
+  - type: dropdown
+    id: server
+    attributes:
+      label: Server
+      options:
+        - Navidrome
+        - Gonic
+        - LMS
+        - Ampache
+        - Airsonic-Advanced
+        - Other (Subsonic / OpenSubsonic)
+    validations:
+      required: true
+  - type: input
+    id: server-version
+    attributes:
+      label: Server version
+      placeholder: e.g. Navidrome 0.64.2
+  - type: dropdown
+    id: area
+    attributes:
+      label: Area
+      options:
+        - Playback / audio output
+        - Library sync
+        - Search / browsing
+        - Playlists / smart playlists / ratings
+        - Now Playing (waveform, spectrum, lyrics)
+        - Queue / Flow / autoplay
+        - Scrobbling / history
+        - Media keys / OS integration
+        - MCP bridge
+        - UI / theme / layout
+        - Performance (memory, CPU, startup)
+        - Other
+    validations:
+      required: true
+  - type: input
+    id: output
+    attributes:
+      label: Output device and mode (for playback issues)
+      description: Device name and what the Now Playing header shows, e.g. "USB DAC, 16/44.1 FLAC, EXCLUSIVE".
+  - type: input
+    id: library-size
+    attributes:
+      label: Library size (for sync / performance issues)
+      placeholder: e.g. ~40,000 tracks
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened, and what did you expect?
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      placeholder: |
+        1. ...
+        2. ...
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs
+      description: |
+        Crash log: `logs/crash.log` in the data directory (`%LOCALAPPDATA%\dev.sonix.app` on Windows,
+        `~/Library/Application Support/dev.sonix.app` on macOS, `~/.local/share/dev.sonix.app` on Linux).
+        A detailed trace: start SONIX with `SONIX_LOG=<file>`.
+      render: shell
+  - type: textarea
+    id: screenshots
+    attributes:
+      label: Screenshots or recordings
+      description: Drag and drop files here.
