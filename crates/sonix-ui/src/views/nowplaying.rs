@@ -1,8 +1,8 @@
 //! Now Playing (`NowPlaying.svelte`, "artwork dominant" layout): header strip with the real
 //! source/output line, dominant cover with the source-format tag, title block, a 28-band FFT
 //! with peak hold, stereo peak meters, a 240-bucket waveform seek bar and the full transport.
-//! Animates on vsync (`request_animation_frame`) only while visible, playing and not
-//! minimized; the backend is told to compute the spectrum only while this view is up.
+//! The FFT bars and meters are painted by the live layer (`crate::live`, `fft_step`) every `MIN_DRAW_MS` while
+//! visible and playing or falling, never while minimized; the backend is told to compute the spectrum only while this view is up.
 use crate::app::{self, PlayerEvent, PlayerModel};
 use crate::art::{self, ArtHandle};
 use crate::playerkeys::PLAYER_KEYS;
