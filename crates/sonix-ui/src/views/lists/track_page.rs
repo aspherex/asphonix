@@ -110,7 +110,12 @@ fn initial_seed() -> u32 {
 
 impl TrackPage {
     pub fn new(kind: PageKind, backend: Arc<dyn Backend>, art: ArtHandle, player: &Entity<PlayerModel>, menu: &Entity<ContextMenu>, cx: &mut Context<Self>) -> Self {
-        let table = cx.new(|cx| Table::new(backend.clone(), player, table_cfg(&kind, false), cx));
+        let table = cx.new(|cx| {
+            let mut t = Table::new(backend.clone(), player, table_cfg(&kind, false), cx);
+            // native-only: the loading skeleton embeds the table; until `playlists_get` fills it, skeleton rows, not the empty text
+            t.pending = matches!(kind, PageKind::Playlist(_));
+            t
+        });
         // native-only play-button state: repaint when the loaded track / status / source changes
         let subs = vec![cx.subscribe(&table, Self::on_table), cx.subscribe(player, |_, _, _: &crate::app::PlayerEvent, cx| cx.notify())];
         let mut this = Self {
@@ -582,11 +587,21 @@ impl Render for TrackPage {
         let th = app::theme(cx);
         match self.load {
             Load::Loading => {
-                let msg = match self.kind {
-                    PageKind::Playlist(_) => "LOADING PLAYLIST…",
-                    _ => "EVALUATING…",
-                };
-                return status_line(&th, msg, false).into_any_element();
+                // native-only: the loaded page's geometry (art, title block, 40 px actions, the table's own skeleton rows)
+                use crate::widgets::skeleton as sk;
+                let actions = div().flex().flex_row().items_center().gap(px(lm::ACTIONS_GAP)).mt(px(lm::ACTIONS_MT)).child(sk::block(&th, 150.0, 40.0)).child(sk::block(&th, 40.0, 40.0)).child(sk::block(&th, 40.0, 40.0));
+                let info = div()
+                    .flex()
+                    .flex_col()
+                    .gap(px(lm::INFO_GAP))
+                    .justify_end()
+                    .min_w_0()
+                    .child(sk::text_slot(&th, crate::tracking::HEADLINE_LG.line, 24.0, 1.0).w(px(320.)))
+                    .child(sk::text_slot(&th, MONO_DATA.line, 12.0, 1.0).w(px(220.)))
+                    .child(actions);
+                let art = div().w(px(lm::ART)).h(px(lm::ART)).flex_none().bg(th.high).border_1().border_color(th.border);
+                let header = div().flex().flex_row().gap(px(lm::HEADER_GAP)).flex_none().child(art).child(info);
+                return pid("page", div().size_full().flex().flex_col().p(px(lm::PAGE_PAD)).gap(px(lm::PAGE_GAP)).child(header).child(pid("tp.panel", self.table.clone()))).into_any_element();
             }
             Load::Error => {
                 let msg = match self.kind {

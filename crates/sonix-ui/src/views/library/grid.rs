@@ -48,7 +48,7 @@ pub struct GridState<T> {
     /// Rows currently rendered and the column count of the last frame (to re-fetch the visible pages in place).
     pub vis: Range<usize>,
     pub cols: usize,
-    /// The first page arrived (`pager.loaded` in the Svelte pager).
+    /// The first page arrived (`pager.loaded` in the Svelte pager), or its query failed (ends the loading skeleton).
     pub loaded: bool,
 }
 
@@ -94,13 +94,24 @@ pub fn grid_element<T: Clone + 'static, V: GridHost<T>>(this: &mut V, th: Theme,
     let total = g.pager.total;
     let wrap_w = g.width.get();
     // the 10 px scrollbar gutter is part of the layout only while the content overflows (assume it does until measured)
-    let overflow = list_overflows(&g.list).unwrap_or(total > 0);
+    let overflow = list_overflows(&g.list).unwrap_or(total > 0 || !g.loaded);
     let vw = if wrap_w > 0.0 {
         wrap_w - if overflow { scrollbar::WIDTH } else { 0.0 }
     } else {
         f32::from(window.viewport_size().width) - crate::views::shell::Shell::sidebar_width(f32::from(window.viewport_size().width)) - 2.0 * m::PAGE_PAD - scrollbar::WIDTH
     };
     let geo = geometry(vw, m::GRID_MIN_CELL, m::GRID_TEXT_H, m::GRID_GAP);
+    // native-only: before the first answer, placeholder cards of the loaded cell size fill the viewport. Keyed on
+    // `loaded` (set by every host on any current answer, failures included), not on page 0 being resident: a failed
+    // first query never inserts page 0 and must not leave skeletons up forever.
+    if total == 0 && !g.loaded {
+        let width = g.width.clone();
+        let mut wrap = div().flex().flex_row().flex_wrap().items_start().content_start().gap(px(geo.gap)).size_full().overflow_hidden().pr(px(scrollbar::WIDTH));
+        for _ in 0..geo.cols * 4 {
+            wrap = wrap.child(div().w(px(geo.cell_w)).h(px(geo.cell_h)).flex_none().overflow_hidden().child(super::cards::card_skeleton(&th, geo.cell_w)));
+        }
+        return div().relative().size_full().child(super::parts::measure_keyed("grid", &width)).child(wrap).into_any_element();
+    }
     let rows = total.div_ceil(geo.cols);
     // scroll memory (session only): restore once there is content, then keep the map current
     if total > 0 {

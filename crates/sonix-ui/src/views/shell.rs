@@ -739,10 +739,11 @@ impl Render for Shell {
         if !self.shown {
             self.shown = true;
             crate::log("first_render");
-            // `SONIX_NO_ACTIVATE=1`: do not pull the window to the foreground (test runs while someone works at the
-            // PC: a stolen focus routes their keystrokes and clicks into the player).
-            if std::env::var_os("SONIX_NO_ACTIVATE").is_none() {
+            // test-only guard: exactly `SONIX_NO_ACTIVATE=1` parks the window; unset (or any other value) activates as always
+            if std::env::var_os("SONIX_NO_ACTIVATE").is_none_or(|v| v != "1") {
                 window.activate_window();
+            } else if let Some(h) = crate::winffi::hwnd_of(window) {
+                crate::winffi::show_parked_no_activate(h);
             }
             #[cfg(not(feature = "parity"))]
             self.start_boot(window, cx);
