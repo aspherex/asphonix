@@ -36,6 +36,11 @@ impl Shell {
     }
 }
 
+/// `shortcuts.ts: isTyping || inOverlay`: focus is in a text field, a context menu or a dialog.
+pub(crate) fn typing_or_in_overlay(window: &Window) -> bool {
+    window.context_stack().iter().any(|c| c.contains("TextInput") || c.contains("ContextMenu") || c.contains("Dialog"))
+}
+
 impl Shell {
     /// Root key-down hook for keys whose `key` name depends on the keyboard layout: `/` is Shift+7 on a German
     /// layout, so match the produced character (`KeyboardEvent.key === "/"` in the web) instead of a binding.
@@ -44,7 +49,7 @@ impl Shell {
         if m.control || m.alt || m.platform {
             return;
         }
-        if window.context_stack().iter().any(|c| c.contains("TextInput") || c.contains("ContextMenu") || c.contains("Dialog")) {
+        if typing_or_in_overlay(window) {
             return;
         }
         if ev.keystroke.key_char.as_deref() == Some("/") && !ev.is_held {

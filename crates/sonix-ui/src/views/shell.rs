@@ -772,7 +772,9 @@ impl Render for Shell {
             .track_focus(&self.focus)
             .on_key_down(cx.listener(|this, ev: &gpui::KeyDownEvent, window, cx| {
                 let m = ev.keystroke.modifiers;
-                if *this.router.current() == Route::NowPlaying && this.focus.contains_focused(window, cx) && !this.search.read(cx).focus_handle.is_focused(window) && !m.control && !m.alt && !m.platform && !m.shift {
+                // `shortcuts.ts`: not while typing (any text field, e.g. a prompt opened over Now Playing), not inside a
+                // menu/dialog, not while a popover/modal is open
+                if *this.router.current() == Route::NowPlaying && this.focus.contains_focused(window, cx) && !this.search.read(cx).focus_handle.is_focused(window) && !super::shell_keys::typing_or_in_overlay(window) && !this.overlay_open(cx) && !m.control && !m.alt && !m.platform && !m.shift {
                     let key = ev.keystroke.key.clone();
                     if this.np.update(cx, |n, cx| n.key(&key, cx)) {
                         cx.stop_propagation();
