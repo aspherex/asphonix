@@ -55,6 +55,11 @@ fn seen_put(id: &str, f: impl FnOnce(&mut Seen)) {
         }
     });
 }
+/// A failed query evicts the entry: the next visit starts from skeletons and shows the web's error state, not a page the
+/// backend no longer serves (artist gone after a sync, offline).
+fn seen_remove(id: &str) {
+    SEEN.with(|c| c.borrow_mut().retain(|(k, _)| k != id));
+}
 
 pub struct ArtistDetailView {
     ctx: Ctx,
@@ -62,6 +67,8 @@ pub struct ArtistDetailView {
     detail: Option<ArtistDetail>,
     loading: bool,
     error: bool,
+    /// `detail` was painted from [`SEEN`] and its query has not answered yet
+    detail_cached: bool,
     top: Option<ArtistTopTracks>,
     top_pending: bool,
     info: Option<ArtistInfo>,
@@ -103,6 +110,7 @@ impl ArtistDetailView {
             ctx,
             id,
             loading: seen.detail.is_none(),
+            detail_cached: seen.detail.is_some(),
             detail: seen.detail,
             error: false,
             top_pending: seen.top.is_none(),
@@ -132,8 +140,9 @@ impl ArtistDetailView {
         cx.spawn(async move |this, cx| {
             let id2 = id.clone();
             let d = cx.background_executor().spawn(async move { b.browse_get_artist(&id) }).await;
-            if let Ok(d) = &d {
-                seen_put(&id2, |s| s.detail = Some(d.clone()));
+            match &d {
+                Ok(d) => seen_put(&id2, |s| s.detail = Some(d.clone())),
+                Err(_) => seen_remove(&id2),
             }
             let _ = this.update(cx, |t, cx| {
                 match d {
@@ -141,8 +150,15 @@ impl ArtistDetailView {
                         t.detail = Some(d);
                         t.error = false;
                     }
-                    Err(_) => t.error = true,
+                    Err(_) => {
+                        t.error = true;
+                        // `load()` nulls `detail` before querying: a failed revisit shows ARTIST UNAVAILABLE, not the cache
+                        if t.detail_cached {
+                            t.detail = None;
+                        }
+                    }
                 }
+                t.detail_cached = false;
                 t.loading = false;
                 cx.notify();
             });
@@ -157,8 +173,9 @@ impl ArtistDetailView {
         cx.spawn(async move |this, cx| {
             let id3 = id.clone();
             let r = cx.background_executor().spawn(async move { b.browse_get_artist_top_tracks(&id) }).await;
-            if let Ok(r) = &r {
-                seen_put(&id3, |s| s.top = Some(r.clone()));
+            match &r {
+                Ok(r) => seen_put(&id3, |s| s.top = Some(r.clone())),
+                Err(_) => seen_put(&id3, |s| s.top = None),
             }
             let _ = this.update(cx, |t, cx| {
                 t.top = r.ok();
@@ -170,8 +187,9 @@ impl ArtistDetailView {
         cx.spawn(async move |this, cx| {
             let id4 = id2.clone();
             let r = cx.background_executor().spawn(async move { b2.browse_get_artist_info(&id2) }).await;
-            if let Ok(r) = &r {
-                seen_put(&id4, |s| s.info = Some(r.clone()));
+            match &r {
+                Ok(r) => seen_put(&id4, |s| s.info = Some(r.clone())),
+                Err(_) => seen_put(&id4, |s| s.info = None),
             }
             let _ = this.update(cx, |t, cx| {
                 t.info = r.ok();
@@ -586,5 +604,29 @@ impl Render for ArtistDetailView {
         };
         let _ = BODY_MD;
         self.page.wrap(window, &th, "artist-scroll", content)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn ids() -> Vec<String> {
+        SEEN.with(|c| c.borrow().iter().map(|(k, _)| k.clone()).collect())
+    }
+
+    #[test]
+    fn seen_cache_is_capped_lru_and_failures_evict() {
+        for i in 0..CACHE_MAX + 3 {
+            seen_put(&format!("a{i}"), |_| {});
+        }
+        assert_eq!(ids().len(), CACHE_MAX);
+        assert_eq!(ids()[0], "a3", "the oldest artists fall out first");
+        seen_put("a3", |_| {});
+        assert_eq!(ids().last().map(String::as_str), Some("a3"), "a revisit makes the entry newest");
+        seen_remove("a3");
+        assert!(!ids().contains(&"a3".to_string()));
+        let s = seen_get("a3");
+        assert!(s.detail.is_none() && s.top.is_none() && s.info.is_none());
     }
 }
