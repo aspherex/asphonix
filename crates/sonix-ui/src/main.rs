@@ -18,6 +18,7 @@ mod pager;
 mod playback;
 mod playerkeys;
 mod rail_dnd;
+mod rcount;
 #[cfg(feature = "parity")]
 mod parity;
 mod perf;
@@ -110,6 +111,7 @@ macro_rules! fonts {
 fn main() {
     T0.set(Instant::now()).ok();
     install_crash_log();
+    rcount::init();
     log("main_start");
     #[cfg(feature = "memprof")]
     memprof::start();

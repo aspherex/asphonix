@@ -579,6 +579,7 @@ impl TrackPage {
 
 impl Render for TrackPage {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        crate::rcount::hit("trackpage");
         let th = app::theme(cx);
         match self.load {
             Load::Loading => {

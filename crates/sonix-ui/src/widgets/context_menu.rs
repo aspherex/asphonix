@@ -372,6 +372,7 @@ impl Focusable for ContextMenu {
 
 impl Render for ContextMenu {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        crate::rcount::hit("menu");
         let Some(o) = self.open.as_ref() else { return div().into_any_element() };
         let (items, pos, active, sub) = (o.items.clone(), o.pos, o.active, o.sub_active);
         let width = panel_width(window, &self.th, &items);

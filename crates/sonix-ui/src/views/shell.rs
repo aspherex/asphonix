@@ -219,11 +219,13 @@ impl Shell {
     /// Env-driven hooks for screenshots and the perf harness (never set in normal use).
     fn debug_hooks(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         if std::env::var("SONIX_PLAY").is_ok() {
-            app::call(cx, |b| {
+            // `SONIX_PLAY=first` starts at the first row of the list (its now-playing bars on screen), anything else at tr_7
+            let first = std::env::var("SONIX_PLAY").is_ok_and(|v| v == "first");
+            app::call(cx, move |b| {
                 let _ = b.player_play_all(sonix_api::PlayAllRequest {
                     order: sonix_api::TrackOrder::Sort { field: sonix_api::TrackSortField::Title, dir: sonix_api::SortDir::Asc },
                     filter: None,
-                    start_track_id: Some("tr_7".into()),
+                    start_track_id: (!first).then(|| "tr_7".into()),
                     flow: None,
                 });
             });
@@ -727,11 +729,17 @@ impl Render for Shell {
         }
 
         self.fs.tick();
+        crate::rcount::frame_start();
+        crate::rcount::hit("root");
         crate::probe::begin_frame();
         if !self.shown {
             self.shown = true;
             crate::log("first_render");
-            window.activate_window();
+            // `SONIX_NO_ACTIVATE=1`: do not pull the window to the foreground (test runs while someone works at the
+            // PC: a stolen focus routes their keystrokes and clicks into the player).
+            if std::env::var_os("SONIX_NO_ACTIVATE").is_none() {
+                window.activate_window();
+            }
             #[cfg(not(feature = "parity"))]
             self.start_boot(window, cx);
         }
@@ -846,6 +854,7 @@ impl Render for Shell {
             .font_family(th.body_font)
             .text_size(px(13.))
             .line_height(px(18.))
+            .child(crate::rcount::frame_phase_probe())
             .child(title)
             .children((!is_login).then_some(top))
             .child(
@@ -866,7 +875,8 @@ impl Render for Shell {
             .children(self.lists_editor_overlay())
             .child(self.overlays.clone())
             .children(self.boot.clone())
-            .child(crate::widgets::smooth::host());
+            .child(crate::widgets::smooth::host())
+            .child(crate::rcount::frame_end_probe());
         #[cfg(feature = "parity")]
         let root = root.child(crate::probe::frame_marker());
         root

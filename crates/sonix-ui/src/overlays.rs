@@ -268,6 +268,7 @@ fn panel(th: &Theme, title: &str, meta: Option<&str>, body: impl IntoElement) ->
 
 impl Render for Overlays {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        crate::rcount::hit("overlays");
         let th = app::theme(cx);
         let vw = f32::from(window.viewport_size().width);
         let vh = f32::from(window.viewport_size().height);

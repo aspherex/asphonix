@@ -641,6 +641,7 @@ impl Focusable for TracksView {
 
 impl Render for TracksView {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        crate::rcount::hit("tracks");
         let th = self.th;
         let cols = self.cols(window);
         let total = self.pager.total;

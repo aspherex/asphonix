@@ -634,6 +634,7 @@ impl gpui::EventEmitter<NpEvent> for NowPlayingView {}
 
 impl Render for NowPlayingView {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        crate::rcount::hit("np");
         let th: Theme = app::theme(cx);
         let (ps, frame) = {
             let m = self.player.read(cx);

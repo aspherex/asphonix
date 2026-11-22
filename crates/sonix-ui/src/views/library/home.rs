@@ -381,6 +381,7 @@ impl HomeView {
 
 impl Render for HomeView {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        crate::rcount::hit("home");
         let th = app::theme(cx);
         let content_w = (self.w.get() - 2.0 * m::HOME_PAD).max(1.0);
         let mut children: Vec<AnyElement> = vec![self.telemetry(&th)];

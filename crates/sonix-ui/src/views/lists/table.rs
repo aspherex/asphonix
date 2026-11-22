@@ -586,6 +586,7 @@ impl Focusable for Table {
 
 impl Render for Table {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        crate::rcount::hit("table");
         let th = app::theme(cx);
         let cols = self.cols(window);
         let total = self.total();

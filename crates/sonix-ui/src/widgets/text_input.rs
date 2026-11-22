@@ -836,6 +836,7 @@ impl Element for TextElement {
 
 impl Render for TextInput {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        crate::rcount::hit("input");
         div()
             .flex()
             .key_context("TextInput")

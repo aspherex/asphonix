@@ -224,6 +224,7 @@ fn header(th: &Theme, id: &'static str, label: String, right: Option<String>) ->
 
 impl Render for QueueRail {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        crate::rcount::hit("rail");
         if self.top_pending.is_some() {
             match take_pending_top(&mut self.top_pending, f32::from(self.scroll.bounds().size.height)) {
                 Some(pos) => self.scroll.scroll_to_top_of_item(pos),

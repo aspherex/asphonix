@@ -120,6 +120,7 @@ impl GridHost<Album> for AlbumsView {
 
 impl Render for AlbumsView {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        crate::rcount::hit("albums");
         let th = app::theme(cx);
         let this = cx.entity().downgrade();
         let this2 = this.clone();

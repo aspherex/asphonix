@@ -48,6 +48,7 @@ impl DockView {
 
 impl Render for DockView {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        crate::rcount::hit("dock");
         let th: Theme = app::theme(cx);
         let ps = self.player.read(cx).state.clone();
         let vw = f32::from(window.viewport_size().width);
