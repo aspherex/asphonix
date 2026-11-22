@@ -135,7 +135,7 @@ impl LiveLayer {
             return;
         }
         let task = cx.spawn(async move |this, cx| {
-            delay(d).await;
+            crate::ticker::delay(d).await;
             let _ = this.update(cx, |l, cx| {
                 l.timer = None;
                 cx.notify();
@@ -225,39 +225,6 @@ impl Render for LiveLayer {
 }
 
 
-
-/// A precise one-shot delay. GPUI's `Timer` on Windows is a WinRT thread-pool timer (~15.6 ms granularity: a 20 ms
-/// wait became 31 ms), so the layer's frame pacing sleeps on one small thread instead (`std::thread::sleep` uses a
-/// high-resolution waitable timer) and wakes the UI task through a oneshot channel.
-fn delay(d: Duration) -> impl std::future::Future<Output = ()> {
-    use std::sync::OnceLock;
-    use std::sync::mpsc::{Sender, channel};
-    type Req = (Instant, futures::channel::oneshot::Sender<()>);
-    static TICKER: OnceLock<Option<Sender<Req>>> = OnceLock::new();
-    let tx = TICKER.get_or_init(|| {
-        let (tx, rx) = channel::<Req>();
-        std::thread::Builder::new()
-            .name("live-ticker".into())
-            .spawn(move || {
-                while let Ok((due, done)) = rx.recv() {
-                    let now = Instant::now();
-                    if due > now {
-                        std::thread::sleep(due - now);
-                    }
-                    let _ = done.send(());
-                }
-            })
-            .ok()
-            .map(|_| tx)
-    });
-    let (done, wait) = futures::channel::oneshot::channel();
-    let sent = tx.as_ref().is_some_and(|tx| tx.send((Instant::now() + d, done)).is_ok());
-    async move {
-        if sent {
-            let _ = wait.await;
-        }
-    }
-}
 
 /// Playing bars that are (at least partly) inside their clip: only those keep the bar frames coming.
 fn animating_bars(s: &Slot) -> bool {

@@ -21,6 +21,7 @@ mod live;
 mod part;
 mod rail_dnd;
 mod rcount;
+mod ticker;
 #[cfg(feature = "parity")]
 mod parity;
 mod perf;
