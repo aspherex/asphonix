@@ -5,6 +5,7 @@ use crate::router::Route;
 use crate::widgets::context_menu::MenuItem;
 use gpui::{App, ClipboardItem, Pixels, Point, px};
 use sonix_api::*;
+use sonix_i18n::tr;
 use std::rc::Rc;
 
 /// A menu action callback.
@@ -48,19 +49,19 @@ pub fn rating_submenu(ids: Vec<String>, kind: StarTargetType) -> Vec<MenuItem> {
         .map(|n| MenuItem::action("★".repeat(n as usize), apply(ids.clone(), n)))
         .collect();
     v.push(MenuItem::separator());
-    v.push(MenuItem::action("Clear rating", apply(ids, 0)));
+    v.push(MenuItem::action(tr!(MenuClearRating), apply(ids, 0)));
     v
 }
 
 pub fn track_menu_items(m: TrackMenu) -> Vec<MenuItem> {
     let ids: Vec<String> = m.tracks.iter().map(|t| t.id.clone()).collect();
     let n = m.tracks.len();
-    let suffix = if n > 1 { format!(" ({n} tracks)") } else { String::new() };
+    let suffix = if n > 1 { format!(" ({})", tr!(CountTracks, count = n)) } else { String::new() };
     let single = if n == 1 { m.tracks.first().cloned() } else { None };
     let all_starred = m.tracks.iter().all(|t| t.starred.is_some());
 
     let play_now = m.on_play_now.clone();
-    let mut items = vec![MenuItem::action("Play now", move |_, cx| play_now(cx)).icon("play")];
+    let mut items = vec![MenuItem::action(tr!(MenuPlayNow), move |_, cx| play_now(cx)).icon("play")];
     let enqueue = |label: String, pos: EnqueuePosition, ids: Vec<String>, icon: &'static str| {
         MenuItem::action(label, move |_, cx| {
             let ids = ids.clone();
@@ -73,15 +74,15 @@ pub fn track_menu_items(m: TrackMenu) -> Vec<MenuItem> {
     items.push(match &m.on_play_next {
         Some(f) => {
             let f = f.clone();
-            MenuItem::action(format!("Play next{suffix}"), move |_, cx| f(cx)).icon("next")
+            MenuItem::action(format!("{}{suffix}", tr!(MenuPlayNext)), move |_, cx| f(cx)).icon("next")
         }
-        None => enqueue(format!("Play next{suffix}"), EnqueuePosition::Next, ids.clone(), "next"),
+        None => enqueue(format!("{}{suffix}", tr!(MenuPlayNext)), EnqueuePosition::Next, ids.clone(), "next"),
     });
-    items.push(enqueue(format!("Add to queue{suffix}"), EnqueuePosition::End, ids.clone(), "queue"));
+    items.push(enqueue(format!("{}{suffix}", tr!(MenuAddToQueue)), EnqueuePosition::End, ids.clone(), "queue"));
     if let Some(t) = &single {
         let id = t.id.clone();
         items.push(
-            MenuItem::action("Start radio", move |_, cx| {
+            MenuItem::action(tr!(MenuStartRadio), move |_, cx| {
                 let id = id.clone();
                 app::call(cx, move |b| {
                     let _ = b.radio_start(RadioStartRequest { seed: RadioSeed { kind: RadioSeedKind::Track, id } });
@@ -92,7 +93,7 @@ pub fn track_menu_items(m: TrackMenu) -> Vec<MenuItem> {
     }
     let (ids_p, at) = (ids.clone(), m.at);
     items.push(
-        MenuItem::action(format!("Add to playlist{suffix}"), move |_, cx| {
+        MenuItem::action(format!("{}{suffix}", tr!(MenuAddToPlaylist)), move |_, cx| {
             // the popover anchors at the menu's point: `top = y + 4`, `left = x` (right edge = x + 220)
             crate::overlays::add_to_playlist(cx, ids_p.clone(), gpui::point(at.x + px(220.), at.y));
         })
@@ -100,7 +101,7 @@ pub fn track_menu_items(m: TrackMenu) -> Vec<MenuItem> {
     );
     let ids_l = ids.clone();
     items.push(
-        MenuItem::action(format!("{}{suffix}", if all_starred { "Unlike" } else { "Like" }), move |_, cx| {
+        MenuItem::action(format!("{}{suffix}", if all_starred { tr!(MenuUnlike) } else { tr!(MenuLike) }), move |_, cx| {
             let ids = ids_l.clone();
             app::call(cx, move |b| {
                 for id in ids {
@@ -111,33 +112,33 @@ pub fn track_menu_items(m: TrackMenu) -> Vec<MenuItem> {
         })
         .icon(if all_starred { "heart-filled" } else { "heart" }),
     );
-    items.push(MenuItem::submenu(format!("Rate{suffix}"), rating_submenu(ids.clone(), StarTargetType::Track)).icon("star"));
+    items.push(MenuItem::submenu(format!("{}{suffix}", tr!(MenuRate)), rating_submenu(ids.clone(), StarTargetType::Track)).icon("star"));
     if let Some(t) = &single {
         if let Some(al) = t.album_id.clone() {
             let nav = m.on_navigate.clone();
-            items.push(MenuItem::action("Go to album", move |_, cx| nav(Route::Album(al.clone()), cx)).icon("album"));
+            items.push(MenuItem::action(tr!(MenuGoToAlbum), move |_, cx| nav(Route::Album(al.clone()), cx)).icon("album"));
         }
         if let Some(ar) = t.artist_id.clone() {
             let nav = m.on_navigate.clone();
-            items.push(MenuItem::action("Go to artist", move |_, cx| nav(Route::Artist(ar.clone()), cx)).icon("artist"));
+            items.push(MenuItem::action(tr!(MenuGoToArtist), move |_, cx| nav(Route::Artist(ar.clone()), cx)).icon("artist"));
         }
     }
     if let Some(f) = &m.on_remove_from_playlist {
         let f = f.clone();
         items.push(MenuItem::separator());
-        items.push(MenuItem::action(format!("Remove from this playlist{suffix}"), move |_, cx| f(cx)).icon("trash").danger());
+        items.push(MenuItem::action(format!("{}{suffix}", tr!(MenuRemoveFromPlaylist)), move |_, cx| f(cx)).icon("trash").danger());
     }
     if let Some(f) = &m.on_remove_from_queue {
         let f = f.clone();
         items.push(MenuItem::separator());
-        items.push(MenuItem::action(format!("Remove from queue{suffix}"), move |_, cx| f(cx)).icon("close").danger());
+        items.push(MenuItem::action(format!("{}{suffix}", tr!(MenuRemoveFromQueue)), move |_, cx| f(cx)).icon("close").danger());
     }
     if let Some(t) = single {
         items.push(MenuItem::separator());
         let t0 = t.clone();
-        items.push(MenuItem::action("Track info", move |_, cx| crate::overlays::track_info(cx, t0.clone())).icon("eye"));
+        items.push(MenuItem::action(tr!(MenuTrackInfo), move |_, cx| crate::overlays::track_info(cx, t0.clone())).icon("eye"));
         let text = format!("{} – {}", t.artist, t.title);
-        items.push(MenuItem::action("Copy \"Artist – Title\"", move |_, cx| cx.write_to_clipboard(ClipboardItem::new_string(text.clone()))));
+        items.push(MenuItem::action(tr!(MenuCopyArtistTitle), move |_, cx| cx.write_to_clipboard(ClipboardItem::new_string(text.clone()))));
     }
     items
 }

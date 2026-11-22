@@ -6,7 +6,7 @@
 //! `views/shell_cache.rs`, `crate::live`) rebuild their text. State that holds already-translated text (the search
 //! placeholder) is refreshed by the shell (`Shell::set_language`).
 use gpui::{App, Global};
-use sonix_i18n::Lang;
+use sonix_i18n::{Key, Lang};
 
 /// The active UI language and the user's choice (`None` = follow the OS).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -45,6 +45,26 @@ pub fn switch(cx: &mut App, pref: Option<Lang>) -> bool {
 /// The active choice (`None` = System).
 pub fn pref(cx: &App) -> Option<Lang> {
     cx.try_global::<I18n>().and_then(|i| i.pref)
+}
+
+/// The user-facing text of a backend error, from its stable code. The English `message` is for the log only.
+pub fn api_error(e: &sonix_api::ApiError) -> String {
+    use sonix_api::ErrorCode as C;
+    crate::log(&format!("api error {:?}: {}", e.code, e.message));
+    let k = match e.code {
+        C::NotConnected => Key::ErrorNotConnected,
+        C::Network => Key::ErrorNetwork,
+        C::AuthFailed => Key::ErrorAuthFailed,
+        C::NotFound => Key::ErrorNotFound,
+        C::ServerError => Key::ErrorServer,
+        C::Io => Key::ErrorIo,
+        C::Decode => Key::ErrorDecode,
+        C::OutputUnavailable => Key::ErrorOutputUnavailable,
+        C::Unimplemented => Key::ErrorUnimplemented,
+        C::InvalidRequest => Key::ErrorInvalidRequest,
+        C::Unknown => Key::ErrorUnknown,
+    };
+    sonix_i18n::tr(k).to_string()
 }
 
 #[cfg(test)]

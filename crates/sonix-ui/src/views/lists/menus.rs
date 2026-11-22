@@ -7,6 +7,7 @@ use crate::router::Route;
 use crate::widgets::context_menu::MenuItem;
 use gpui::{App, EventEmitter, WeakEntity};
 use sonix_api::*;
+use sonix_i18n::tr;
 use std::rc::Rc;
 
 pub type Action = Rc<dyn Fn(&mut App)>;
@@ -45,7 +46,7 @@ fn play_pl(id: String, shuffle: bool) -> impl Fn(&mut gpui::Window, &mut App) {
 /// Playlist menu.
 pub fn playlist_menu_items<V: EventEmitter<ListsEvent> + 'static>(this: WeakEntity<V>, p: &Playlist, on_deleted_nav: bool) -> Vec<MenuItem> {
     let empty = p.song_count == 0;
-    let ro_hint = "Read-only playlist.";
+    let ro_hint = tr!(PlaylistReadonlyHint);
     let queue_item = |label: &'static str, pos: EnqueuePosition, icon: &'static str| {
         let id = p.id.clone();
         MenuItem::action(label, move |_, cx| {
@@ -60,9 +61,9 @@ pub fn playlist_menu_items<V: EventEmitter<ListsEvent> + 'static>(this: WeakEnti
         .disabled(empty)
     };
     let (id_r, name_r, this_r) = (p.id.clone(), p.name.clone(), this.clone());
-    let rename = MenuItem::action("Rename", move |_, cx| {
+    let rename = MenuItem::action(tr!(MenuRename), move |_, cx| {
         let (id, this) = (id_r.clone(), this_r.clone());
-        crate::overlays::prompt(cx, "Rename playlist", "", "Rename", &name_r, move |name, cx| {
+        crate::overlays::prompt(cx, tr!(DialogRenamePlaylist), "", tr!(MenuRename), &name_r, move |name, cx| {
             let id2 = id.clone();
             app::call(cx, move |b| {
                 let _ = b.playlists_rename(RenamePlaylistRequest { id: id2, name });
@@ -75,7 +76,7 @@ pub fn playlist_menu_items<V: EventEmitter<ListsEvent> + 'static>(this: WeakEnti
     .icon("edit")
     .disabled(p.read_only);
     let (id_d, this_d) = (p.id.clone(), this.clone());
-    let dup = MenuItem::action("Duplicate", move |_, cx| {
+    let dup = MenuItem::action(tr!(MenuDuplicate), move |_, cx| {
         let id = id_d.clone();
         app::call(cx, move |b| {
             let _ = b.playlists_duplicate(&id);
@@ -86,9 +87,9 @@ pub fn playlist_menu_items<V: EventEmitter<ListsEvent> + 'static>(this: WeakEnti
     })
     .icon("add");
     let (id_x, name_x, this_x) = (p.id.clone(), p.name.clone(), this);
-    let delete = MenuItem::action("Delete", move |_, cx| {
+    let delete = MenuItem::action(tr!(MenuDelete), move |_, cx| {
         let (id, this) = (id_x.clone(), this_x.clone());
-        crate::overlays::confirm(cx, "Delete playlist", &format!("Delete \"{name_x}\"? This cannot be undone."), "Delete", true, move |cx| {
+        crate::overlays::confirm(cx, tr!(DialogDeletePlaylist), &tr!(DialogDeletePlaylistBody, name = name_x.as_str()), tr!(MenuDelete), true, move |cx| {
             let id2 = id.clone();
             app::call(cx, move |b| {
                 let _ = b.playlists_delete(DeletePlaylistRequest { id: id2 });
@@ -112,14 +113,14 @@ pub fn playlist_menu_items<V: EventEmitter<ListsEvent> + 'static>(this: WeakEnti
         delete = delete.hint(ro_hint);
     }
     vec![
-        MenuItem::action("Play", play_pl(p.id.clone(), false)).icon("play").disabled(empty),
-        MenuItem::action("Shuffle", play_pl(p.id.clone(), true)).icon("shuffle").disabled(empty),
+        MenuItem::action(tr!(MenuPlay), play_pl(p.id.clone(), false)).icon("play").disabled(empty),
+        MenuItem::action(tr!(MenuShuffle), play_pl(p.id.clone(), true)).icon("shuffle").disabled(empty),
         {
             let id = p.id.clone();
             crate::flow::menu_entry(Rc::new(move |arc, cx: &mut App| crate::playback::play_playlist(cx, id.clone(), false, Some(arc))), empty)
         },
-        queue_item("Play next", EnqueuePosition::Next, "next"),
-        queue_item("Add to queue", EnqueuePosition::End, "queue"),
+        queue_item(tr!(MenuPlayNext), EnqueuePosition::Next, "next"),
+        queue_item(tr!(MenuAddToQueue), EnqueuePosition::End, "queue"),
         MenuItem::separator(),
         rename,
         dup,
@@ -131,8 +132,8 @@ pub fn playlist_menu_items<V: EventEmitter<ListsEvent> + 'static>(this: WeakEnti
 pub fn liked_menu_items(count: usize) -> Vec<MenuItem> {
     let play = |shuffle: bool| move |_: &mut gpui::Window, cx: &mut App| crate::playback::play_liked(cx, shuffle, None);
     vec![
-        MenuItem::action("Play", play(false)).icon("play").disabled(count == 0),
-        MenuItem::action("Shuffle", play(true)).icon("shuffle").disabled(count == 0),
+        MenuItem::action(tr!(MenuPlay), play(false)).icon("play").disabled(count == 0),
+        MenuItem::action(tr!(MenuShuffle), play(true)).icon("shuffle").disabled(count == 0),
         crate::flow::menu_entry(Rc::new(|arc, cx: &mut App| crate::playback::play_liked(cx, false, Some(arc))), count == 0),
     ]
 }
@@ -142,7 +143,7 @@ pub fn smart_menu_items<V: EventEmitter<ListsEvent> + 'static>(this: WeakEntity<
     let empty = sp.track_count == 0;
     let play = |id: String, shuffle: bool| move |_: &mut gpui::Window, cx: &mut App| crate::playback::play_smart(cx, id.clone(), shuffle, seed, None);
     let (sp_e, this_e) = (sp.clone(), this.clone());
-    let edit = MenuItem::action("Edit rules…", move |_, cx| {
+    let edit = MenuItem::action(tr!(MenuEditRules), move |_, cx| {
         if let Some(t) = this_e.upgrade() {
             let sp = sp_e.clone();
             t.update(cx, |_, cx| cx.emit(ListsEvent::EditSmart(Some(Box::new(sp)))));
@@ -150,9 +151,9 @@ pub fn smart_menu_items<V: EventEmitter<ListsEvent> + 'static>(this: WeakEntity<
     })
     .icon("sliders");
     let (sp_r, this_r) = (sp.clone(), this.clone());
-    let rename = MenuItem::action("Rename", move |_, cx| {
+    let rename = MenuItem::action(tr!(MenuRename), move |_, cx| {
         let (sp, this) = (sp_r.clone(), this_r.clone());
-        crate::overlays::prompt(cx, "Rename smart playlist", "", "Rename", &sp_r.input.name, move |name, cx| {
+        crate::overlays::prompt(cx, tr!(DialogRenameSmart), "", tr!(MenuRename), &sp_r.input.name, move |name, cx| {
             let (id, mut input) = (sp.id.clone(), sp.input.clone());
             input.name = name;
             app::call(cx, move |b| {
@@ -165,7 +166,7 @@ pub fn smart_menu_items<V: EventEmitter<ListsEvent> + 'static>(this: WeakEntity<
     })
     .icon("edit");
     let (id_d, this_d) = (sp.id.clone(), this.clone());
-    let dup = MenuItem::action("Duplicate", move |_, cx| {
+    let dup = MenuItem::action(tr!(MenuDuplicate), move |_, cx| {
         let id = id_d.clone();
         let this = this_d.clone();
         // the copy opens right away
@@ -185,9 +186,9 @@ pub fn smart_menu_items<V: EventEmitter<ListsEvent> + 'static>(this: WeakEntity<
     })
     .icon("add");
     let (sp_x, this_x) = (sp.clone(), this);
-    let delete = MenuItem::action("Delete", move |_, cx| {
+    let delete = MenuItem::action(tr!(MenuDelete), move |_, cx| {
         let (sp, this) = (sp_x.clone(), this_x.clone());
-        crate::overlays::confirm(cx, "Delete smart playlist", &format!("Delete \"{}\"? Only the rules are removed, never any tracks.", sp.input.name), "Delete", true, move |cx| {
+        crate::overlays::confirm(cx, tr!(DialogDeleteSmart), &tr!(DialogDeleteSmartBody, name = sp.input.name.as_str()), tr!(MenuDelete), true, move |cx| {
             let id = sp.id.clone();
             app::call(cx, move |b| {
                 let _ = b.smart_delete(&id);
@@ -205,8 +206,8 @@ pub fn smart_menu_items<V: EventEmitter<ListsEvent> + 'static>(this: WeakEntity<
     .icon("trash")
     .danger();
     vec![
-        MenuItem::action("Play", play(sp.id.clone(), false)).icon("play").disabled(empty),
-        MenuItem::action("Shuffle", play(sp.id.clone(), true)).icon("shuffle").disabled(empty),
+        MenuItem::action(tr!(MenuPlay), play(sp.id.clone(), false)).icon("play").disabled(empty),
+        MenuItem::action(tr!(MenuShuffle), play(sp.id.clone(), true)).icon("shuffle").disabled(empty),
         {
             let id = sp.id.clone();
             crate::flow::menu_entry(Rc::new(move |arc, cx: &mut App| crate::playback::play_smart(cx, id.clone(), false, seed, Some(arc))), empty)

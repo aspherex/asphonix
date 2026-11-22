@@ -145,3 +145,136 @@ drag-artist = artist: { $name }
 toast-added-to-playlist = Added { $what } to "{ $playlist }"
 toast-add-failed = Could not add to "{ $playlist }"
 overlay-now-playing = Now playing
+
+## Track context menu (counts are appended as " (3 tracks)")
+
+menu-clear-rating = Clear rating
+menu-play-now = Play now
+menu-play-next = Play next
+menu-add-to-queue = Add to queue
+menu-start-radio = Start radio
+menu-add-to-playlist = Add to playlist
+menu-like = Like
+menu-unlike = Unlike
+menu-rate = Rate
+menu-go-to-album = Go to album
+menu-go-to-artist = Go to artist
+menu-remove-from-playlist = Remove from this playlist
+menu-remove-from-queue = Remove from queue
+menu-track-info = Track info
+menu-copy-artist-title = Copy "Artist – Title"
+
+## Flow
+
+flow-menu = Flow
+flow-steady = Steady
+flow-steady-hint = Smooth transitions, even energy
+flow-build = Build
+flow-build-hint = Energy rises over each ~40 tracks
+flow-peak = Peak
+flow-peak-hint = Rise, then cool down
+# $kind is an id (playlist, artist, genre, view, list), $pct a number or "<1"
+flow-hint-no-bpm-loudness = No BPM tags in this { $kind ->
+    [playlist] playlist
+    [artist] artist
+    [genre] genre
+    [view] view
+   *[list] list
+} yet: Flow orders by genre, artist spread and loudness (ReplayGain on { $pct }%)
+flow-hint-no-bpm = No BPM tags in this { $kind ->
+    [playlist] playlist
+    [artist] artist
+    [genre] genre
+    [view] view
+   *[list] list
+} yet: Flow orders by genre and artist spread
+flow-hint-bpm = BPM known for { $pct }% of this { $kind ->
+    [playlist] playlist
+    [artist] artist
+    [genre] genre
+    [view] view
+   *[list] list
+}
+flow-hint-key = key { $pct }%
+
+## Album / artist / playlist menus
+
+menu-play = Play
+menu-play-all = Play all
+menu-shuffle = Shuffle
+menu-star = Star
+menu-unstar = Unstar
+menu-album-radio = Album radio
+menu-artist-radio = Artist radio
+menu-rename = Rename
+menu-duplicate = Duplicate
+menu-delete = Delete
+menu-edit-rules = Edit rules…
+playlist-readonly-hint = Read-only playlist.
+
+## Dialogs
+
+dialog-cancel = Cancel
+dialog-close = Close
+dialog-create = Create
+dialog-new-playlist = New playlist
+dialog-new-playlist-ellipsis = New playlist…
+dialog-playlist-name = Playlist name
+dialog-rename-playlist = Rename playlist
+dialog-rename-smart = Rename smart playlist
+dialog-delete-playlist = Delete playlist
+dialog-delete-playlist-body = Delete "{ $name }"? This cannot be undone.
+dialog-delete-smart = Delete smart playlist
+dialog-delete-smart-body = Delete "{ $name }"? Only the rules are removed, never any tracks.
+
+## Update dialog
+
+update-available-title = Update available
+update-later = Later
+update-install = Install & restart
+update-playback-will-stop = Playback will stop while SONIX updates and restarts.
+update-downloading = Downloading…
+update-downloading-pct = Downloading { $pct }% · { $size }
+update-installing = Verifying & installing…
+
+## Track info dialog
+
+info-format = Format
+info-bit-depth = Bit depth
+info-bit-depth-value = { $bits }-bit
+info-sample-rate = Sample rate
+info-bitrate = Bitrate
+info-channels = Channels
+info-mono = Mono
+info-stereo = Stereo
+info-duration = Duration
+info-file-size = File size
+info-track-gain = Track gain
+info-album-gain = Album gain
+info-album = Album
+info-year = Year
+info-genre = Genre
+
+## Text field menu
+
+kbd-ctrl = Ctrl
+edit-undo = Undo
+edit-redo = Redo
+edit-cut = Cut
+edit-copy = Copy
+edit-paste = Paste
+edit-select-all = Select all
+
+## Backend errors (by error code)
+
+error-not-connected = Not connected to a server.
+error-network = The server could not be reached.
+error-auth-failed = Wrong username or password.
+error-not-found = Not found.
+error-server = The server reported an error.
+error-io = A file could not be read or written.
+error-decode = The audio file could not be decoded.
+error-output-unavailable = The audio output is not available.
+error-unimplemented = Not supported by this server.
+error-invalid-request = The request was invalid.
+error-unknown = Something went wrong.

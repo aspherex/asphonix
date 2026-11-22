@@ -6,6 +6,7 @@ use crate::app;
 use crate::router::Route;
 use crate::widgets::context_menu::MenuItem;
 use gpui::{App, Pixels, Point, px};
+use sonix_i18n::tr;
 use std::rc::Rc;
 use sonix_api::*;
 
@@ -79,17 +80,17 @@ pub fn album_menu(album: &Album, at: Point<Pixels>) -> Vec<MenuItem> {
     let id = album.id.clone();
     let starred = album.starred.is_some();
     let mut items = vec![
-        MenuItem::action("Play", {
+        MenuItem::action(tr!(MenuPlay), {
             let id = id.clone();
             move |_, cx| play_album(cx, id.clone(), false)
         })
         .icon("play"),
-        MenuItem::action("Shuffle", {
+        MenuItem::action(tr!(MenuShuffle), {
             let id = id.clone();
             move |_, cx| play_album(cx, id.clone(), true)
         })
         .icon("shuffle"),
-        MenuItem::action("Play next", {
+        MenuItem::action(tr!(MenuPlayNext), {
             let id = id.clone();
             move |_, cx| {
                 let id = id.clone();
@@ -102,7 +103,7 @@ pub fn album_menu(album: &Album, at: Point<Pixels>) -> Vec<MenuItem> {
             }
         })
         .icon("next"),
-        MenuItem::action("Add to queue", {
+        MenuItem::action(tr!(MenuAddToQueue), {
             let id = id.clone();
             move |_, cx| {
                 let id = id.clone();
@@ -119,7 +120,7 @@ pub fn album_menu(album: &Album, at: Point<Pixels>) -> Vec<MenuItem> {
     {
         let id = id.clone();
         items.push(
-            MenuItem::action("Add to playlist", move |_, cx| {
+            MenuItem::action(tr!(MenuAddToPlaylist), move |_, cx| {
                 let id = id.clone();
                 let b = app::backend(cx);
                 cx.spawn(async move |cx| {
@@ -132,19 +133,19 @@ pub fn album_menu(album: &Album, at: Point<Pixels>) -> Vec<MenuItem> {
         );
     }
     items.push(
-        MenuItem::action(if starred { "Unstar" } else { "Star" }, {
+        MenuItem::action(if starred { tr!(MenuUnstar) } else { tr!(MenuStar) }, {
             let id = id.clone();
             move |_, cx| toggle_star(cx, id.clone(), StarTargetType::Album, starred)
         })
         .icon(if starred { "star-filled" } else { "star" }),
     );
-    items.push(MenuItem::submenu("Rate", crate::menus::rating_submenu(vec![id.clone()], StarTargetType::Album)).icon("star"));
+    items.push(MenuItem::submenu(tr!(MenuRate), crate::menus::rating_submenu(vec![id.clone()], StarTargetType::Album)).icon("star"));
     {
         let id = id.clone();
-        items.push(MenuItem::action("Album radio", move |_, cx| crate::playback::radio(cx, RadioSeedKind::Album, id.clone())).icon("equalizer"));
+        items.push(MenuItem::action(tr!(MenuAlbumRadio), move |_, cx| crate::playback::radio(cx, RadioSeedKind::Album, id.clone())).icon("equalizer"));
     }
     if let Some(ar) = album.artist_id.clone() {
-        items.push(MenuItem::action("Go to artist", move |_, cx| navigate(cx, Route::Artist(ar.clone()))).icon("artist"));
+        items.push(MenuItem::action(tr!(MenuGoToArtist), move |_, cx| navigate(cx, Route::Artist(ar.clone()))).icon("artist"));
     }
     items
 }
@@ -154,12 +155,12 @@ pub fn artist_menu(artist: &Artist) -> Vec<MenuItem> {
     let id = artist.id.clone();
     let starred = artist.starred.is_some();
     vec![
-        MenuItem::action("Play all", {
+        MenuItem::action(tr!(MenuPlayAll), {
             let id = id.clone();
             move |_, cx| play_artist(cx, id.clone(), false)
         })
         .icon("play"),
-        MenuItem::action("Shuffle", {
+        MenuItem::action(tr!(MenuShuffle), {
             let id = id.clone();
             move |_, cx| play_artist(cx, id.clone(), true)
         })
@@ -171,12 +172,12 @@ pub fn artist_menu(artist: &Artist) -> Vec<MenuItem> {
             },
             false,
         ),
-        MenuItem::action("Artist radio", {
+        MenuItem::action(tr!(MenuArtistRadio), {
             let id = id.clone();
             move |_, cx| crate::playback::radio(cx, RadioSeedKind::Artist, id.clone())
         })
         .icon("equalizer"),
-        MenuItem::action(if starred { "Unstar" } else { "Star" }, {
+        MenuItem::action(if starred { tr!(MenuUnstar) } else { tr!(MenuStar) }, {
             let id = id.clone();
             move |_, cx| toggle_star(cx, id.clone(), StarTargetType::Artist, starred)
         })

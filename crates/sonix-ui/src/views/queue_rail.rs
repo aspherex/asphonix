@@ -340,7 +340,7 @@ impl Render for QueueRail {
         let src_info = q.as_ref().and_then(|q| q.source.clone());
         let flow_rows = src_info.as_ref().map(|s| s.mode == SourceMode::Flow).unwrap_or(false);
         let flow_hint = match &src_info {
-            Some(s) if s.mode == SourceMode::Flow => s.flow_coverage.as_ref().map(|c| fmt::coverage_hint(c, flow_noun(s.kind))).unwrap_or_default(),
+            Some(s) if s.mode == SourceMode::Flow => s.flow_coverage.as_ref().map(|c| crate::flow::coverage_hint(c, flow_noun(s.kind))).unwrap_or_default(),
             _ => String::new(),
         };
         let queue_section = if total == 0 {

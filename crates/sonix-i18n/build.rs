@@ -5,7 +5,7 @@ use std::fmt::Write as _;
 use std::path::Path;
 
 /// `(id, variables)` of every message of a Fluent file. Only what the generator needs: a message starts at column 0
-/// with an identifier followed by `=`; indented lines continue it; `#` comments and `-terms` are skipped.
+/// with an identifier followed by `=`; other non-empty lines continue it; `#` comments and `-terms` end it.
 fn messages(src: &str) -> Vec<(String, Vec<String>)> {
     let mut out: Vec<(String, Vec<String>)> = Vec::new();
     let mut cur: Option<usize> = None;
@@ -19,7 +19,8 @@ fn messages(src: &str) -> Vec<(String, Vec<String>)> {
             out.push((id.trim().to_string(), Vec::new()));
             cur = Some(out.len() - 1);
             rest
-        } else if line.starts_with(' ') || line.starts_with('\t') {
+        } else if !line.is_empty() && !line.starts_with('#') && !line.starts_with('-') {
+            // indented continuation, or a select expression closing at column 0 (`} yet: ...`)
             line
         } else {
             cur = None;

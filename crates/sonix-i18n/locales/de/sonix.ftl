@@ -138,3 +138,135 @@ drag-artist = Künstler: { $name }
 toast-added-to-playlist = { $what } zu „{ $playlist }“ hinzugefügt
 toast-add-failed = Hinzufügen zu „{ $playlist }“ fehlgeschlagen
 overlay-now-playing = Läuft gerade
+
+## Track context menu (counts are appended as " (3 Titel)")
+
+menu-clear-rating = Bewertung entfernen
+menu-play-now = Jetzt abspielen
+menu-play-next = Als Nächstes abspielen
+menu-add-to-queue = Zur Warteschlange hinzufügen
+menu-start-radio = Radio starten
+menu-add-to-playlist = Zu Wiedergabeliste hinzufügen
+menu-like = Gefällt mir
+menu-unlike = Gefällt mir nicht mehr
+menu-rate = Bewerten
+menu-go-to-album = Zum Album
+menu-go-to-artist = Zum Künstler
+menu-remove-from-playlist = Aus dieser Wiedergabeliste entfernen
+menu-remove-from-queue = Aus der Warteschlange entfernen
+menu-track-info = Titelinfo
+menu-copy-artist-title = „Künstler – Titel“ kopieren
+
+## Flow
+
+flow-menu = Flow
+flow-steady = Gleichmäßig
+flow-steady-hint = Sanfte Übergänge, gleichbleibende Energie
+flow-build = Aufbauend
+flow-build-hint = Energie steigt über je ~40 Titel an
+flow-peak = Höhepunkt
+flow-peak-hint = Ansteigen, dann abklingen
+flow-hint-no-bpm-loudness = Noch keine BPM-Tags { $kind ->
+    [playlist] in dieser Wiedergabeliste
+    [artist] bei diesem Künstler
+    [genre] in diesem Genre
+    [view] in dieser Ansicht
+   *[list] in dieser Liste
+}: Flow sortiert nach Genre, Künstlerverteilung und Lautheit (ReplayGain bei { $pct } %)
+flow-hint-no-bpm = Noch keine BPM-Tags { $kind ->
+    [playlist] in dieser Wiedergabeliste
+    [artist] bei diesem Künstler
+    [genre] in diesem Genre
+    [view] in dieser Ansicht
+   *[list] in dieser Liste
+}: Flow sortiert nach Genre und Künstlerverteilung
+flow-hint-bpm = BPM bekannt für { $pct } % { $kind ->
+    [playlist] dieser Wiedergabeliste
+    [artist] dieses Künstlers
+    [genre] dieses Genres
+    [view] dieser Ansicht
+   *[list] dieser Liste
+}
+flow-hint-key = Tonart { $pct } %
+
+## Album / artist / playlist menus
+
+menu-play = Abspielen
+menu-play-all = Alle abspielen
+menu-shuffle = Zufallswiedergabe
+menu-star = Zu Favoriten hinzufügen
+menu-unstar = Aus Favoriten entfernen
+menu-album-radio = Album-Radio
+menu-artist-radio = Künstler-Radio
+menu-rename = Umbenennen
+menu-duplicate = Duplizieren
+menu-delete = Löschen
+menu-edit-rules = Regeln bearbeiten…
+playlist-readonly-hint = Schreibgeschützte Wiedergabeliste.
+
+## Dialogs
+
+dialog-cancel = Abbrechen
+dialog-close = Schließen
+dialog-create = Erstellen
+dialog-new-playlist = Neue Wiedergabeliste
+dialog-new-playlist-ellipsis = Neue Wiedergabeliste…
+dialog-playlist-name = Name der Wiedergabeliste
+dialog-rename-playlist = Wiedergabeliste umbenennen
+dialog-rename-smart = Intelligente Wiedergabeliste umbenennen
+dialog-delete-playlist = Wiedergabeliste löschen
+dialog-delete-playlist-body = „{ $name }“ löschen? Das kann nicht rückgängig gemacht werden.
+dialog-delete-smart = Intelligente Wiedergabeliste löschen
+dialog-delete-smart-body = „{ $name }“ löschen? Nur die Regeln werden entfernt, niemals Titel.
+
+## Update dialog
+
+update-available-title = Update verfügbar
+update-later = Später
+update-install = Installieren & neu starten
+update-playback-will-stop = Die Wiedergabe stoppt, während SONIX aktualisiert und neu startet.
+update-downloading = Wird heruntergeladen…
+update-downloading-pct = Wird heruntergeladen: { $pct } % · { $size }
+update-installing = Wird geprüft und installiert…
+
+## Track info dialog
+
+info-format = Format
+info-bit-depth = Bittiefe
+info-bit-depth-value = { $bits } Bit
+info-sample-rate = Abtastrate
+info-bitrate = Bitrate
+info-channels = Kanäle
+info-mono = Mono
+info-stereo = Stereo
+info-duration = Dauer
+info-file-size = Dateigröße
+info-track-gain = Titel-Gain
+info-album-gain = Album-Gain
+info-album = Album
+info-year = Jahr
+info-genre = Genre
+
+## Text field menu
+
+kbd-ctrl = Strg
+edit-undo = Rückgängig
+edit-redo = Wiederholen
+edit-cut = Ausschneiden
+edit-copy = Kopieren
+edit-paste = Einfügen
+edit-select-all = Alles auswählen
+
+## Backend errors (by error code)
+
+error-not-connected = Nicht mit einem Server verbunden.
+error-network = Der Server ist nicht erreichbar.
+error-auth-failed = Benutzername oder Passwort falsch.
+error-not-found = Nicht gefunden.
+error-server = Der Server hat einen Fehler gemeldet.
+error-io = Eine Datei konnte nicht gelesen oder geschrieben werden.
+error-decode = Die Audiodatei konnte nicht dekodiert werden.
+error-output-unavailable = Die Audioausgabe ist nicht verfügbar.
+error-unimplemented = Von diesem Server nicht unterstützt.
+error-invalid-request = Die Anfrage war ungültig.
+error-unknown = Etwas ist schiefgelaufen.

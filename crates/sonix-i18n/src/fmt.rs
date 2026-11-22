@@ -117,6 +117,11 @@ pub fn int(n: u64) -> String {
     group_i64(n.min(i64::MAX as u64) as i64, crate::lang())
 }
 
+/// A number already formatted with a `.` decimal point ("44.1", "-3.50") with the active language's decimal separator.
+pub fn decimal(s: &str) -> String {
+    s.replace('.', decimal_sep(crate::lang()))
+}
+
 /// Short numeric date from the built-in table: `10/31/2026` / `31.10.2026`.
 pub fn short_date_table(y: i64, m: i64, d: i64, lang: Lang) -> String {
     match lang {
