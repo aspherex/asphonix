@@ -127,7 +127,12 @@ fn main() {
                 "space-grotesk-400", "space-grotesk-500", "space-grotesk-600", "space-grotesk-700"
             ))
             .expect("fonts");
-        cx.set_global(if prefs.light || std::env::var("SONIX_LIGHT").is_ok() { theme::Theme::light() } else { theme::Theme::dark() });
+        // first run (no stored choice): follow the Windows app theme like the web's `prefers-color-scheme` fallback
+        #[cfg(not(feature = "parity"))]
+        let os_light = !settings::has_stored() && matches!(cx.window_appearance(), gpui::WindowAppearance::Light | gpui::WindowAppearance::VibrantLight);
+        #[cfg(feature = "parity")]
+        let os_light = false;
+        cx.set_global(if prefs.light || os_light || std::env::var("SONIX_LIGHT").is_ok() { theme::Theme::light() } else { theme::Theme::dark() });
         cx.set_global(app::Services { backend, art: art::new_handle(24 * 1024 * 1024) });
         widgets::text_input::bind_keys(cx);
         bind_keys(cx);

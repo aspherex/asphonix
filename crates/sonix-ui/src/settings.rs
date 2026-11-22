@@ -20,6 +20,12 @@ pub fn load() -> UiPrefs {
     path().and_then(|p| std::fs::read_to_string(p).ok()).and_then(|s| serde_json::from_str(&s).ok()).unwrap_or_default()
 }
 
+/// `theme.svelte.ts: readStored()`: true when the user has picked a theme before (`ui.json` exists). Without one
+/// the web follows `prefers-color-scheme`; `main.rs` then asks the OS (`App::window_appearance`).
+pub fn has_stored() -> bool {
+    path().is_some_and(|p| p.exists())
+}
+
 pub fn save(p: &UiPrefs) {
     if let Some(path) = path() {
         if let Some(dir) = path.parent() {
