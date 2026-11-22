@@ -805,7 +805,7 @@ impl Render for NowPlayingView {
                 .mt(px(if short { 0.0 } else { 4.0 }))
                 .child(chip("np-add", th, 30.0, 12.0, th.low, false)
                         .child(chip_icon(th, "add", 14., false))
-                        .child(txt(&th, MONO_DATA, tr!(MenuAddToPlaylist).to_uppercase()))
+                        .child(txt(&th, MONO_DATA, tr!(NpAddToPlaylist).to_uppercase()))
                         .child(canvas(move |b, _, _| add_cell.set(b), |_, _, _, _| ()).absolute().size_full())
                         .relative()
                         .on_click(cx.listener(move |_, _: &gpui::ClickEvent, _, cx| cx.emit(NpEvent::AddToPlaylist { id: tid.clone(), at: add_cell2.get().bottom_right() }))))

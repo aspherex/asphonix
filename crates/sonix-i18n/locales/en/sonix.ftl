@@ -561,6 +561,7 @@ dock-no-track = No track loaded
 dock-pick-something = Pick an album or track to play
 dock-now-playing-tip = Now Playing (N)
 dock-toggle-queue = Toggle queue rail
+np-add-to-playlist = Add to playlist
 np-lyrics = Lyrics
 np-lyrics-tip = Lyrics (T)
 np-stars = { $count ->
