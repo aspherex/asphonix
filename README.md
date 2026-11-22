@@ -7,7 +7,7 @@
 ### The player for audio enthusiasts.
 
 A native desktop client for your **Navidrome / Subsonic** library.<br>
-Bit-perfect on Windows · light on resources · ready for AI agents.
+Bit-perfect on Windows · light on resources · open to AI agents.
 
 [![Build](https://github.com/aspherex/asphonix/actions/workflows/build.yml/badge.svg)](https://github.com/aspherex/asphonix/actions/workflows/build.yml)
 [![Release](https://img.shields.io/github/v/release/aspherex/asphonix?include_prereleases&color=d4ff00&labelColor=0a0a0c)](https://github.com/aspherex/asphonix/releases)
@@ -15,10 +15,12 @@ Bit-perfect on Windows · light on resources · ready for AI agents.
 ![Platforms](https://img.shields.io/badge/platforms-Windows%20%7C%20macOS%20%7C%20Linux-d4ff00?labelColor=0a0a0c)
 ![Rust](https://img.shields.io/badge/built%20with-Rust%20%2B%20GPUI-d4ff00?labelColor=0a0a0c)
 
+[**TL;DR**](#-tldr) ·
 [**Philosophy**](#-philosophy) ·
 [**Features**](#-features) ·
 [**Install**](#-install) ·
 [**Agents (MCP)**](#-agentic-interaction-mcp) ·
+[**Technology**](#-technology) ·
 [**Shortcuts**](#-keyboard) ·
 [**FAQ**](#-faq)
 
@@ -26,9 +28,30 @@ Bit-perfect on Windows · light on resources · ready for AI agents.
 
 ---
 
+## // TL;DR
+
+- **Bit-perfect on Windows.** WASAPI exclusive mode at the file's native sample rate, with a readout of the output mode that is really active.
+- **Gapless**, with optional ReplayGain.
+- **Native Rust + GPUI**, no browser engine. Budget targets: ≤ 40 MB RAM in normal use, ~300 ms to a visible window.
+- **Instant browse and search** from a local index of your server library.
+- **Now Playing** with waveform seek bar, spectrum, peak meters and synced lyrics.
+- **Smart playlists and Flow**, a queue ordering by tempo, key and genre.
+- **MCP bridge for AI agents**, opt-in and local. No telemetry.
+
+| | Compatibility at a glance |
+|---|---|
+| **Servers** | Navidrome 0.6x (tested) · other Subsonic API 1.16.1 / OpenSubsonic servers such as Gonic, LMS, Ampache, Airsonic-Advanced (should work, untested) · Jellyfin and Plex are not supported |
+| **Windows** 10/11 x64 | Primary platform · WASAPI exclusive or shared · media keys (SMTC) |
+| **macOS** (Apple Silicon), **Linux** (x64) | Newer, less tested · shared-mode output · no media-key integration yet |
+| **Formats** | FLAC · ALAC · WAV · AIFF · MP3 · AAC / M4A · Ogg Vorbis |
+| **Agents** | Claude Code or any MCP client over stdio |
+
+---
+
 ASPHONIX streams your library from a [Navidrome](https://www.navidrome.org/) (or any Subsonic / OpenSubsonic)
-server and plays it through a native UI: a dark *audio terminal* with real readouts instead of decoration.
-Every number on screen is either measured by the app or reported by your server.
+server and plays it through a native UI: a dark *audio terminal*, lime on near-black, with monospace readouts
+where decoration would usually go. Every number on screen is either measured by the app or reported by your
+server.
 
 <picture>
   <source media="(prefers-color-scheme: light)" srcset="docs/screenshots/now-playing-light.png">
@@ -39,49 +62,75 @@ Every number on screen is either measured by the app or reported by your server.
   <tr>
     <td width="33%" valign="top">
       <h4>🎚️ Honest signal path</h4>
-      Bit-perfect WASAPI exclusive output at the file's native sample rate, gapless. The header always shows
-      what is really playing, including a fallback to shared mode.
+      In exclusive mode on Windows, at unity gain, the file reaches your DAC untouched. When the app has to
+      fall back to shared mode, the header says so.
     </td>
     <td width="33%" valign="top">
       <h4>⚡ Native and lean</h4>
-      Rust + GPUI, no browser engine. Hard budgets: ≤ 40 MB of RAM in normal use, ~300 ms to a window, a few MB
-      and near-zero CPU when minimized.
+      A small Rust binary where every change is held to a memory and startup budget. Minimized, the target is
+      a few MB and near-zero CPU.
     </td>
     <td width="33%" valign="top">
-      <h4>🤖 Ready for agents</h4>
-      A built-in MCP bridge lets Claude Code and other agents explore your library and, if you allow it,
-      run the queue.
+      <h4>🤖 Open to agents</h4>
+      Ask an agent about your library and listening history and, if you allow it, let it run the queue.
     </td>
   </tr>
 </table>
 
 ## // Philosophy
 
-ASPHONIX is built for people who care about *what actually reaches their ears*, and who want their tools to
-stay out of the way.
+<p align="center"><b>Play the file as it is. Show what is true. Stay out of the way.</b></p>
 
-1. **The signal path is sacred.** The original file is streamed from your server, decoded in Rust and, in
-   exclusive mode, handed to your DAC at its native sample rate. No resampling, no hidden mixer, no
-   "enhancement". Volume and ReplayGain are the only things that change samples, and only when you ask for
-   them: at unity gain, playback is bit-perfect.
-2. **Honesty over decoration.** No fake meters, no invented quality badges. Sample rate, bit depth, format and
-   output mode are shown as they really are, including when exclusive mode is not available and the app falls
-   back to shared mode. If a number can't be measured, it isn't shown.
-3. **A player, not a platform.** Your library belongs to your server. ASPHONIX keeps a fast local index of it,
-   talks to nothing else unless you turn it on, and collects no telemetry.
-4. **Native or nothing.** No browser engine pretending to be an app. A small Rust binary with a hard memory
-   and startup budget, refresh-rate animation, and near-zero CPU while it sits in the background.
-5. **Keyboard first, mouse welcome.** Everything you do often has a key; everything else is one click away.
-6. **Open to agents, on your terms.** Your library is data you should be able to ask questions about.
-   ASPHONIX exposes it to AI agents over the Model Context Protocol, locally and off by default; letting an
-   agent control playback is a separate, explicit switch.
+ASPHONIX is built for people who care about *what actually reaches their ears*. Six principles decide what
+goes in and what stays out.
+
+<table>
+  <tr>
+    <td width="50%" valign="top">
+      <h4><code>01</code> The signal path is sacred</h4>
+      The original file is streamed from your server, decoded in Rust and, in exclusive mode, handed to your
+      DAC at its native sample rate. No resampling, no hidden mixer, no "enhancement". Only volume and
+      ReplayGain change samples, and only when you ask for them: at unity gain, playback is bit-perfect.
+    </td>
+    <td width="50%" valign="top">
+      <h4><code>02</code> Honesty over decoration</h4>
+      No fake meters, no invented quality badges. Sample rate, bit depth, format and output mode are shown as
+      they are, including when exclusive mode is unavailable and the app falls back to shared mode. A number
+      that can't be measured isn't shown.
+    </td>
+  </tr>
+  <tr>
+    <td width="50%" valign="top">
+      <h4><code>03</code> A player, not a platform</h4>
+      Your library belongs to your server. ASPHONIX keeps a fast local index of it, talks to nothing else
+      unless you turn it on, and collects no telemetry.
+    </td>
+    <td width="50%" valign="top">
+      <h4><code>04</code> Native or nothing</h4>
+      No browser engine dressed up as an app. A small Rust binary with a memory and startup budget, animation
+      at your display's refresh rate, and near-zero CPU while it waits in the background.
+    </td>
+  </tr>
+  <tr>
+    <td width="50%" valign="top">
+      <h4><code>05</code> Keyboard first, mouse welcome</h4>
+      Everything you do often has a key. Everything else is one click away.
+    </td>
+    <td width="50%" valign="top">
+      <h4><code>06</code> Open to agents, on your terms</h4>
+      Your library is data, and you should be able to ask it questions. ASPHONIX exposes it to AI agents over
+      the Model Context Protocol, locally and off by default. Letting an agent control playback is a
+      separate, explicit switch.
+    </td>
+  </tr>
+</table>
 
 ## // Features
 
 | | |
 |---|---|
 | **Playback** | Gapless · WASAPI exclusive or shared output · optional ReplayGain · A-B loop · ±10 s skips · session resume · optional play-queue sync with the server |
-| **Library** | Home, Albums, Artists, Tracks, Genres, History · playlists and Liked Songs · ratings and stars · local smart playlists with a rule editor · instant full-text search |
+| **Library** | Home, Albums, Artists, Tracks, Genres, History · playlists and Liked Songs · ratings and stars · local smart playlists with a rule editor · full-text search on a local SQLite (FTS5) mirror of your server library |
 | **Now Playing** | Waveform seek bar · 28-band FFT spectrum · peak meters · synced lyrics |
 | **Queue** | Rolling queue window · drag-and-drop reordering · shuffle with artist spread · **Flow** ordering by tempo, key and genre (where your tags provide them) · autoplay / radio when the queue runs out |
 | **Desktop** | Windows media controls and media keys · scrobbling to your server · light and dark theme · multiple server profiles |
@@ -89,12 +138,12 @@ stay out of the way.
 
 <table>
   <tr>
-    <td width="50%"><a href="docs/screenshots/home.png"><img src="docs/screenshots/home.png" alt="Home: recently played albums and sessions"></a><p align="center"><sub><b>Home</b>: jump back into recent sessions</sub></p></td>
+    <td width="50%"><a href="docs/screenshots/home.png"><img src="docs/screenshots/home.png" alt="Home: recently played albums and sessions"></a><p align="center"><sub><b>Home</b>: pick up a recent session where you left it</sub></p></td>
     <td width="50%"><a href="docs/screenshots/albums.png"><img src="docs/screenshots/albums.png" alt="Albums grid"></a><p align="center"><sub><b>Albums</b>: covers decoded at display size</sub></p></td>
   </tr>
   <tr>
     <td width="50%"><a href="docs/screenshots/tracks.png"><img src="docs/screenshots/tracks.png" alt="Tracks table with format column"></a><p align="center"><sub><b>Tracks</b>: format and bit depth for every file</sub></p></td>
-    <td width="50%"><a href="docs/screenshots/search.png"><img src="docs/screenshots/search.png" alt="Instant search"></a><p align="center"><sub><b>Search</b>: instant, across the whole library</sub></p></td>
+    <td width="50%"><a href="docs/screenshots/search.png"><img src="docs/screenshots/search.png" alt="Instant search"></a><p align="center"><sub><b>Search</b>: the whole library, as you type</sub></p></td>
   </tr>
 </table>
 
@@ -153,10 +202,13 @@ Development: `cargo test` and `cargo clippy --all-targets -- -D warnings`; see [
 
 ## // Agentic interaction (MCP)
 
-ASPHONIX ships `asphonix-mcp`, a [Model Context Protocol](https://modelcontextprotocol.io/) server that connects
-an AI agent to the running player. Ask things like:
+Your library and your listening history are data. ASPHONIX lets an AI agent ask questions of them and, if you
+permit it, act on the answers. It ships `asphonix-mcp`, a
+[Model Context Protocol](https://modelcontextprotocol.io/) server that connects an agent to the running player.
+Ask things like:
 
 > *"What did I listen to most this month?"* · *"Which albums have I never played?"* ·
+> *"Which tracks do I keep skipping?"* ·
 > *"Build a 40-minute focus set from my liked ambient tracks and play it."*
 
 | Access | Tools |
@@ -170,8 +222,42 @@ an AI agent to the running player. Ask things like:
 claude mcp add asphonix -- "C:\path\to\asphonix-mcp.exe"
 ```
 
-The bridge is off by default and only listens locally (a named pipe on Windows, a Unix socket elsewhere). The
-app proves its identity to the client, and every session needs a fresh token.
+**On your terms.** The bridge is off by default and only listens locally (a named pipe on Windows, a Unix
+socket elsewhere). The app proves its identity to the client, and every session needs a fresh token. Reading
+and controlling are two switches: an agent can look without being able to touch.
+
+## // Technology
+
+The signal path, from your server to your DAC:
+
+```
+SERVER    Subsonic stream             the original file, no transcoding
+             │
+DISK      temp file                   next track prefetched to disk, not RAM
+             │
+DECODE    Symphonia                   pure Rust
+             │
+BUFFER    rtrb ring buffer            small, lock-free
+             │
+OUTPUT    WASAPI exclusive / shared   Windows
+          cpal                        macOS, Linux
+```
+
+Tracks hand off gaplessly. Waveform and spectrum (`realfft`) are computed in Rust from the decoded audio,
+not drawn from canned animations.
+
+| | |
+|---|---|
+| **Language** | Rust, edition 2024 |
+| **UI** | [GPUI](https://www.gpui.rs/) 0.2.2 from crates.io, unpatched: Zed's GPU-rendered UI framework |
+| **Architecture** | The UI reaches everything through one trait, `asphonix_api::Backend` |
+| **Audio** | Symphonia decoding · `rtrb` ring buffer · `wasapi` on Windows, `cpal` on macOS and Linux |
+| **Library** | SQLite (bundled, via `rusqlite`) with FTS5 full-text search, synced from the server · lists paged from SQLite and virtualized in the UI |
+| **Network** | `reqwest` with `rustls` (no OpenSSL) on `tokio` · Subsonic API 1.16.1 token auth (salted MD5, per the Subsonic spec) · OpenSubsonic extensions such as synced lyrics via `getLyricsBySongId` |
+| **Secrets** | OS keychain via the `keyring` crate |
+| **OS integration** | Windows SMTC via the `windows` crate |
+| **Updater** | Off unless configured · minisign signature verification (`minisign-verify`) |
+| **MCP** | `asphonix-mcp`, a stdio MCP server that talks to the app over a local named pipe / Unix socket |
 
 ## // Keyboard
 
@@ -192,8 +278,8 @@ app proves its identity to the client, and every session needs a fresh token.
 <summary><b>The header says SHARED MODE. Why not exclusive?</b></summary>
 
 Exclusive mode is Windows-only (Settings → Output). It needs a device that accepts the file's sample rate and
-bit depth, and no other app holding the device exclusively. If the device refuses, ASPHONIX falls back to shared
-mode and tells you so.
+bit depth, and no other app holding that device exclusively. If the device refuses, ASPHONIX falls back to
+shared mode and says so.
 </details>
 
 <details>
@@ -205,8 +291,8 @@ No. ASPHONIX speaks the Subsonic / OpenSubsonic API only.
 <details>
 <summary><b>Does ASPHONIX phone home?</b></summary>
 
-No. It talks to your server and nothing else. Scrobbling and update checks are off unless you enable them,
-and update checks additionally need a release channel to be configured ([docs/UPDATES.md](docs/UPDATES.md)).
+No. It talks to your server and nothing else. Scrobbling and update checks stay off unless you enable them,
+and update checks also need a release channel to be configured ([docs/UPDATES.md](docs/UPDATES.md)).
 </details>
 
 <details>
@@ -250,3 +336,9 @@ Font License 1.1, see `assets/fonts/OFL-*.txt`.
 
 Built on [GPUI](https://www.gpui.rs/) by Zed Industries, [Symphonia](https://github.com/pdeljanov/Symphonia),
 [rusqlite](https://github.com/rusqlite/rusqlite) and the [OpenSubsonic](https://opensubsonic.netlify.app/) API.
+
+---
+
+<div align="center">
+<sub><code>ASPHONIX//</code> &nbsp;The player for audio enthusiasts.</sub>
+</div>
