@@ -49,6 +49,39 @@ pub struct ArtCache {
 
 pub type ArtHandle = Rc<RefCell<ArtCache>>;
 
+/// Cover loads run on their own threads, not on GPUI's shared background pool: a `art_get` blocks (network, disk, decode) and
+/// must never occupy a pool thread a page query (`browse_get_*`, scroll restore) is waiting for. One thread per loader slot.
+fn run_on_art_thread<T: Send + 'static>(job: impl FnOnce() -> T + Send + 'static) -> futures::channel::oneshot::Receiver<T> {
+    type Job = Box<dyn FnOnce() + Send>;
+    static POOL: std::sync::OnceLock<std::sync::mpsc::Sender<Job>> = std::sync::OnceLock::new();
+    let tx = POOL.get_or_init(|| {
+        let (tx, rx) = std::sync::mpsc::channel::<Job>();
+        let rx = Arc::new(std::sync::Mutex::new(rx));
+        for i in 0..MAX_WORKERS {
+            let rx = rx.clone();
+            let _ = std::thread::Builder::new().name(format!("art-loader-{i}")).spawn(move || {
+                loop {
+                    let job = rx.lock().unwrap_or_else(|p| p.into_inner()).recv();
+                    match job {
+                        // a panicking decode must not take the thread with it (unwinding builds only; release aborts):
+                        // its oneshot is dropped, the awaiting loader sees `Canceled` -> no image, the thread stays
+                        Ok(job) => {
+                            let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(job));
+                        }
+                        Err(_) => break,
+                    }
+                }
+            });
+        }
+        tx
+    });
+    let (done, rx) = futures::channel::oneshot::channel();
+    let _ = tx.send(Box::new(move || {
+        let _ = done.send(job());
+    }));
+    rx
+}
+
 pub fn new_handle(cap_bytes: usize) -> ArtHandle {
     Rc::new(RefCell::new(ArtCache::new(cap_bytes)))
 }
@@ -279,7 +312,7 @@ pub fn cover_bucket<V: 'static>(
                         break;
                     };
                     let (b, key) = (backend.clone(), sid2.to_string());
-                    let img = cx.background_executor().spawn(async move { b.art_get(&key, bucket).ok().and_then(render_image) }).await;
+                    let img = run_on_art_thread(move || b.art_get(&key, bucket).ok().and_then(render_image)).await.ok().flatten();
                     let _ = cx.update(|window, cx| {
                         let plan = {
                             let mut a = art2.borrow_mut();
@@ -381,6 +414,17 @@ mod tests {
         }
         let order: Vec<_> = std::iter::from_fn(|| c.pop()).map(|k| k.0.to_string()).collect();
         assert_eq!(order, ["a", "b", "c"]);
+    }
+
+    #[test]
+    fn art_threads_survive_panicking_jobs() {
+        let panics: Vec<_> = (0..MAX_WORKERS + 1).map(|_| run_on_art_thread(|| -> u32 { panic!("bad image") })).collect();
+        for rx in panics {
+            assert!(futures::executor::block_on(rx).is_err(), "a panicked job resolves as Canceled, not a hang");
+        }
+        let ok: Vec<_> = (0..MAX_WORKERS * 2).map(|i| run_on_art_thread(move || i)).collect();
+        let got: Vec<_> = ok.into_iter().map(|rx| futures::executor::block_on(rx).unwrap()).collect();
+        assert_eq!(got, (0..MAX_WORKERS * 2).collect::<Vec<_>>(), "the pool still runs jobs after more panics than threads");
     }
 
     #[test]

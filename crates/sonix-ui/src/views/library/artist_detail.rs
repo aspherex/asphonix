@@ -25,12 +25,50 @@ use sonix_api::*;
 use std::cell::Cell;
 use std::rc::Rc;
 
+/// What the last visit of an artist showed (session only, newest last, at most [`CACHE_MAX`] artists): a revisit paints the
+/// header, popular tracks and bio at once and the (SQLite-cached, 7-day) queries only refresh them behind it, instead of
+/// every visit starting from skeletons. The backend stays the source of truth: every arrival replaces the entry.
+#[derive(Default, Clone)]
+struct Seen {
+    detail: Option<ArtistDetail>,
+    top: Option<ArtistTopTracks>,
+    info: Option<ArtistInfo>,
+}
+const CACHE_MAX: usize = 12;
+thread_local! {
+    static SEEN: std::cell::RefCell<Vec<(String, Seen)>> = const { std::cell::RefCell::new(Vec::new()) };
+}
+fn seen_get(id: &str) -> Seen {
+    SEEN.with(|c| c.borrow().iter().find(|(k, _)| k == id).map(|(_, v)| v.clone()).unwrap_or_default())
+}
+fn seen_put(id: &str, f: impl FnOnce(&mut Seen)) {
+    SEEN.with(|c| {
+        let mut c = c.borrow_mut();
+        let mut e = match c.iter().position(|(k, _)| k == id) {
+            Some(i) => c.remove(i).1,
+            None => Seen::default(),
+        };
+        f(&mut e);
+        c.push((id.to_string(), e));
+        if c.len() > CACHE_MAX {
+            c.remove(0);
+        }
+    });
+}
+/// A failed query evicts the entry: the next visit starts from skeletons and shows the web's error state, not a page the
+/// backend no longer serves (artist gone after a sync, offline).
+fn seen_remove(id: &str) {
+    SEEN.with(|c| c.borrow_mut().retain(|(k, _)| k != id));
+}
+
 pub struct ArtistDetailView {
     ctx: Ctx,
     id: String,
     detail: Option<ArtistDetail>,
     loading: bool,
     error: bool,
+    /// `detail` was painted from [`SEEN`] and its query has not answered yet
+    detail_cached: bool,
     top: Option<ArtistTopTracks>,
     top_pending: bool,
     info: Option<ArtistInfo>,
@@ -67,16 +105,18 @@ impl ArtistDetailView {
         }));
         let p = ctx.player.read(cx);
         let (current, playing) = (p.current_id().map(str::to_string), p.playing());
+        let seen = seen_get(&id);
         let mut this = Self {
             ctx,
             id,
-            detail: None,
-            loading: true,
+            loading: seen.detail.is_none(),
+            detail_cached: seen.detail.is_some(),
+            detail: seen.detail,
             error: false,
-            top: None,
-            top_pending: true,
-            info: None,
-            info_pending: true,
+            top_pending: seen.top.is_none(),
+            top: seen.top,
+            info_pending: seen.info.is_none(),
+            info: seen.info,
             bio_expanded: false,
             selected_top: None,
             flow_btn: Rc::new(Cell::new(Bounds::default())),
@@ -98,15 +138,27 @@ impl ArtistDetailView {
     fn load_local(&mut self, cx: &mut Context<Self>) {
         let (b, id) = (self.ctx.backend.clone(), self.id.clone());
         cx.spawn(async move |this, cx| {
+            let id2 = id.clone();
             let d = cx.background_executor().spawn(async move { b.browse_get_artist(&id) }).await;
+            match &d {
+                Ok(d) => seen_put(&id2, |s| s.detail = Some(d.clone())),
+                Err(_) => seen_remove(&id2),
+            }
             let _ = this.update(cx, |t, cx| {
                 match d {
                     Ok(d) => {
                         t.detail = Some(d);
                         t.error = false;
                     }
-                    Err(_) => t.error = true,
+                    Err(_) => {
+                        t.error = true;
+                        // `load()` nulls `detail` before querying: a failed revisit shows ARTIST UNAVAILABLE, not the cache
+                        if t.detail_cached {
+                            t.detail = None;
+                        }
+                    }
                 }
+                t.detail_cached = false;
                 t.loading = false;
                 cx.notify();
             });
@@ -119,7 +171,12 @@ impl ArtistDetailView {
         let (b, id) = (self.ctx.backend.clone(), self.id.clone());
         let (b2, id2) = (b.clone(), id.clone());
         cx.spawn(async move |this, cx| {
+            let id3 = id.clone();
             let r = cx.background_executor().spawn(async move { b.browse_get_artist_top_tracks(&id) }).await;
+            match &r {
+                Ok(r) => seen_put(&id3, |s| s.top = Some(r.clone())),
+                Err(_) => seen_put(&id3, |s| s.top = None),
+            }
             let _ = this.update(cx, |t, cx| {
                 t.top = r.ok();
                 t.top_pending = false;
@@ -128,7 +185,12 @@ impl ArtistDetailView {
         })
         .detach();
         cx.spawn(async move |this, cx| {
+            let id4 = id2.clone();
             let r = cx.background_executor().spawn(async move { b2.browse_get_artist_info(&id2) }).await;
+            match &r {
+                Ok(r) => seen_put(&id4, |s| s.info = Some(r.clone())),
+                Err(_) => seen_put(&id4, |s| s.info = None),
+            }
             let _ = this.update(cx, |t, cx| {
                 t.info = r.ok();
                 t.info_pending = false;
@@ -542,5 +604,29 @@ impl Render for ArtistDetailView {
         };
         let _ = BODY_MD;
         self.page.wrap(window, &th, "artist-scroll", content)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn ids() -> Vec<String> {
+        SEEN.with(|c| c.borrow().iter().map(|(k, _)| k.clone()).collect())
+    }
+
+    #[test]
+    fn seen_cache_is_capped_lru_and_failures_evict() {
+        for i in 0..CACHE_MAX + 3 {
+            seen_put(&format!("a{i}"), |_| {});
+        }
+        assert_eq!(ids().len(), CACHE_MAX);
+        assert_eq!(ids()[0], "a3", "the oldest artists fall out first");
+        seen_put("a3", |_| {});
+        assert_eq!(ids().last().map(String::as_str), Some("a3"), "a revisit makes the entry newest");
+        seen_remove("a3");
+        assert!(!ids().contains(&"a3".to_string()));
+        let s = seen_get("a3");
+        assert!(s.detail.is_none() && s.top.is_none() && s.info.is_none());
     }
 }

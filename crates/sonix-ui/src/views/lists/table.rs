@@ -425,6 +425,7 @@ pub fn refresh_visible(&mut self, cx: &mut Context<Self>) {
         let idx_cell = pid(
             format!("track.row.{ix}.idx"),
             div()
+                .id(("lidxc", ix))
                 .relative()
                 .w(px(tr::IDX_W))
                 .flex_none()
@@ -433,6 +434,15 @@ pub fn refresh_visible(&mut self, cx: &mut Context<Self>) {
                 .justify_center()
                 .gap(px(2.))
                 .text_color(th.muted)
+                // `.idx-play:hover` (TrackRow.svelte): only the index cell, not the whole row (see views/tracks.rs)
+                .on_hover(cx.listener(move |this, h: &bool, _, cx| {
+                    if *h {
+                        this.hover_row = Some(ix);
+                    } else if this.hover_row == Some(ix) {
+                        this.hover_row = None;
+                    }
+                    cx.notify();
+                }))
                 .child(if active {
                     now_playing_bars(&th, self.playing).into_any_element()
                 } else {
@@ -531,14 +541,6 @@ pub fn refresh_visible(&mut self, cx: &mut Context<Self>) {
             .child(pid(format!("track.row.{ix}.more"), more))
             .when(active, |d| d.child(div().absolute().left_0().top_0().bottom_0().w(px(tr::ACTIVE_BAR_W)).bg(th.accent_fg)))
             .when(selected, |d| d.child(div().absolute().top_0().left_0().size_full().border_1().border_color(th.accent_fg)))
-            .on_hover(cx.listener(move |this, h: &bool, _, cx| {
-                if *h {
-                    this.hover_row = Some(ix);
-                } else if this.hover_row == Some(ix) {
-                    this.hover_row = None;
-                }
-                cx.notify();
-            }))
             .on_click(cx.listener(move |this, ev: &ClickEvent, window, cx| {
                 if ev.click_count() >= 2 {
                     cx.emit(TableEvent::Play(ix));
