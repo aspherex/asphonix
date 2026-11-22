@@ -50,3 +50,5 @@ cpal = "0.15"
 [dev-dependencies]
 minisign = "0.7"
 proptest.workspace = true
+# virtual time (`#[tokio::test(start_paused = true)]`) for timeout tests
+tokio = { workspace = true, features = ["test-util", "macros", "rt", "io-util"] }
