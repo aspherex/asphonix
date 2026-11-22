@@ -110,7 +110,12 @@ fn initial_seed() -> u32 {
 
 impl TrackPage {
     pub fn new(kind: PageKind, backend: Arc<dyn Backend>, art: ArtHandle, player: &Entity<PlayerModel>, menu: &Entity<ContextMenu>, cx: &mut Context<Self>) -> Self {
-        let table = cx.new(|cx| Table::new(backend.clone(), player, table_cfg(&kind, false), cx));
+        let table = cx.new(|cx| {
+            let mut t = Table::new(backend.clone(), player, table_cfg(&kind, false), cx);
+            // native-only: the loading skeleton embeds the table; until `playlists_get` fills it, skeleton rows, not the empty text
+            t.pending = matches!(kind, PageKind::Playlist(_));
+            t
+        });
         // native-only play-button state: repaint when the loaded track / status / source changes
         let subs = vec![cx.subscribe(&table, Self::on_table), cx.subscribe(player, |_, _, _: &crate::app::PlayerEvent, cx| cx.notify())];
         let mut this = Self {

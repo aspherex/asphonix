@@ -105,6 +105,9 @@ pub struct Table {
     hover_row: Option<usize>,
     body_bounds: Rc<Cell<Bounds<Pixels>>>,
     last_width: f32,
+    /// Native-only: the owner's rows are still on their way (a playlist page before `set_local`), so skeleton rows show
+    /// instead of the empty text of the initial empty local list. Cleared by every `set_*`.
+    pub pending: bool,
     _subs: Vec<Subscription>,
 }
 
@@ -135,6 +138,7 @@ impl Table {
             hover_row: None,
             body_bounds: Rc::new(Cell::new(Bounds::default())),
             last_width: 1440.0,
+            pending: false,
             _subs: subs,
         }
     }
@@ -142,16 +146,19 @@ impl Table {
     // ------------------------------------------------------------ data
     pub fn set_local(&mut self, rows: Vec<RowItem>, cx: &mut Context<Self>) {
         self.data = Data::Local { rows };
+        self.pending = false;
         self.vis = 0..0;
         cx.notify();
     }
     pub fn set_local_keep_scroll(&mut self, rows: Vec<RowItem>, cx: &mut Context<Self>) {
         self.data = Data::Local { rows };
+        self.pending = false;
         cx.notify();
     }
 
     pub fn set_paged(&mut self, fetch: Fetch, cx: &mut Context<Self>) {
         self.data = Data::Paged { pager: Pager::default(), fetch, loaded: false };
+        self.pending = false;
         self.sel.clear();
         self.list.scroll_to_item(0, ScrollStrategy::Top);
         self.vis = 0..0;
@@ -171,13 +178,21 @@ impl Table {
             let r = cx.background_executor().spawn(async move { fetch(&*b, page * PAGE, PAGE) }).await;
             let _ = this.update(cx, |t, cx| {
                 let centre = t.vis.start;
-                if let Data::Paged { pager, loaded, .. } = &mut t.data
-                    && let Ok(p) = r
-                    && pager.insert(epoch, page, p.items, centre)
-                {
-                    pager.total = p.total;
-                    *loaded = true;
-                    cx.notify();
+                let Data::Paged { pager, loaded, .. } = &mut t.data else { return };
+                match r {
+                    Ok(p) => {
+                        if pager.insert(epoch, page, p.items, centre) {
+                            pager.total = p.total;
+                            *loaded = true;
+                            cx.notify();
+                        }
+                    }
+                    // a failed current query still settles the first load: the empty text, not skeleton rows forever
+                    Err(_) if epoch == pager.epoch && !*loaded => {
+                        *loaded = true;
+                        cx.notify();
+                    }
+                    Err(_) => {}
                 }
             });
         })
@@ -191,10 +206,11 @@ impl Table {
         }
     }
     pub fn loaded(&self) -> bool {
-        match &self.data {
-            Data::Local { .. } => true,
-            Data::Paged { loaded, .. } => *loaded,
-        }
+        !self.pending
+            && match &self.data {
+                Data::Local { .. } => true,
+                Data::Paged { loaded, .. } => *loaded,
+            }
     }
     pub fn item(&self, ix: usize) -> Option<&RowItem> {
         match &self.data {
