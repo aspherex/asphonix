@@ -39,13 +39,19 @@ a workflow artifact, without creating a release.
 Without this, releases are built unsigned and the in-app updater stays off in those builds (the pipeline warns).
 
 1. **Key pair** (keep the secret key and a backup outside the repository; installed apps trust only this public key,
-   losing it means every user has to reinstall by hand):
+   losing it means every user has to reinstall by hand). With `rsign2` (`cargo install rsign2 --locked`, the
+   minisign-compatible tool the pipeline signs with):
 
    ```
-   minisign -G -W -p asphonix.pub -s asphonix.key
+   rsign generate -W -p asphonix.pub -s asphonix.key
    ```
 
    `-W` creates the key without a password: CI cannot answer a prompt, the repository secret store is the protection.
+
+   **Current key** (set up 2026-11-23): key id `1FA0ED03DFB7014A`, public key
+   `RWRKAbffA+2gH9c3M74HQ+jRTUR8lP8oc1CvH+Hq6nNpPQet2WueXPkV`. The secret key is stored in the repository secret
+   `MINISIGN_SECRET_KEY` and on the maintainer's machine; GitHub never shows a secret again, so that local copy and
+   its backup are the only way to sign outside CI or to recover.
 2. **Releases repository** (recommended while the source repository is private, because assets of a private repository
    cannot be downloaded without a login): a public repository holding only installers, signatures and feeds, like
    `sonix-releases` for the Tauri app. Create a fine-grained token with *Contents: read and write* on that repository

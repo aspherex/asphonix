@@ -17,7 +17,7 @@
 #   vars.ASPHONIX_UPDATE_ENDPOINT   HTTPS URL of latest.json, e.g.
 #                                   https://github.com/<owner>/<releases-repo>/releases/latest/download/latest.json
 #   vars.ASPHONIX_UPDATE_PUBKEY     base64 of the whole minisign .pub file (base64 -w0 asphonix.pub)
-#   secrets.MINISIGN_SECRET_KEY     the minisign secret key file content (created with `minisign -G -W`, i.e. without a
+#   secrets.MINISIGN_SECRET_KEY     the minisign secret key file content (created with `rsign generate -W`, i.e. without a
 #                                   password: the secret store is the protection)
 #   vars.ASPHONIX_RELEASES_REPO     owner/name of a public releases repository (mirror job), plus
 #   secrets.RELEASES_REPO_TOKEN     a fine-grained token with "Contents: read and write" on that repository only
@@ -255,16 +255,17 @@ jobs:
             exit 0
           fi
           [[ -n "$PUBKEY_B64" ]] || { echo "::error::MINISIGN_SECRET_KEY is set but vars.ASPHONIX_UPDATE_PUBKEY is not"; exit 1; }
-          sudo apt-get update -qq && sudo apt-get install -y -qq minisign >/dev/null
+          # rsign2 (minisign-compatible, pure Rust): the tool and version the key was created and tested with.
+          cargo install rsign2 --version 0.6.7 --locked --quiet
           umask 077
           key="$RUNNER_TEMP/asphonix.key"
           printf '%s\n' "$MINISIGN_SECRET_KEY" > "$key"
-          # `< /dev/null`: a password-protected key fails here instead of waiting for a prompt.
-          minisign -S -s "$key" -m "dist/$setup" -x "dist/$setup.sig" -t "version:$VERSION" < /dev/null
+          # -W: the key has no password; `< /dev/null` makes a password-protected key fail instead of waiting.
+          rsign sign -W -s "$key" -t "version:$VERSION" -x "dist/$setup.sig" "dist/$setup" < /dev/null
           rm -f "$key"
           # Verify exactly like the updater: the public key the builds trust, and the signed version.
           printf '%s' "$PUBKEY_B64" | base64 -d > "$RUNNER_TEMP/asphonix.pub"
-          minisign -V -p "$RUNNER_TEMP/asphonix.pub" -m "dist/$setup" -x "dist/$setup.sig"
+          rsign verify -p "$RUNNER_TEMP/asphonix.pub" -x "dist/$setup.sig" "dist/$setup"
           grep -qx "trusted comment: version:$VERSION" "dist/$setup.sig" || { echo "::error::signed version mismatch"; exit 1; }
           # Notes for the feed: the release notes file (capped like the updater, 8 KB) or a link.
           if [[ -n "$NOTES" ]]; then
