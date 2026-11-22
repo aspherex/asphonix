@@ -73,6 +73,10 @@ pub struct Shell {
     /// Library routes (Home, Albums, ..., `views/library`): the view entity of the open route and what it needs.
     pub(crate) lib_ctx: library::Ctx,
     lib_stage: Option<gpui::AnyView>,
+    /// The route `lib_stage` was built for, and the page parked while Now Playing is open: closing Now Playing brings the
+    /// same view entity back (no remount, no re-query, scroll and loaded data intact) instead of rebuilding it.
+    lib_stage_route: Option<Route>,
+    lib_parked: Option<(Route, gpui::AnyView)>,
     last_vw: f32,
     spectrum_on: bool,
     pub(crate) suspended: bool,
@@ -182,6 +186,8 @@ impl Shell {
             rail_collapsed: false,
             lib_ctx,
             lib_stage: None,
+            lib_stage_route: None,
+            lib_parked: None,
             last_vw: 1440.0,
             spectrum_on: false,
             suspended: false,
@@ -486,7 +492,16 @@ impl Shell {
         self.queue_drawer = false;
         let route = self.router.current().clone();
         library::entity_link::set_current(&route);
-        self.lib_stage = library::stage_for(&route, &self.lib_ctx, cx);
+        let prev = self.lib_stage.take().zip(self.lib_stage_route.take());
+        if route == Route::NowPlaying {
+            self.lib_parked = prev.map(|(v, r)| (r, v));
+        } else {
+            self.lib_stage = match self.lib_parked.take() {
+                Some((r, v)) if r == route => Some(v),
+                _ => library::stage_for(&route, &self.lib_ctx, cx),
+            };
+            self.lib_stage_route = self.lib_stage.as_ref().map(|_| route.clone());
+        }
         let on_np = *self.router.current() == Route::NowPlaying;
         self.np.update(cx, |n, cx| n.set_visible(on_np, cx));
         cx.notify();
