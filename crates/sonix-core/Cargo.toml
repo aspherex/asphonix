@@ -30,7 +30,7 @@ tempfile = "3"
 semver = "1"
 base64 = "0.22"
 minisign-verify = "0.3"
-sonix-mcp = { path = "../sonix-mcp" }
+sonix-mcp-protocol = { path = "../sonix-mcp-protocol" }
 
 [target.'cfg(windows)'.dependencies]
 keyring = { version = "3", features = ["windows-native"] }
@@ -48,5 +48,6 @@ keyring = { version = "3", features = ["sync-secret-service", "crypto-rust"] }
 cpal = "0.15"
 
 [dev-dependencies]
+sonix-mcp = { path = "../sonix-mcp" }
 sonix-logging = { path = "../sonix-logging", features = ["test-support"] }
 minisign = "0.7"

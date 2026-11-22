@@ -22,7 +22,6 @@ workspace = true
 
 [dependencies]
 serde_json.workspace = true
-sha2 = "0.10"
-getrandom = "0.2"
+sonix-mcp-protocol = { path = "../sonix-mcp-protocol" }
 sonix-logging = { path = "../sonix-logging" }
 tracing.workspace = true

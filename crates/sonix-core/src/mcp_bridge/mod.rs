@@ -20,7 +20,7 @@ use std::time::Duration;
 
 use serde::Deserialize;
 use serde_json::{json, Value};
-use sonix_mcp::wire::{self, Discovery};
+use sonix_mcp_protocol::wire::{self, Discovery};
 
 use tokio::io::{AsyncBufRead, AsyncBufReadExt, AsyncWrite, AsyncWriteExt, BufReader};
 use tokio::sync::{watch, Semaphore};
@@ -57,7 +57,7 @@ impl Default for Limits {
     }
 }
 
-use sonix_mcp::wire::ct_eq;
+use sonix_mcp_protocol::wire::ct_eq;
 
 /// The two secrets of one enable (both also in `mcp.json`): `token` is what
 /// clients must present; `server_key` is what this app proves it knows
@@ -68,7 +68,7 @@ pub struct Keys {
     pub server_key: String,
 }
 
-/// Async twin of `sonix_mcp::wire::read_line_capped`.
+/// Async twin of `sonix_mcp_protocol::wire::read_line_capped`.
 async fn read_line_capped<R: AsyncBufRead + Unpin>(r: &mut R, max: usize) -> std::io::Result<Option<String>> {
     use std::io::{Error, ErrorKind};
     let mut buf: Vec<u8> = Vec::new();
@@ -133,7 +133,7 @@ fn valid_nonce(n: &str) -> bool {
     (32..=256).contains(&n.len()) && n.bytes().all(|b| b.is_ascii_hexdigit())
 }
 
-/// The handshake (`sonix_mcp::wire` module doc): hello + nonce -> proof ->
+/// The handshake (`sonix_mcp_protocol::wire` module doc): hello + nonce -> proof ->
 /// token. `Ok(())` = authenticated; `Err(reply)` = send it and close.
 async fn authenticate<R, W>(r: &mut R, w: &mut W, keys: &Keys, limits: &Limits) -> Result<(), Value>
 where

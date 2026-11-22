@@ -13,7 +13,7 @@ use chrono::{Local, LocalResult, NaiveDate, NaiveDateTime, SecondsFormat, TimeZo
 use rand::seq::SliceRandom;
 use serde::Deserialize;
 use serde_json::{json, Map, Value};
-use sonix_mcp::catalog::MAX_PAGE;
+use sonix_mcp_protocol::catalog::MAX_PAGE;
 
 use crate::audio::output::VOLUME_RANGE_DB;
 use crate::audio::{EngineCommand, EngineRequestError};
@@ -82,7 +82,7 @@ fn args_of<T: for<'de> Deserialize<'de>>(args: &Value) -> Result<T, String> {
 
 /// Runs one tool. Unknown names and gated control tools are errors.
 pub fn call(ctx: &Ctx, tool: &str, args: &Value) -> ToolResult {
-    let Some(def) = sonix_mcp::catalog::find(tool) else {
+    let Some(def) = sonix_mcp_protocol::catalog::find(tool) else {
         return Err(format!("{UNKNOWN_TOOL_PREFIX}: {tool}"));
     };
     if !args.is_object() {
@@ -979,7 +979,7 @@ pub(crate) mod tests {
     #[test]
     fn every_catalog_tool_has_a_handler() {
         let f = Fixture::new();
-        for t in sonix_mcp::catalog::tools() {
+        for t in sonix_mcp_protocol::catalog::tools() {
             // `{}` is invalid for some tools (missing args) but never "unknown tool".
             let r = f.call(true, t.name, json!({}));
             if let Err(e) = &r {
@@ -993,7 +993,7 @@ pub(crate) mod tests {
     fn control_tools_are_refused_without_the_setting_and_send_nothing() {
         let f = Fixture::new();
         let args = json!({ "positionSec": 5, "db": -10, "trackIds": ["t1"], "kind": "liked" });
-        for t in sonix_mcp::catalog::tools().into_iter().filter(|t| t.control) {
+        for t in sonix_mcp_protocol::catalog::tools().into_iter().filter(|t| t.control) {
             let e = f.call(false, t.name, args.clone()).unwrap_err();
             assert_eq!(e, CONTROL_DISABLED, "{}", t.name);
         }

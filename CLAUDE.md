@@ -38,6 +38,8 @@ SONIX is a native GPUI desktop player for Navidrome/Subsonic. See README.md for 
   separate entities so the 4 Hz position tick re-renders only the dock/Now Playing; animated elements render in
   one live layer (`live.rs`) so the rest of the frame stays cached (`part.rs`).
 - `sonix-mcp`: stdio MCP server that connects to the running app's bridge.
+- `sonix-mcp-protocol`: discovery file, handshake, line format and tool catalog; `sonix-core::mcp_bridge` and
+  `sonix-mcp` both depend on it (core uses `sonix-mcp` only in tests).
 - `sonix-logging`: the only crate that installs a `tracing` subscriber (`init` in both binaries); every other crate just
   emits `tracing` events. Files: `<data dir>/logs/sonix.YYYY-MM-DD.jsonl` and `sonix-mcp.*.jsonl`, 7 days kept.
   Log any URL through `sonix_core::redact::redact_url` (Subsonic auth is in the query string); never log

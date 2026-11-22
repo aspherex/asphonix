@@ -5618,6 +5618,7 @@ dependencies = [
  "serde_json",
  "sonix-logging",
  "sonix-mcp",
+ "sonix-mcp-protocol",
  "symphonia",
  "tempfile",
  "thiserror 1.0.69",
@@ -5645,11 +5646,19 @@ dependencies = [
 name = "sonix-mcp"
 version = "0.1.0"
 dependencies = [
+ "serde_json",
+ "sonix-logging",
+ "sonix-mcp-protocol",
+ "tracing",
+]
+
+[[package]]
+name = "sonix-mcp-protocol"
+version = "0.1.0"
+dependencies = [
  "getrandom 0.2.17",
  "serde_json",
  "sha2 0.10.9",
- "sonix-logging",
- "tracing",
 ]
 
 [[package]]

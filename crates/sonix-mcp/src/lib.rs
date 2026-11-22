@@ -3,10 +3,10 @@
 //! (`wire`, `client`). The bridge holds no library logic: every `tools/call`
 //! is forwarded to the running SONIX app, which validates and gates it.
 
-pub mod catalog;
+pub use sonix_mcp_protocol::catalog;
 pub mod client;
 pub mod stdio;
-pub mod wire;
+pub use sonix_mcp_protocol::wire;
 
 use std::path::PathBuf;
 use std::time::Duration;
