@@ -1,0 +1,23 @@
+[package]
+name = "asphonix-mcp"
+version.workspace = true
+description = "MCP (Model Context Protocol) stdio bridge to a running ASPHONIX app"
+edition = "2021"
+publish.workspace = true
+license.workspace = true
+repository.workspace = true
+
+# The app side of the bridge is `asphonix-core/src/mcp_bridge`.
+
+[lib]
+name = "asphonix_mcp"
+path = "src/lib.rs"
+
+[[bin]]
+name = "asphonix-mcp"
+path = "src/main.rs"
+
+[dependencies]
+serde_json = "1"
+sha2 = "0.10"
+getrandom = "0.2"

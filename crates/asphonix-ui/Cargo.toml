@@ -1,0 +1,31 @@
+[package]
+name = "asphonix-ui"
+version.workspace = true
+edition.workspace = true
+publish.workspace = true
+license.workspace = true
+repository.workspace = true
+description.workspace = true
+
+[[bin]]
+name = "asphonix"
+path = "src/main.rs"
+
+[dependencies]
+asphonix-api = { path = "../asphonix-api" }
+asphonix-real = { path = "../asphonix-real" }
+gpui.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+futures = "0.3"
+unicode-segmentation = "1"
+raw-window-handle = "0.6"
+log = "0.4"
+image = { version = "0.25.1", default-features = false, features = ["png"] }
+
+[features]
+# Heap accounting for memory work (counting allocator + big-allocation backtraces). Never in a release build.
+memprof = []
+
+[build-dependencies]
+embed-resource = "3"

@@ -1,9 +1,9 @@
-# Lint, test and build SONIX on Windows, macOS and Linux.
+# Lint, test and build ASPHONIX on Windows, macOS and Linux.
 # Every push to main / pull request: clippy + tests + release build, binaries attached to the run as artifacts.
 # A pushed tag `v*` additionally publishes the archives as a GitHub release (draft, so notes can be edited first).
 #
 # The binaries are unsigned: Windows SmartScreen and macOS Gatekeeper warn on first launch
-# (macOS: right-click -> Open, or `xattr -dr com.apple.quarantine SONIX.app`).
+# (macOS: right-click -> Open, or `xattr -dr com.apple.quarantine ASPHONIX.app`).
 name: Build
 
 on:
@@ -74,9 +74,9 @@ jobs:
         continue-on-error: ${{ runner.os != 'Windows' }}
         # short temp root: Unix socket paths are limited to ~104 bytes on macOS
         env:
-          SONIX_TEST_TMP: ${{ runner.os != 'Windows' && '/tmp/sx' || runner.temp }}
+          ASPHONIX_TEST_TMP: ${{ runner.os != 'Windows' && '/tmp/sx' || runner.temp }}
         run: |
-          if [[ -n "${SONIX_TEST_TMP:-}" ]]; then mkdir -p "$SONIX_TEST_TMP"; fi
+          if [[ -n "${ASPHONIX_TEST_TMP:-}" ]]; then mkdir -p "$ASPHONIX_TEST_TMP"; fi
           cargo test --workspace --locked
 
       - name: Release build
@@ -87,26 +87,26 @@ jobs:
           set -euo pipefail
           ver="${GITHUB_REF_NAME#v}"
           [[ "$GITHUB_REF_TYPE" == tag ]] || ver="$(git rev-parse --short HEAD)"
-          out="sonix-${ver}-${{ matrix.name }}"
+          out="asphonix-${ver}-${{ matrix.name }}"
           mkdir -p dist
           case "$RUNNER_OS" in
             Windows)
               mkdir "$out"
-              cp target/release/sonix.exe target/release/sonix-mcp.exe LICENSE README.md "$out/"
+              cp target/release/asphonix.exe target/release/asphonix-mcp.exe LICENSE README.md "$out/"
               7z a "dist/$out.zip" "$out" >/dev/null
               ;;
             macOS)
-              app="$out/SONIX.app"
+              app="$out/ASPHONIX.app"
               mkdir -p "$app/Contents/MacOS"
-              cp target/release/sonix target/release/sonix-mcp "$app/Contents/MacOS/"
+              cp target/release/asphonix target/release/asphonix-mcp "$app/Contents/MacOS/"
               cat > "$app/Contents/Info.plist" <<PLIST
           <?xml version="1.0" encoding="UTF-8"?>
           <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
           <plist version="1.0"><dict>
-            <key>CFBundleName</key><string>SONIX</string>
-            <key>CFBundleDisplayName</key><string>SONIX</string>
-            <key>CFBundleIdentifier</key><string>dev.sonix.app</string>
-            <key>CFBundleExecutable</key><string>sonix</string>
+            <key>CFBundleName</key><string>ASPHONIX</string>
+            <key>CFBundleDisplayName</key><string>ASPHONIX</string>
+            <key>CFBundleIdentifier</key><string>dev.asphonix.app</string>
+            <key>CFBundleExecutable</key><string>asphonix</string>
             <key>CFBundlePackageType</key><string>APPL</string>
             <key>CFBundleShortVersionString</key><string>${ver}</string>
             <key>LSMinimumSystemVersion</key><string>11.0</string>
@@ -116,11 +116,11 @@ jobs:
               cp LICENSE README.md "$out/"
               # Ad-hoc signature only (Apple Silicon refuses unsigned binaries); no Developer ID, no notarization.
               codesign --force --deep -s - "$app"
-              hdiutil create -volname SONIX -srcfolder "$out" -ov -format UDZO "dist/$out.dmg"
+              hdiutil create -volname ASPHONIX -srcfolder "$out" -ov -format UDZO "dist/$out.dmg"
               ;;
             Linux)
               mkdir "$out"
-              cp target/release/sonix target/release/sonix-mcp LICENSE README.md "$out/"
+              cp target/release/asphonix target/release/asphonix-mcp LICENSE README.md "$out/"
               tar -czf "dist/$out.tar.gz" "$out"
               ;;
           esac
@@ -128,7 +128,7 @@ jobs:
 
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
-          name: sonix-${{ matrix.name }}
+          name: asphonix-${{ matrix.name }}
           path: dist/*
           if-no-files-found: error
 

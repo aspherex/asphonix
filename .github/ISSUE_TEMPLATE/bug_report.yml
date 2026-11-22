@@ -19,7 +19,7 @@ body:
   - type: input
     id: version
     attributes:
-      label: SONIX version
+      label: ASPHONIX version
       description: Shown next to the logo in the title bar, e.g. v0.1.0.
     validations:
       required: true
@@ -42,7 +42,7 @@ body:
   - type: dropdown
     id: install
     attributes:
-      label: How did you install SONIX?
+      label: How did you install ASPHONIX?
       options:
         - Release archive (zip / dmg / tar.gz)
         - Built from source
@@ -113,9 +113,9 @@ body:
     attributes:
       label: Logs
       description: |
-        Crash log: `logs/crash.log` in the data directory (`%LOCALAPPDATA%\dev.sonix.app` on Windows,
-        `~/Library/Application Support/dev.sonix.app` on macOS, `~/.local/share/dev.sonix.app` on Linux).
-        A detailed trace: start SONIX with `SONIX_LOG=<file>`.
+        Crash log: `logs/crash.log` in the data directory (`%LOCALAPPDATA%\dev.asphonix.app` on Windows,
+        `~/Library/Application Support/dev.asphonix.app` on macOS, `~/.local/share/dev.asphonix.app` on Linux).
+        A detailed trace: start ASPHONIX with `ASPHONIX_LOG=<file>`.
       render: shell
   - type: textarea
     id: screenshots

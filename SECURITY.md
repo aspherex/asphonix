@@ -8,7 +8,7 @@ Only the latest release receives security fixes.
 
 Please **do not open a public issue**. Report it privately through GitHub:
 **Security > Report a vulnerability** on this repository
-([direct link](https://github.com/aspherex/sonix/security/advisories/new)).
+([direct link](https://github.com/aspherex/asphonix/security/advisories/new)).
 
 Include the affected version, your OS, what an attacker can do, and steps to reproduce. You should get a first
 answer within a week. Fixes are released as soon as they are ready, and you are credited in the advisory unless

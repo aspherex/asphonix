@@ -1,6 +1,6 @@
 # Performance
 
-SONIX treats memory, CPU and latency as features. These are the budgets every change is measured against:
+ASPHONIX treats memory, CPU and latency as features. These are the budgets every change is measured against:
 
 | Metric | Budget |
 |---|---|
@@ -21,9 +21,9 @@ Rules that keep it there:
 
 ## Measuring
 
-`scripts/perf.ps1` starts a release build with `SONIX_SCRIPT=1`. The app then drives its own timeline (idle ->
+`scripts/perf.ps1` starts a release build with `ASPHONIX_SCRIPT=1`. The app then drives its own timeline (idle ->
 scroll the whole Tracks list -> play all -> Now Playing 40 s -> back) and logs `phase ...` / `frames ...` lines to
-`SONIX_LOG`; the script samples the process tree around those phases, then minimizes and restores the window.
+`ASPHONIX_LOG`; the script samples the process tree around those phases, then minimizes and restores the window.
 It needs a signed-in profile with a library, and an otherwise idle desktop (an occluded or background window skews
 the minimize/restore and frame-pacing numbers).
 
@@ -36,12 +36,12 @@ Other diagnostics (all off unless the variable is set):
 
 | Variable | Effect |
 |---|---|
-| `SONIX_LOG=<file>` | timestamped startup/phase/backend log lines |
-| `SONIX_FPSLOG=1` | frame-interval statistics |
-| `SONIX_RCOUNT=1` | per-view render counters (needs `SONIX_LOG`) |
-| `SONIX_PAUSE_MS=<ms>` | toggle play/pause once after `<ms>` (CPU of a real pause without input) |
-| `SONIX_NOSCROLL=1` | skip the scroll phase of the scripted run |
-| `SONIX_NO_ACTIVATE=1` | show the window without activating it (test runs while the PC is in use) |
+| `ASPHONIX_LOG=<file>` | timestamped startup/phase/backend log lines |
+| `ASPHONIX_FPSLOG=1` | frame-interval statistics |
+| `ASPHONIX_RCOUNT=1` | per-view render counters (needs `ASPHONIX_LOG`) |
+| `ASPHONIX_PAUSE_MS=<ms>` | toggle play/pause once after `<ms>` (CPU of a real pause without input) |
+| `ASPHONIX_NOSCROLL=1` | skip the scroll phase of the scripted run |
+| `ASPHONIX_NO_ACTIVATE=1` | show the window without activating it (test runs while the PC is in use) |
 
 `scripts/mem/` holds lower-level tools: `snap.ps1` (virtual-memory region dumps at three points of the scripted run),
 `vmm.ps1` and `threads.ps1` (per-process region / thread breakdowns), and the `memprof` cargo feature (counting

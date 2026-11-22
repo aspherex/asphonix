@@ -1,0 +1,48 @@
+[package]
+name = "asphonix-core"
+version.workspace = true
+edition = "2021"
+publish.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+serde.workspace = true
+serde_json.workspace = true
+thiserror = "1"
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "time", "sync", "fs", "net"] }
+log = "0.4"
+reqwest = { version = "0.12", default-features = false, features = ["json", "gzip", "rustls-tls", "stream"] }
+url = "2"
+md-5 = "0.10"
+rand = { version = "0.8", features = ["small_rng"] }
+keyring = "3"
+futures-util = "0.3"
+rusqlite = { version = "0.31", features = ["bundled"] }
+chrono = { version = "0.4", features = ["serde"] }
+symphonia = { version = "0.5.5", features = ["flac", "wav", "aiff", "mp3", "isomp4", "aac", "vorbis", "alac", "pcm"] }
+rtrb = "0.4"
+realfft = "3.5"
+tempfile = "3"
+semver = "1"
+base64 = "0.22"
+minisign-verify = "0.3"
+asphonix-mcp = { path = "../asphonix-mcp" }
+
+[target.'cfg(windows)'.dependencies]
+keyring = { version = "3", features = ["windows-native"] }
+wasapi = "0.25"
+windows = { version = "0.62", features = ["Win32_Media_Audio", "Win32_System_Threading", "Win32_Foundation", "Foundation", "Media", "Storage_Streams", "Win32_System_WinRT", "Win32_Security", "Win32_Security_Authorization", "Win32_UI_WindowsAndMessaging", "Win32_System_LibraryLoader", "Win32_UI_Shell"] }
+
+[target.'cfg(target_os = "macos")'.dependencies]
+keyring = { version = "3", features = ["apple-native"] }
+
+[target.'cfg(target_os = "linux")'.dependencies]
+# Secret Service (GNOME Keyring / KWallet) over D-Bus; pure-Rust crypto.
+keyring = { version = "3", features = ["sync-secret-service", "crypto-rust"] }
+
+[target.'cfg(not(windows))'.dependencies]
+cpal = "0.15"
+
+[dev-dependencies]
+minisign = "0.7"
