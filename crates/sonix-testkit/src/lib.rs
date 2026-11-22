@@ -8,6 +8,7 @@
 
 pub mod fake_backend;
 pub mod fixtures;
+pub mod mock_subsonic;
 
 pub use fake_backend::{Call, FakeBackend, FakeState};
-
+pub use mock_subsonic::{MockSubsonic, Request, Response};

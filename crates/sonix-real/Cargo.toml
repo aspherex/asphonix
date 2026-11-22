@@ -22,4 +22,5 @@ log.workspace = true
 
 [dev-dependencies]
 sonix-mcp = { path = "../sonix-mcp" }
+sonix-testkit = { path = "../sonix-testkit" }
 url.workspace = true
