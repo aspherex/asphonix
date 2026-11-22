@@ -17,6 +17,7 @@ use crate::widgets::context_menu::{ContextMenu, MenuItem};
 use crate::widgets::hard_shadow;
 use crate::widgets::icon;
 use crate::widgets::ui::{Tone, badge};
+use crate::widgets::tooltip::Tip;
 use gpui::{AnyElement, ClickEvent, Context, CursorStyle, Entity, EventEmitter, IntoElement, Render, Subscription, Window, div, prelude::*, px};
 use sonix_api::format as fmt;
 use sonix_api::*;
@@ -668,7 +669,7 @@ impl Render for TrackPage {
         info = info.child(pid("pl.stats", stats));
         if let PageKind::Smart(_) = &self.kind {
             let s = self.smart.as_ref().unwrap();
-            info = info.child(div().flex().min_w_0().child(txt(&th, MONO_CODE, super::smart_rules::describe_smart(&s.input)).color(th.muted).ellipsis()));
+            info = info.child(div().id("pg-rules").tip(super::smart_rules::describe_smart(&s.input), th).flex().min_w_0().child(txt(&th, MONO_CODE, super::smart_rules::describe_smart(&s.input)).color(th.muted).ellipsis()));
         }
 
         // ---- actions
@@ -684,13 +685,13 @@ impl Render for TrackPage {
             .child(pid("pl.btn.shuffle", sec_btn("pg-shuffle", &th, "shuffle", "SHUFFLE", empty).when(!empty, |b| b.on_click(cx.listener(|this, _, _, cx| this.play_source(None, true, cx))))))
             .child(pid(
                 "pl.btn.flow",
-                sec_btn("pg-flow", &th, "sliders", "FLOW", empty).relative().child(crate::flow::bounds_probe(self.flow_btn.clone())).when(!empty, |b| b.on_click(cx.listener(|this, _, window, cx| this.open_flow(window, cx)))),
+                sec_btn("pg-flow", &th, "sliders", "FLOW", empty).tip("Order by tempo, key and genre, keeping bit-perfect playback", th).relative().child(crate::flow::bounds_probe(self.flow_btn.clone())).when(!empty, |b| b.on_click(cx.listener(|this, _, window, cx| this.open_flow(window, cx)))),
             ));
         match &self.kind {
             PageKind::Playlist(_) => {
                 actions = actions
-                    .child(pid("pl.btn.rename", icon_btn40("pg-rename", &th, "edit", ro).when(!ro, |b| b.on_click(cx.listener(|this, _, _, cx| this.rename(cx))))))
-                    .child(pid("pl.btn.delete", icon_btn40("pg-delete", &th, "trash", ro).when(!ro, |b| b.on_click(cx.listener(|this, _, _, cx| this.delete(cx))))))
+                    .child(pid("pl.btn.rename", icon_btn40("pg-rename", &th, "edit", ro).tip(if ro { "Read-only playlist" } else { "Rename" }, th).when(!ro, |b| b.on_click(cx.listener(|this, _, _, cx| this.rename(cx))))))
+                    .child(pid("pl.btn.delete", icon_btn40("pg-delete", &th, "trash", ro).tip(if ro { "Read-only playlist" } else { "Delete" }, th).when(!ro, |b| b.on_click(cx.listener(|this, _, _, cx| this.delete(cx))))))
                     .child(pid(
                         "pl.btn.more",
                         icon_btn40("pg-more", &th, "more", false).on_click(cx.listener(|this, ev: &ClickEvent, _, cx| {
@@ -719,18 +720,18 @@ impl Render for TrackPage {
                 let random = self.smart.as_ref().map(|s| s.input.sort == SmartSort::Random).unwrap_or(false);
                 let mut names = ["pl.btn.rename", "pl.btn.delete", "pl.btn.more", "pl.btn.x"].into_iter();
                 if random {
-                    actions = actions.child(pid(names.next().unwrap(), icon_btn40("pg-reroll", &th, "sync", false).on_click(cx.listener(|this, _, _, cx| {
+                    actions = actions.child(pid(names.next().unwrap(), icon_btn40("pg-reroll", &th, "sync", false).tip("Re-roll the random pick", th).on_click(cx.listener(|this, _, _, cx| {
                         this.seed = (this.seed.wrapping_mul(1_103_515_245).wrapping_add(12_345)) % 999_999 + 1;
                         this.reload(cx);
                     }))));
                 }
                 actions = actions
-                    .child(pid(names.next().unwrap(), icon_btn40("pg-edit", &th, "sliders", false).on_click(cx.listener(|this, _, _, cx| {
+                    .child(pid(names.next().unwrap(), icon_btn40("pg-edit", &th, "sliders", false).tip("Edit rules", th).on_click(cx.listener(|this, _, _, cx| {
                         if let Some(s) = this.smart.clone() {
                             cx.emit(ListsEvent::EditSmart(Some(Box::new(s))));
                         }
                     }))))
-                    .child(pid(names.next().unwrap(), icon_btn40("pg-dup", &th, "add", false).on_click(cx.listener(|this, _, _, cx| {
+                    .child(pid(names.next().unwrap(), icon_btn40("pg-dup", &th, "add", false).tip("Duplicate", th).on_click(cx.listener(|this, _, _, cx| {
                         let Some(s) = this.smart.clone() else { return };
                         let b = this.backend.clone();
                         cx.spawn(async move |this, cx| {

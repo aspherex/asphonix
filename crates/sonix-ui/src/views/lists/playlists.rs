@@ -16,6 +16,7 @@ use crate::tracking::{BODY_LG, BODY_SM, HEADLINE_MD, LABEL_CAPS, MONO_CODE, MONO
 use crate::widgets::context_menu::{ContextMenu, MenuItem};
 use crate::widgets::ui::{Tone, badge};
 use crate::widgets::{hard_shadow, icon, icon_g};
+use crate::widgets::tooltip::Tip;
 use gpui::{AnyElement, ClickEvent, Context, CursorStyle, Entity, EventEmitter, IntoElement, MouseButton, MouseDownEvent, Render, ScrollHandle, Window, div, prelude::*, px};
 use sonix_api::format as fmt;
 use sonix_api::*;
@@ -180,7 +181,7 @@ impl PlaylistsView {
             .child(div().flex().child(txt(&th, BODY_LG, title).color(th.text).ellipsis()))
             .child(div().flex().flex_col().children(wrap_lines(window, &sub, MONO_DATA, meta_w).into_iter().map(|l| txt(&th, MONO_DATA, l).color(th.muted))));
         if let Some(r) = rules {
-            meta = meta.child(div().flex().min_w_0().child(txt(&th, MONO_CODE, r).color(th.muted).ellipsis()));
+            meta = meta.child(div().id(("card-rules", key)).tip(r.clone(), th).flex().min_w_0().child(txt(&th, MONO_CODE, r).color(th.muted).ellipsis()));
         }
         if let Some(b) = badges {
             meta = meta.child(b);
@@ -212,12 +213,13 @@ impl PlaylistsView {
                     .justify_center()
                     .text_color(th.muted)
                     .hover(move |s| s.text_color(th.accent_fg))
+                    .cursor(CursorStyle::PointingHand)
                     .child(icon_g(name, lm::CARD_ICON, th.muted, th.accent_fg))
             };
             let mut actions = div().flex().flex_row().gap(px(lm::CARD_ACTIONS_GAP)).flex_none();
             if !pl.read_only {
                 let p2 = pl.clone();
-                actions = actions.child(btn("edit", "pl-rename").on_click(cx.listener(move |this, _, _, cx| {
+                actions = actions.child(btn("edit", "pl-rename").tip("Rename", th).on_click(cx.listener(move |this, _, _, cx| {
                     cx.stop_propagation();
                     let (id, name, me) = (p2.id.clone(), p2.name.clone(), cx.entity().downgrade());
                     let _ = this;
@@ -234,7 +236,7 @@ impl PlaylistsView {
                     });
                 })));
                 let p3 = pl.clone();
-                actions = actions.child(btn("trash", "pl-delete").on_click(cx.listener(move |_, _, _, cx| {
+                actions = actions.child(btn("trash", "pl-delete").tip("Delete", th).on_click(cx.listener(move |_, _, _, cx| {
                     cx.stop_propagation();
                     let (id, name, me) = (p3.id.clone(), p3.name.clone(), cx.entity().downgrade());
                     crate::overlays::confirm(cx, "Delete playlist", &format!("Delete \"{name}\"? This cannot be undone."), "Delete", true, move |cx| {
