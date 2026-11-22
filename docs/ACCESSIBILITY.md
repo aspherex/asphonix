@@ -1,6 +1,6 @@
 # Accessibility and font scaling: assessment against WCAG 2.2 AA
 
-Status: investigation (2026-11-22), code-level review of `crates/asphonix-ui` on branch `claude/v0.2-hardening`.
+Status: investigation (2026-11-22), code-level review of `crates/asphonix-ui` for v0.2.
 Nothing here was tested with a screen reader or on real hardware yet; items marked *verify* need a manual check.
 
 WCAG 2.2 is written for web content; for desktop software it is applied through W3C's
