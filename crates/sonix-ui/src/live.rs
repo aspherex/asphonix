@@ -101,11 +101,13 @@ pub struct LiveLayer {
     np: WeakEntity<NowPlayingView>,
     /// the pending redraw and when it is due
     timer: Option<(Instant, Task<()>)>,
+    /// the last paint had playing bars (recorded after this view rendered): keep their frames coming
+    saw_bars: std::rc::Rc<std::cell::Cell<bool>>,
 }
 
 impl LiveLayer {
     pub fn new(top: bool, player: &Entity<PlayerModel>, np: WeakEntity<NowPlayingView>) -> Self {
-        Self { top, player: player.clone(), np, timer: None }
+        Self { top, player: player.clone(), np, timer: None, saw_bars: Default::default() }
     }
 
     /// A redraw is scheduled (the other layer's new data rides along: both layers render with every root frame).
@@ -151,13 +153,14 @@ impl Render for LiveLayer {
         let th = crate::app::theme(cx);
         let now = crate::clock::now();
         let frozen = crate::clock::frozen();
-        let has = |f: &dyn Fn(Kind) -> bool| slots.iter().any(|s| f(s.kind));
-        let seen = kinds(&slots);
+        // The data does not depend on which slots this render sees: a page that renders after this view in the same
+        // frame (uncached in parity builds, or re-rendered in prepaint) records its slots only later, before the paint.
         let mut next: Option<f64> = None;
-        if !frozen && has(&|k| k == Kind::Bars { playing: true }) {
+        if !frozen && (slots.iter().any(animating_bars) || self.saw_bars.get()) {
             next = Some(1.0 / BARS_FPS);
         }
-        let fft = if has(&|k| matches!(k, Kind::NpSpectrum | Kind::NpMeters)) { self.np.update(cx, |np, cx| np.fft_step(cx)).ok() } else { None };
+        // `fft_step` animates only while Now Playing is shown (`spectrum_wanted`)
+        let fft = if top { None } else { self.np.update(cx, |np, cx| np.fft_step(cx)).ok() };
         if let Some(f) = &fft
             && f.animate
             && !frozen
@@ -165,24 +168,28 @@ impl Render for LiveLayer {
             let d = crate::metrics::spectrum::MIN_DRAW_MS as f64 / 1000.0;
             next = Some(next.map_or(d, |n: f64| n.min(d)));
         }
-        let rail: Option<Vec<u8>> = if has(&|k| k == Kind::RailSpectrum) {
+        let rail: Option<Vec<u8>> = if top {
             let m = self.player.read(cx);
             if m.state.status == PlaybackStatus::Stopped { None } else { m.spectrum.as_ref().map(|f| f.bands.clone()) }
         } else {
             None
         };
+        let scheduled = next.is_some();
         match next {
             // the timer wakes a little early: the redraw lands on the next vsync after it
             Some(s) => self.schedule(Duration::from_secs_f64((s - 0.002).max(0.004)), cx),
             None => self.timer = None,
         }
+        let saw_bars = self.saw_bars.clone();
         canvas(
             |_, _, _| (),
             move |_, _, window, cx| {
-                // the pages lay out (and record their slots) after this view rendered: paint what this frame recorded, and
-                // render once more when a kind of slot appeared that the data above was not prepared for
+                // paint what this frame recorded; playing bars that appeared after the render get their frames from
+                // the next render (once), which schedules them
                 let slots = snapshot(top);
-                if kinds(&slots) != seen {
+                let bars = slots.iter().any(animating_bars);
+                saw_bars.set(bars);
+                if bars && !scheduled && !frozen {
                     window.request_animation_frame();
                 }
                 for s in &slots {
@@ -218,18 +225,6 @@ impl Render for LiveLayer {
 }
 
 
-/// Which kinds of slot are present (bit set), to notice a slot the render did not prepare data for.
-fn kinds(slots: &[Slot]) -> u8 {
-    slots.iter().fold(0, |m, s| {
-        m | match s.kind {
-            Kind::Bars { playing: false } => 1,
-            Kind::Bars { playing: true } => 2,
-            Kind::RailSpectrum => 4,
-            Kind::NpSpectrum => 8,
-            Kind::NpMeters => 16,
-        }
-    })
-}
 
 /// A precise one-shot delay. GPUI's `Timer` on Windows is a WinRT thread-pool timer (~15.6 ms granularity: a 20 ms
 /// wait became 31 ms), so the layer's frame pacing sleeps on one small thread instead (`std::thread::sleep` uses a
@@ -262,4 +257,9 @@ fn delay(d: Duration) -> impl std::future::Future<Output = ()> {
             let _ = wait.await;
         }
     }
+}
+
+/// Playing bars that are (at least partly) inside their clip: only those keep the bar frames coming.
+fn animating_bars(s: &Slot) -> bool {
+    s.kind == (Kind::Bars { playing: true }) && s.bounds.intersects(&s.mask.bounds)
 }

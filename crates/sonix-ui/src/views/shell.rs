@@ -807,6 +807,7 @@ impl Render for Shell {
             // pages that left the screen keep no animated slots; the next frame re-renders everything uncached, so the
             // views still on screen record theirs again
             crate::live::clear_all();
+            crate::widgets::smooth::forget_targets();
             cx.refresh_windows();
             self.live_key = Some(live_key);
         }

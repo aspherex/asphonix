@@ -146,6 +146,7 @@ impl Scrollable {
     }
 }
 
+#[derive(Clone)]
 struct Target {
     key: usize,
     hitbox: Hitbox,
@@ -155,7 +156,10 @@ struct Target {
 thread_local! {
     static ANIMS: RefCell<HashMap<usize, Curve>> = RefCell::new(HashMap::new());
     static SETTERS: RefCell<HashMap<usize, Scrollable>> = RefCell::new(HashMap::new());
-    static TARGETS: RefCell<Vec<Target>> = const { RefCell::new(Vec::new()) };
+    /// the registered wheel targets by container. Kept across frames: a cached view (`crate::part`) that is reused
+    /// does not run its prepaint again, but its hitbox (same id) is replayed; a container that left the screen keeps
+    /// an inert entry (its hitbox is never hit again) until the stage changes (`forget_targets`).
+    static TARGETS: RefCell<HashMap<usize, Target>> = RefCell::new(HashMap::new());
     /// frame-clock time of the last wheel event each container consumed
     static LAST_WHEEL: RefCell<HashMap<usize, f64>> = RefCell::new(HashMap::new());
     /// (key, area) of the containers registered in the last frame, for keyboard scrolling
@@ -171,6 +175,11 @@ pub fn last_wheel(key: usize) -> Option<f64> {
 /// Drop every running animation (minimize).
 pub fn clear() {
     ANIMS.with(|a| a.borrow_mut().clear());
+}
+
+/// The stage changed: forget the wheel targets (the views on screen register theirs again in the next, full frame).
+pub fn forget_targets() {
+    TARGETS.with(|t| t.borrow_mut().clear());
 }
 
 /// Called from a view's `render`: advances the container's animation to the frame clock and returns the overlay that
@@ -195,7 +204,7 @@ pub fn drive(window: &mut Window, sc: Scrollable) -> AnyElement {
     canvas(
         move |b: Bounds<Pixels>, window, _| {
             let hitbox = window.insert_hitbox(b, HitboxBehavior::Normal);
-            TARGETS.with(|t| t.borrow_mut().push(Target { key, hitbox, area: f32::from(b.size.width) * f32::from(b.size.height) }));
+            TARGETS.with(|t| t.borrow_mut().insert(key, Target { key, hitbox, area: f32::from(b.size.width) * f32::from(b.size.height) }));
             SETTERS.with(|s| s.borrow_mut().insert(key, sc));
         },
         |_, _, _, _| {},
@@ -233,7 +242,7 @@ pub fn scroll_largest(delta: f32) -> bool {
 pub fn host() -> AnyElement {
     canvas(
         |_, _, _| {
-            let v = TARGETS.with(|t| std::mem::take(&mut *t.borrow_mut()));
+            let v: Vec<Target> = TARGETS.with(|t| t.borrow().values().cloned().collect());
             LAST_FRAME.with(|l| *l.borrow_mut() = v.iter().map(|t| (t.key, t.area)).collect());
             v
         },
