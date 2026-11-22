@@ -166,6 +166,7 @@ impl Installer for NsisInstaller {
         let dir = tempfile::Builder::new().prefix(&format!("sonix-{version}-updater-")).tempdir().map_err(|e| e.to_string())?.keep();
         let path = dir.join("sonix-setup.exe");
         std::fs::write(&path, bytes).map_err(|e| e.to_string())?;
+        // SAFETY: all string arguments are valid NUL-terminated wide strings that outlive the call; no window handle is passed.
         let r = unsafe { ShellExecuteW(None, w!("open"), &HSTRING::from(path.as_os_str()), w!("/P /UPDATE /R"), None, SW_SHOW) };
         if r.0 as isize <= 32 {
             return Err(std::io::Error::last_os_error().to_string());

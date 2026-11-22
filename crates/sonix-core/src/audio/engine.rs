@@ -860,11 +860,10 @@ impl Engine {
                             | EngineCommand::LoopCycle
                             | EngineCommand::RestoreSession { force: false, .. }
                     );
-                    if log::log_enabled!(log::Level::Info) {
-                        if let Some(what) = describe_queue_command(&cmd) {
+                    if log::log_enabled!(log::Level::Info)
+                        && let Some(what) = describe_queue_command(&cmd) {
                             log::info!("engine: {what}");
                         }
-                    }
                     self.handle(cmd);
                     if mutates {
                         self.tracking.queue_dirty = true;
@@ -1885,11 +1884,10 @@ impl Engine {
             Some(id) => Some(id.clone()),
             None => (self.default_id_lookup)(),
         };
-        if let (Some(key), Some((id, name))) = (&key, &*self.device_name_cache.borrow()) {
-            if key == id {
+        if let (Some(key), Some((id, name))) = (&key, &*self.device_name_cache.borrow())
+            && key == id {
                 return name.clone();
             }
-        }
         let name = self.resolve_device_name(key.as_deref());
         if let Some(key) = key {
             *self.device_name_cache.borrow_mut() = Some((key, name.clone()));
@@ -1911,11 +1909,10 @@ impl Engine {
         &mut self,
         id: &str,
     ) -> std::io::Result<Box<dyn symphonia::core::io::MediaSource>> {
-        if let Some((pid, _)) = &self.prefetched {
-            if pid == id {
+        if let Some((pid, _)) = &self.prefetched
+            && pid == id {
                 return Ok(self.prefetched.take().expect("checked above").1);
             }
-        }
         self.prefetched = None; // drops (and deletes) a stale prefetch
         self.source.open(id)
     }

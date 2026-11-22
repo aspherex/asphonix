@@ -413,12 +413,11 @@ pub fn reason(prev: &FlowTrack, cur: &FlowTrack) -> Option<FlowReason> {
         r.key_from = Some(a.label());
         r.key_to = Some(b.label());
     }
-    if let (Some(a), Some(b)) = (&prev.genre, &cur.genre) {
-        if a.eq_ignore_ascii_case(b) {
+    if let (Some(a), Some(b)) = (&prev.genre, &cur.genre)
+        && a.eq_ignore_ascii_case(b) {
             r.same_genre = Some(true);
             r.genre = Some(b.to_string());
         }
-    }
     (r != FlowReason::default()).then_some(r)
 }
 

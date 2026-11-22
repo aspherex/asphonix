@@ -340,11 +340,10 @@ fn play_source(ctx: &Ctx, args: &Value) -> ToolResult {
     ctx.player.send(cmd);
     let mut r = json!({ "ok": true, "kind": a.kind, "label": label, "poolSize": count, "mode": mode,
                         "note": "Plays as a rolling source: only the next few tracks are queued at once." });
-    if mode == crate::ipc::SourceMode::Flow {
-        if let Some(o) = r.as_object_mut() {
+    if mode == crate::ipc::SourceMode::Flow
+        && let Some(o) = r.as_object_mut() {
             o.insert("arc".into(), json!(arc));
         }
-    }
     Ok(r)
 }
 
@@ -485,11 +484,10 @@ pub fn parse_when(s: &str, is_until: bool) -> Result<i64, String> {
 fn range(since: &Option<String>, until: &Option<String>) -> Result<(Option<i64>, Option<i64>), String> {
     let s = since.as_deref().map(|v| parse_when(v, false)).transpose()?;
     let u = until.as_deref().map(|v| parse_when(v, true)).transpose()?;
-    if let (Some(s), Some(u)) = (s, u) {
-        if s >= u {
+    if let (Some(s), Some(u)) = (s, u)
+        && s >= u {
             return Err("'since' must be before 'until'".into());
         }
-    }
     Ok((s, u))
 }
 

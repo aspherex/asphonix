@@ -575,8 +575,8 @@ impl ProgressiveDownload {
         g.finished = false;
         g.error = None;
         g.gen_started = Instant::now();
-        let gen = g.generation;
-        self.shared.generation.store(gen, Ordering::SeqCst);
+        let r#gen = g.generation;
+        self.shared.generation.store(r#gen, Ordering::SeqCst);
         spawn_download_worker(
             self.shared.client.clone(),
             self.shared.url.clone(),
@@ -585,7 +585,7 @@ impl ProgressiveDownload {
             self.state.clone(),
             self.cond.clone(),
             self.shared.generation.clone(),
-            gen,
+            r#gen,
             self.shared.idle_timeout,
         );
     }

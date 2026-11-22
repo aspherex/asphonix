@@ -110,13 +110,11 @@ pub async fn check_server_queue(
         return Ok(None);
     }
     let Some(client) = client else { return Ok(None) };
-    if engine.is_started() {
-        if let Some(ps) = engine.request(EngineCommand::GetPlayerState).await {
-            if ps.status == PlaybackStatus::Playing {
+    if engine.is_started()
+        && let Some(ps) = engine.request(EngineCommand::GetPlayerState).await
+            && ps.status == PlaybackStatus::Playing {
                 return Ok(None);
             }
-        }
-    }
     let pq = match client.get_play_queue().await {
         Ok(Some(pq)) => pq,
         Ok(None) => return Ok(None),

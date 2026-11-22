@@ -62,8 +62,8 @@ impl PlayThresholdTracker {
     /// advance the accumulator, but still update the last-seen position so
     /// the next real sample's delta is measured from the right place).
     pub fn observe(&mut self, playing: bool, position_sec: f64) {
-        if playing {
-            if let Some(last) = self.last_position_sec {
+        if playing
+            && let Some(last) = self.last_position_sec {
                 let delta = position_sec - last;
                 // Only a small *forward* delta is genuine elapsed playback;
                 // anything else (backward, or a jump bigger than one tick
@@ -72,7 +72,6 @@ impl PlayThresholdTracker {
                     self.listened_sec += delta;
                 }
             }
-        }
         self.last_position_sec = Some(position_sec);
     }
 

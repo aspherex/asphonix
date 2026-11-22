@@ -162,17 +162,17 @@ async fn sync_inner(
         return Ok(SyncOutcome::CatalogUnchanged);
     }
 
-    let gen: i64 = db
+    let r#gen: i64 = db
         .get_meta(META_SYNC_GEN)?
         .and_then(|v| v.parse().ok())
         .unwrap_or(0)
         + 1;
-    write(db, progress, |tx| set_meta_tx(tx, META_SYNC_GEN, &gen.to_string()))?;
+    write(db, progress, |tx| set_meta_tx(tx, META_SYNC_GEN, &r#gen.to_string()))?;
 
     let track_total_hint = status.as_ref().and_then(|s| s.count).unwrap_or(0);
-    sync_artists(client, db, progress, gen).await?;
-    sync_albums(client, db, progress, gen).await?;
-    sync_tracks(client, db, progress, gen, track_total_hint).await?;
+    sync_artists(client, db, progress, r#gen).await?;
+    sync_albums(client, db, progress, r#gen).await?;
+    sync_tracks(client, db, progress, r#gen, track_total_hint).await?;
     sync_playlists(client, db, progress).await?;
     // Best-effort: home section caching failing shouldn't fail the whole
     // sync (the UI keeps the previous lists until the next sync).
@@ -237,7 +237,7 @@ async fn refresh_user_state(client: &Client, db: &Db, progress: &dyn SyncProgres
     Ok(())
 }
 
-async fn sync_artists(client: &Client, db: &Db, progress: &dyn SyncProgressSink, gen: i64) -> Result<(), IpcError> {
+async fn sync_artists(client: &Client, db: &Db, progress: &dyn SyncProgressSink, r#gen: i64) -> Result<(), IpcError> {
     let artists = client.get_artists().await?;
     let total = artists.len() as u64;
     progress.progress(SyncPhase::Artists, 0, total, None);
@@ -245,16 +245,16 @@ async fn sync_artists(client: &Client, db: &Db, progress: &dyn SyncProgressSink,
     // transaction.
     write(db, progress, |tx| {
         for a in &artists {
-            upsert_artist(tx, a, gen)?;
+            upsert_artist(tx, a, r#gen)?;
         }
-        tx.execute("DELETE FROM artists WHERE gen < ?1", [gen])?;
+        tx.execute("DELETE FROM artists WHERE gen < ?1", [r#gen])?;
         Ok(())
     })?;
     progress.progress(SyncPhase::Artists, total, total, None);
     Ok(())
 }
 
-async fn sync_albums(client: &Client, db: &Db, progress: &dyn SyncProgressSink, gen: i64) -> Result<(), IpcError> {
+async fn sync_albums(client: &Client, db: &Db, progress: &dyn SyncProgressSink, r#gen: i64) -> Result<(), IpcError> {
     let mut offset: u32 = 0;
     let mut current: u64 = 0;
     loop {
@@ -263,7 +263,7 @@ async fn sync_albums(client: &Client, db: &Db, progress: &dyn SyncProgressSink, 
         if n > 0 {
             write(db, progress, |tx| {
                 for a in &page {
-                    upsert_album(tx, a, gen)?;
+                    upsert_album(tx, a, r#gen)?;
                 }
                 Ok(())
             })?;
@@ -275,7 +275,7 @@ async fn sync_albums(client: &Client, db: &Db, progress: &dyn SyncProgressSink, 
         }
         offset += PAGE;
     }
-    write(db, progress, |tx| tx.execute("DELETE FROM albums WHERE gen < ?1", [gen]).map(|_| ()))?;
+    write(db, progress, |tx| tx.execute("DELETE FROM albums WHERE gen < ?1", [r#gen]).map(|_| ()))?;
     Ok(())
 }
 
@@ -283,7 +283,7 @@ async fn sync_tracks(
     client: &Client,
     db: &Db,
     progress: &dyn SyncProgressSink,
-    gen: i64,
+    r#gen: i64,
     total_hint: u64,
 ) -> Result<(), IpcError> {
     let mut offset: u32 = 0;
@@ -295,7 +295,7 @@ async fn sync_tracks(
         if n > 0 {
             write(db, progress, |tx| {
                 for s in &page {
-                    upsert_track(tx, s, gen)?;
+                    upsert_track(tx, s, r#gen)?;
                 }
                 Ok(())
             })?;
@@ -307,7 +307,7 @@ async fn sync_tracks(
         }
         offset += PAGE;
     }
-    write(db, progress, |tx| tx.execute("DELETE FROM tracks WHERE gen < ?1", [gen]).map(|_| ()))?;
+    write(db, progress, |tx| tx.execute("DELETE FROM tracks WHERE gen < ?1", [r#gen]).map(|_| ()))?;
     Ok(())
 }
 
@@ -434,18 +434,18 @@ async fn sync_playlists(client: &Client, db: &Db, progress: &dyn SyncProgressSin
 // Row UPSERTs (FTS follows via triggers, see schema.rs)
 // ---------------------------------------------------------------------------
 
-pub(super) fn upsert_artist(tx: &rusqlite::Transaction, a: &RawArtist, gen: i64) -> rusqlite::Result<()> {
+pub(super) fn upsert_artist(tx: &rusqlite::Transaction, a: &RawArtist, r#gen: i64) -> rusqlite::Result<()> {
     let rating = a.user_rating.filter(|&v| v > 0).map(|v| v.min(5));
     tx.prepare_cached(
         "INSERT INTO artists (id, name, album_count, cover_art, starred, rating, gen) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)
          ON CONFLICT(id) DO UPDATE SET name=excluded.name, album_count=excluded.album_count,
             cover_art=excluded.cover_art, starred=excluded.starred, rating=excluded.rating, gen=excluded.gen",
     )?
-    .execute(rusqlite::params![a.id, a.name, a.album_count.unwrap_or(0), a.cover_art, a.starred, rating, gen])?;
+    .execute(rusqlite::params![a.id, a.name, a.album_count.unwrap_or(0), a.cover_art, a.starred, rating, r#gen])?;
     Ok(())
 }
 
-pub(super) fn upsert_album(tx: &rusqlite::Transaction, a: &RawAlbum, gen: i64) -> rusqlite::Result<()> {
+pub(super) fn upsert_album(tx: &rusqlite::Transaction, a: &RawAlbum, r#gen: i64) -> rusqlite::Result<()> {
     let rating = a.user_rating.filter(|&v| v > 0).map(|v| v.min(5));
     tx.prepare_cached(
         "INSERT INTO albums (id, name, artist, artist_id, year, genre, cover_art, song_count, duration, starred, rating, play_count, created, gen)
@@ -469,12 +469,12 @@ pub(super) fn upsert_album(tx: &rusqlite::Transaction, a: &RawAlbum, gen: i64) -
         rating,
         a.play_count.map(|v| v as i64),
         a.created,
-        gen,
+        r#gen,
     ])?;
     Ok(())
 }
 
-pub(super) fn upsert_track(tx: &rusqlite::Transaction, s: &RawSong, gen: i64) -> rusqlite::Result<()> {
+pub(super) fn upsert_track(tx: &rusqlite::Transaction, s: &RawSong, r#gen: i64) -> rusqlite::Result<()> {
     let bit_depth = s.bit_depth.filter(|&v| v > 0);
     // Unknown is stored as 0 (the IPC field is non-optional) rather than a
     // made-up "44100 Hz / stereo": real telemetry only.
@@ -528,7 +528,7 @@ pub(super) fn upsert_track(tx: &rusqlite::Transaction, s: &RawSong, gen: i64) ->
         album_peak,
         s.path,
         s.created,
-        gen,
+        r#gen,
         s.play_count,
         s.played,
     ])?;

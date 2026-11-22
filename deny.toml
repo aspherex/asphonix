@@ -1,0 +1,48 @@
+# cargo-deny: licenses, security advisories, banned/duplicate crates, allowed sources.
+# Run locally with `cargo deny check`; CI runs the same.
+
+[graph]
+all-features = false
+
+[advisories]
+# Unmaintained crates without a safe replacement are listed explicitly with a reason.
+unmaintained = "workspace"
+yanked = "deny"
+ignore = [
+    # chrono: flagged unmaintained, no safe upgrade exists. Used only for timestamp formatting/parsing;
+    # replacement (jiff or time) is tracked as follow-up work, not a 0.2 blocker.
+    { id = "RUSTSEC-2026-0543", reason = "no safe upgrade; replacement planned" },
+]
+
+[licenses]
+confidence-threshold = 0.9
+# All permissive / weak-copyleft (file-level) licenses compatible with distributing an MIT binary.
+allow = [
+    "MIT",
+    "MIT-0",
+    "Apache-2.0",
+    "Apache-2.0 WITH LLVM-exception",
+    "BSD-2-Clause",
+    "BSD-3-Clause",
+    "0BSD",
+    "ISC",
+    "Zlib",
+    "BSL-1.0",
+    "Unicode-3.0",
+    "Unlicense",
+    "CC0-1.0",
+    "CDLA-Permissive-2.0",
+    "NCSA",
+    "MPL-2.0",
+]
+
+[bans]
+# Duplicate versions are common through GPUI's large tree; report, do not fail.
+multiple-versions = "warn"
+wildcards = "deny"
+allow-wildcard-paths = true
+
+[sources]
+unknown-registry = "deny"
+unknown-git = "deny"
+allow-registry = ["https://github.com/rust-lang/crates.io-index"]

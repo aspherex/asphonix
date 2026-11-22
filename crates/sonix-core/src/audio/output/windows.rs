@@ -227,13 +227,11 @@ fn probe_exclusive(
     if is_device_level_refusal(&direct) {
         return Err(direct);
     }
-    if wf.get_nchannels() <= 2 {
-        if let Ok(plain) = wf.to_waveformatex() {
-            if client.is_supported(&plain, &ShareMode::Exclusive).is_ok() {
+    if wf.get_nchannels() <= 2
+        && let Ok(plain) = wf.to_waveformatex()
+            && client.is_supported(&plain, &ShareMode::Exclusive).is_ok() {
                 return Ok((None, true));
             }
-        }
-    }
     let default_mask = wf.get_dwchannelmask();
     for mask in wasapi::make_channelmasks(wf.get_nchannels() as usize) {
         if mask == default_mask {
@@ -480,6 +478,7 @@ fn unsupported_format_message(device: &str, rate: u32, bit_depth: Option<u8>, ac
 fn set_mmcss_pro_audio() -> Option<windows::Win32::Foundation::HANDLE> {
     let name: Vec<u16> = "Pro Audio\0".encode_utf16().collect();
     let mut task_index: u32 = 0;
+    // SAFETY: `name` is a NUL-terminated UTF-16 buffer that outlives the call; `task_index` is a valid out-pointer.
     match unsafe { AvSetMmThreadCharacteristicsW(PCWSTR(name.as_ptr()), &mut task_index) } {
         Ok(h) => Some(h),
         Err(e) => {
@@ -718,6 +717,7 @@ fn render_thread(
     );
     let _ = stream.client.stop_stream();
     if let Some(h) = mmcss {
+        // SAFETY: `h` is the handle returned by AvSetMmThreadCharacteristicsW on this same thread and is reverted exactly once.
         let _ = unsafe { AvRevertMmThreadCharacteristics(h) };
     }
     if let Err(e) = result {

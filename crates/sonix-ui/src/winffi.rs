@@ -23,6 +23,7 @@ pub fn empty_working_set() {
         fn GetCurrentProcess() -> *mut std::ffi::c_void;
         fn K32EmptyWorkingSet(p: *mut std::ffi::c_void) -> i32;
     }
+    // SAFETY: the pseudo-handle from GetCurrentProcess is always valid for the current process.
     unsafe { K32EmptyWorkingSet(GetCurrentProcess()) };
 }
 #[cfg(not(windows))]
@@ -84,6 +85,7 @@ pub mod size_hook {
         if super::caption_passthrough(msg, w) {
             // native caption drag (modal move loop: Aero Snap, drag-restore from maximized, per-monitor DPI via
             // WM_DPICHANGED, which GPUI handles), caption double-click maximize/restore, system menu
+            // SAFETY: forwarding the unmodified message to the default window procedure for the live window `h`.
             return unsafe { DefWindowProcW(h, msg, w, l) };
         }
         match msg {
@@ -95,7 +97,9 @@ pub mod size_hook {
             // WM_NCLBUTTONUP: act like a native button (release over the button that was pressed)
             0x00A2 if NC_PRESSED.with(|p| p.get()) != 0 => {
                 let pressed = NC_PRESSED.with(|p| p.replace(0));
+                // SAFETY: `h` is the live window handle this window procedure was invoked for.
                 if pressed == w && let Some(cmd) = super::caption_button_command(w, unsafe { IsZoomed(h) } != 0) {
+                    // SAFETY: posting WM_SYSCOMMAND to our own live window; no pointers are passed.
                     unsafe { PostMessageW(h, 0x0112, cmd, 0) }; // WM_SYSCOMMAND
                 }
                 return 0;
@@ -114,11 +118,13 @@ pub mod size_hook {
                 });
             }
         }
+        // SAFETY: forwarding the unmodified message to the next subclass procedure, as the subclass contract requires.
         unsafe { DefSubclassProc(h, msg, w, l) }
     }
     /// Must be called on the UI thread with the window's HWND.
     pub fn install(hwnd: isize, f: MinimizeCallback) -> bool {
         HOOK.with(|c| *c.borrow_mut() = Some(f));
+        // SAFETY: `hwnd` is the live top-level window; `sub` is a valid extern "system" subclass procedure for the window's lifetime.
         unsafe { SetWindowSubclass(hwnd as Hwnd, sub, 1, 0) != 0 }
     }
 }
@@ -151,6 +157,7 @@ pub fn work_area_of(hwnd: isize) -> Option<(i32, i32, i32, i32)> {
         fn MonitorFromWindow(h: *mut c_void, flags: u32) -> *mut c_void;
         fn GetMonitorInfoW(m: *mut c_void, i: *mut MonitorInfo) -> i32;
     }
+    // SAFETY: the monitor handle comes from MonitorFromWindow for a live window; MonitorInfo is a local with cbSize set before the call.
     unsafe {
         let m = MonitorFromWindow(hwnd as *mut c_void, 2);
         let mut i = MonitorInfo { size: std::mem::size_of::<MonitorInfo>() as u32, monitor: [0; 4], work: [0; 4], flags: 0 };
@@ -181,6 +188,7 @@ pub fn show_no_activate(hwnd: isize, x: i32, y: i32, w: i32, ht: i32) {
         fn GetClientRect2(h: *mut c_void, r: *mut Rect) -> i32;
         fn ShowWindow(h: *mut c_void, cmd: i32) -> i32;
     }
+    // SAFETY: `h` is this process's live top-level window handle; ShowWindow has no other preconditions.
     unsafe {
         let hw = hwnd as *mut c_void;
         let ex = GetWindowLongPtrW(hw, -20);
@@ -212,6 +220,7 @@ pub fn restore_foreground(hwnd: isize) {
         fn IsIconic(h: *mut c_void) -> i32;
         fn SetForegroundWindow(h: *mut c_void) -> i32;
     }
+    // SAFETY: `h` is this process's live top-level window handle; these user32 calls only take the handle and plain integers.
     unsafe {
         let h = hwnd as *mut c_void;
         if IsIconic(h) != 0 {
@@ -244,6 +253,7 @@ pub fn show_parked_no_activate(hwnd: isize) {
         fn SetWindowPos(h: *mut c_void, after: *mut c_void, x: i32, y: i32, cx: i32, cy: i32, flags: u32) -> i32;
         fn ShowWindow(h: *mut c_void, cmd: i32) -> i32;
     }
+    // SAFETY: `h` is this process's live top-level window handle; ShowWindow has no other preconditions.
     unsafe {
         // SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE
         SetWindowPos(hwnd as *mut c_void, std::ptr::null_mut(), -30000, -30000, 0, 0, 0x0001 | 0x0004 | 0x0010);

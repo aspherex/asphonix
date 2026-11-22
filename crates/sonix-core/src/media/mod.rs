@@ -42,8 +42,8 @@ pub type BoxFut<T> = std::pin::Pin<Box<dyn std::future::Future<Output = T> + Sen
 /// longer equals `gen` (the window was re-attached) or the engine is gone. Non-Windows: no-op (macOS
 /// `MPNowPlayingInfoCenter` is not implemented yet).
 #[cfg(windows)]
-pub fn attach(host: std::sync::Arc<dyn MediaHost>, hwnd: isize, generation: std::sync::Arc<std::sync::atomic::AtomicU64>, gen: u64) {
-    windows_backend::attach(host, hwnd, generation, gen);
+pub fn attach(host: std::sync::Arc<dyn MediaHost>, hwnd: isize, generation: std::sync::Arc<std::sync::atomic::AtomicU64>, r#gen: u64) {
+    windows_backend::attach(host, hwnd, generation, r#gen);
 }
 #[cfg(not(windows))]
 pub fn attach(_host: std::sync::Arc<dyn MediaHost>, _hwnd: isize, _generation: std::sync::Arc<std::sync::atomic::AtomicU64>, _gen: u64) {}

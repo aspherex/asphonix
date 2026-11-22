@@ -4,3 +4,6 @@ perf-out/
 .idea/
 .vscode/
 .env*
+
+# perf/parity harness output
+parity/out/

@@ -39,13 +39,15 @@ struct Smtc {
 // `SystemMediaTransportControls` et al. `Send + Sync` for exactly this reason), so moving the registered
 // handle between threads and sharing it with the update task is sound.
 unsafe impl Send for Smtc {}
+// SAFETY: see the Send impl above.
 unsafe impl Sync for Smtc {}
 
 /// Runs on the window's thread (see [`super::attach`]); the update loop reads the engine's *current* state on
 /// subscribing, so a restored session still appears.
-pub fn attach(host: Arc<dyn MediaHost>, hwnd: isize, generation: Arc<AtomicU64>, gen: u64) {
+pub fn attach(host: Arc<dyn MediaHost>, hwnd: isize, generation: Arc<AtomicU64>, r#gen: u64) {
     // The UI thread normally has its apartment already (S_FALSE / RPC_E_CHANGED_MODE are fine): make sure WinRT
     // activation works here without changing an existing apartment.
+    // SAFETY: RoInitialize has no memory-safety preconditions; S_FALSE / RPC_E_CHANGED_MODE are tolerated by design.
     let _ = unsafe { RoInitialize(RO_INIT_SINGLETHREADED) };
     let smtc = match register(&host, hwnd) {
         Ok(s) => s,
@@ -56,7 +58,7 @@ pub fn attach(host: Arc<dyn MediaHost>, hwnd: isize, generation: Arc<AtomicU64>,
     };
     std::thread::Builder::new()
         .name("sonix-smtc".into())
-        .spawn(move || crate::rt::block_on(run_update_loop(host, smtc, generation, gen)))
+        .spawn(move || crate::rt::block_on(run_update_loop(host, smtc, generation, r#gen)))
         .ok();
 }
 
@@ -80,6 +82,7 @@ pub(crate) fn button_command(button: SystemMediaTransportControlsButton) -> Opti
 fn register(host: &Arc<dyn MediaHost>, hwnd: isize) -> Result<Smtc, String> {
     let interop: ISystemMediaTransportControlsInterop =
         windows::core::factory::<SystemMediaTransportControls, ISystemMediaTransportControlsInterop>().map_err(|e| e.to_string())?;
+    // SAFETY: `hwnd` is the live top-level window handle passed in by the UI for the window's lifetime.
     let controls: SystemMediaTransportControls = unsafe { interop.GetForWindow(HWND(hwnd as *mut core::ffi::c_void)) }.map_err(|e| e.to_string())?;
 
     controls.SetIsEnabled(true).map_err(|e| e.to_string())?;
@@ -120,7 +123,7 @@ fn register(host: &Arc<dyn MediaHost>, hwnd: isize) -> Result<Smtc, String> {
 }
 
 /// One `PlayerState` watch subscription, pushing updates to SMTC only when [`classify`] says something changed.
-async fn run_update_loop(host: Arc<dyn MediaHost>, smtc: Smtc, generation: Arc<AtomicU64>, gen: u64) {
+async fn run_update_loop(host: Arc<dyn MediaHost>, smtc: Smtc, generation: Arc<AtomicU64>, r#gen: u64) {
     let smtc = Arc::new(smtc);
     let Some(mut rx) = host.subscribe() else { return };
 
@@ -153,7 +156,7 @@ async fn run_update_loop(host: Arc<dyn MediaHost>, smtc: Smtc, generation: Arc<A
         if rx.changed().await.is_err() {
             break; // engine handle dropped: app shutting down.
         }
-        if generation.load(Ordering::SeqCst) != gen {
+        if generation.load(Ordering::SeqCst) != r#gen {
             break; // a newer window registered; this one is gone.
         }
     }
@@ -219,7 +222,9 @@ fn apply_metadata(host: &Arc<dyn MediaHost>, smtc: &Arc<Smtc>, state: &PlayerSta
 }
 
 struct Display(SystemMediaTransportControlsDisplayUpdater);
+// SAFETY: the display updater is a WinRT-agile COM object (free-threaded marshaling), safe to move and share across threads.
 unsafe impl Send for Display {}
+// SAFETY: see the Send impl above.
 unsafe impl Sync for Display {}
 
 /// Latest-wins queue for one in-flight thumbnail fetch: a fast track skip must never leave SMTC showing a

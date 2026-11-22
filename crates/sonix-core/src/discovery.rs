@@ -179,21 +179,19 @@ pub fn sanitize_bio(html: &str) -> Option<String> {
             "p" | "div" | "li" if closing => push_text(&mut out, &mut anchor, "\n"),
             "a" if !closing => anchor = Some(String::new()),
             "a" if closing => {
-                if let Some(text) = anchor.take() {
-                    if !is_read_more(&text) {
+                if let Some(text) = anchor.take()
+                    && !is_read_more(&text) {
                         out.push_str(&text);
                     }
-                }
             }
             _ => {}
         }
     }
     push_text(&mut out, &mut anchor, rest);
-    if let Some(text) = anchor.take() {
-        if !is_read_more(&text) {
+    if let Some(text) = anchor.take()
+        && !is_read_more(&text) {
             out.push_str(&text);
         }
-    }
     let decoded = decode_entities(&out);
     // Collapse whitespace per line, then limit blank-line runs to one.
     let mut lines: Vec<String> = Vec::new();

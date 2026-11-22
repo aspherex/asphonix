@@ -75,11 +75,10 @@ pub fn profile_account(url: &str, username: &str) -> String {
 /// from before profiles existed has no `profiles.json`). Appended at the front
 /// when missing, since it is the most recently used one.
 pub fn seed_with_active(list: &mut Vec<StoredProfile>, active: Option<&ConnectionConfig>) {
-    if let Some(cfg) = active {
-        if !list.iter().any(|p| p.matches(&cfg.url, &cfg.username)) {
+    if let Some(cfg) = active
+        && !list.iter().any(|p| p.matches(&cfg.url, &cfg.username)) {
             list.insert(0, StoredProfile::new(&cfg.url, &cfg.username));
         }
-    }
 }
 
 /// Inserts or moves the profile to the front (most recently used first).

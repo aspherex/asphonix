@@ -54,11 +54,10 @@ const LYRICS_TTL_NONE_MS: i64 = 3600 * 1000;
 
 async fn song_lyrics_supported(client: &Client) -> Option<bool> {
     let server = client.base_url().as_str().to_string();
-    if let Some((s, yes)) = SONG_LYRICS.lock().unwrap_or_else(|p| p.into_inner()).as_ref() {
-        if *s == server {
+    if let Some((s, yes)) = SONG_LYRICS.lock().unwrap_or_else(|p| p.into_inner()).as_ref()
+        && *s == server {
             return Some(*yes);
         }
-    }
     let exts = client.get_open_subsonic_extensions().await.ok()?;
     let yes = exts.iter().any(|e| e.eq_ignore_ascii_case("songLyrics"));
     *SONG_LYRICS.lock().unwrap_or_else(|p| p.into_inner()) = Some((server, yes));
@@ -98,14 +97,13 @@ async fn fetch_lyrics(client: &Client, track: &Track) -> Result<Option<Lyrics>, 
 pub async fn lyrics_get(db: &Db, client: Option<Client>, track_id: &str) -> IpcResult<Option<Lyrics>> {
     let key = format!("lyrics:{track_id}");
     let now = now_ms();
-    if let Some((json, at)) = library::discovery::cache_get(db, &key)? {
-        if let Ok(cached) = serde_json::from_str::<Option<Lyrics>>(&json) {
+    if let Some((json, at)) = library::discovery::cache_get(db, &key)?
+        && let Ok(cached) = serde_json::from_str::<Option<Lyrics>>(&json) {
             let ttl = if cached.is_some() { LYRICS_TTL_FOUND_MS } else { LYRICS_TTL_NONE_MS };
             if now >= at && now - at < ttl {
                 return Ok(cached);
             }
         }
-    }
     let Some(track) = library::get_tracks_by_ids(db, std::slice::from_ref(&track_id.to_string()))?.into_iter().next() else {
         return Ok(None);
     };
@@ -135,8 +133,8 @@ pub async fn artist_top_tracks(db: &Db, client: Option<Client>, id: &str) -> Ipc
     let parsed = entry.and_then(|(json, at)| serde_json::from_str::<CachedTop>(&json).ok().map(|c| (c, at)));
     let fresh = parsed.as_ref().map(|(c, at)| cache_is_fresh(*at, now, c.ids.is_empty())).unwrap_or(false);
     let mut ids = parsed.map(|(c, _)| c.ids).unwrap_or_default();
-    if !fresh {
-        if let Some(client) = client {
+    if !fresh
+        && let Some(client) = client {
             let name = library::get_artist_detail(db, id)?.map(|d| d.artist.name);
             if let Some(name) = name {
                 match client.get_top_songs(&name, TOP_SONGS_COUNT).await {
@@ -150,7 +148,6 @@ pub async fn artist_top_tracks(db: &Db, client: Option<Client>, id: &str) -> Ipc
                 }
             }
         }
-    }
     let local = library::get_tracks_by_ids(db, &ids)?;
     let fallback = if local.is_empty() { library::discovery::artist_most_played(db, id, TOP_SONGS_COUNT)? } else { Vec::new() };
     let (source, items) = resolve_top(&ids, local, fallback);
@@ -166,8 +163,8 @@ pub async fn artist_info(db: &Db, client: Option<Client>, id: &str) -> IpcResult
     let parsed = entry.as_ref().and_then(|(json, at)| serde_json::from_str::<CachedInfo>(json).ok().map(|c| (c, *at)));
     let fresh = parsed.as_ref().map(|(c, at)| cache_is_fresh(*at, now, c.biography.is_none() && c.similar.is_empty())).unwrap_or(false);
     let mut info = parsed.map(|(c, _)| c).unwrap_or_default();
-    if !fresh {
-        if let Some(client) = client {
+    if !fresh
+        && let Some(client) = client {
             match client.get_artist_info2(id).await {
                 Ok(raw) => {
                     info = CachedInfo {
@@ -181,14 +178,12 @@ pub async fn artist_info(db: &Db, client: Option<Client>, id: &str) -> IpcResult
                 Err(e) => log::debug!("getArtistInfo2 failed: {}", e.message),
             }
         }
-    }
     let mut similar: Vec<Artist> = Vec::new();
     for (sid, name) in &info.similar {
-        if let Some(a) = library::discovery::find_artist_by_id_or_name(db, sid.as_deref(), name)? {
-            if a.id != id && !similar.iter().any(|s| s.id == a.id) {
+        if let Some(a) = library::discovery::find_artist_by_id_or_name(db, sid.as_deref(), name)?
+            && a.id != id && !similar.iter().any(|s| s.id == a.id) {
                 similar.push(a);
             }
-        }
         if similar.len() >= MAX_SIMILAR {
             break;
         }

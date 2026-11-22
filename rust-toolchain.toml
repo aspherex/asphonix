@@ -1,0 +1,4 @@
+# Pinned so a new Clippy release cannot turn CI red on its own. Bump deliberately.
+[toolchain]
+channel = "1.99.0"
+components = ["clippy", "rustfmt"]

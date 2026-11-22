@@ -10,6 +10,9 @@ repository.workspace = true
 name = "sonix"
 path = "src/main.rs"
 
+[lints]
+workspace = true
+
 [dependencies]
 sonix-api = { path = "../sonix-api" }
 sonix-real = { path = "../sonix-real" }
@@ -19,8 +22,8 @@ serde_json.workspace = true
 futures = "0.3"
 unicode-segmentation = "1"
 raw-window-handle = "0.6"
-log = "0.4"
-image = { version = "0.25.1", default-features = false, features = ["png"] }
+log.workspace = true
+image = { workspace = true, features = ["png"] }
 
 [features]
 # Heap accounting for memory work (counting allocator + big-allocation backtraces). Never in a release build.

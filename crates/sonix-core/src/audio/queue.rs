@@ -313,11 +313,10 @@ impl Queue {
             SourceMode::Shuffle => {
                 let mut ids = dedup_keep_first(pool.clone());
                 ids.shuffle(&mut fresh_rng());
-                if let Some(start_id) = start_track_id {
-                    if let Some(pos) = ids.iter().position(|id| id == start_id) {
+                if let Some(start_id) = start_track_id
+                    && let Some(pos) = ids.iter().position(|id| id == start_id) {
                         ids.swap(0, pos);
                     }
-                }
                 ids.into()
             }
             SourceMode::InOrder => match start_track_id.and_then(|sid| pool.iter().position(|id| id == sid)) {
@@ -339,12 +338,11 @@ impl Queue {
         let round_total = remaining.len();
         let mut remaining = remaining;
         let mut opener: Option<Entry> = None;
-        if matches!(mode, SourceMode::Flow) {
-            if let Some(pos) = start_track_id.and_then(|sid| remaining.iter().position(|id| id == sid)) {
+        if matches!(mode, SourceMode::Flow)
+            && let Some(pos) = start_track_id.and_then(|sid| remaining.iter().position(|id| id == sid)) {
                 let id = remaining.remove(pos).expect("position is in range");
                 opener = Some(Entry { id, origin: QueueItemOrigin::Source });
             }
-        }
         self.source = Some(Source { kind, label, id: None, mode, arc, round_total, quota: Quota::default(), pool, remaining });
         self.recompute_flow_coverage();
         let opener_known = opener.as_ref().is_some_and(|e| self.flow.get(&e.id).is_some_and(sequence::energy_known));
@@ -531,12 +529,11 @@ impl Queue {
         if matches!(src.mode, SourceMode::Shuffle | SourceMode::Flow) {
             ids = dedup_keep_first(ids);
             ids.shuffle(&mut fresh_rng());
-            if let Some(avoid) = avoid_first {
-                if ids.len() > 1 && ids[0] == avoid {
+            if let Some(avoid) = avoid_first
+                && ids.len() > 1 && ids[0] == avoid {
                     let j = fresh_rng().gen_range(1..ids.len());
                     ids.swap(0, j);
                 }
-            }
         }
         src.round_total = ids.len();
         src.remaining = ids.into();
@@ -774,11 +771,10 @@ impl Queue {
             let current_id = self.current_id().map(str::to_string);
             self.rebuild_static_entries();
             if let Some(id) = &current_id {
-                if self.shuffle {
-                    if let Some(pos) = self.entries.iter().position(|e| &e.id == id) {
+                if self.shuffle
+                    && let Some(pos) = self.entries.iter().position(|e| &e.id == id) {
                         self.entries.swap(0, pos);
                     }
-                }
                 self.current = self.entries.iter().position(|e| &e.id == id);
             }
         }
@@ -926,13 +922,12 @@ impl Queue {
         }
         for i in 1..self.entries.len() {
             let Some(prev_artist) = self.artist_of.get(&self.entries[i - 1].id).cloned() else { continue };
-            if self.artist_of.get(&self.entries[i].id).map(String::as_str) == Some(prev_artist.as_str()) {
-                if let Some(j) = (i + 1..self.entries.len())
+            if self.artist_of.get(&self.entries[i].id).map(String::as_str) == Some(prev_artist.as_str())
+                && let Some(j) = (i + 1..self.entries.len())
                     .find(|&j| self.artist_of.get(&self.entries[j].id).map(String::as_str) != Some(prev_artist.as_str()))
                 {
                     self.entries.swap(i, j);
                 }
-            }
         }
     }
 }
@@ -1080,8 +1075,8 @@ impl Queue {
         };
         if core.source.is_none() {
             q.static_natural_order = core.static_natural_order.into_iter().filter(|id| exists(id)).collect();
-        } else if let (Some(stamp), Some(p)) = (core.source, pools) {
-            if p.stamp == stamp {
+        } else if let (Some(stamp), Some(p)) = (core.source, pools)
+            && p.stamp == stamp {
                 let pool: Vec<String> = p.pool.into_iter().filter(|id| exists(id)).collect();
                 let remaining: VecDeque<String> = p.remaining.into_iter().filter(|id| exists(id)).collect();
                 if !pool.is_empty() {
@@ -1099,7 +1094,6 @@ impl Queue {
                     });
                 }
             }
-        }
         Restored { queue: q, current_kept, dropped }
     }
 

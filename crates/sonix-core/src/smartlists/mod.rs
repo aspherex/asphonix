@@ -218,11 +218,10 @@ pub fn validate(input: &SmartInput) -> Result<(), IpcError> {
     if input.rules.len() > MAX_RULES {
         return Err(bad(format!("at most {MAX_RULES} rules")));
     }
-    if let Some(l) = input.limit {
-        if l == 0 || l > MAX_LIMIT {
+    if let Some(l) = input.limit
+        && (l == 0 || l > MAX_LIMIT) {
             return Err(bad(format!("limit must be 1-{MAX_LIMIT}")));
         }
-    }
     for r in &input.rules {
         if !allowed_ops(r.field).contains(&r.op) {
             return Err(bad(format!("operator {:?} is not valid for field {:?}", r.op, r.field)));

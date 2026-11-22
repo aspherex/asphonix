@@ -315,7 +315,7 @@ fn discovery_file_is_written_and_removed() {
 // tool handlers over an in-memory DB.
 // ---------------------------------------------------------------------------
 
-fn bind_test(dir: &std::path::Path) -> (String, impl Listener) {
+fn bind_test(dir: &std::path::Path) -> (String, impl Listener + use<>) {
     #[cfg(windows)]
     {
         let _ = dir;

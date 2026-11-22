@@ -49,10 +49,12 @@ mod win {
     }
 
     // The descriptor is immutable heap memory owned by this struct.
+    // SAFETY: the descriptor is immutable heap memory exclusively owned by this struct; no thread-affine state.
     unsafe impl Send for PipeSecurity {}
 
     impl Drop for PipeSecurity {
         fn drop(&mut self) {
+            // SAFETY: `sd` was allocated by ConvertStringSecurityDescriptorToSecurityDescriptorW (LocalAlloc) and is freed only here, once.
             unsafe {
                 let _ = LocalFree(Some(HLOCAL(self.sd.0)));
             }
@@ -60,6 +62,7 @@ mod win {
     }
 
     fn current_user_sid_string() -> io::Result<String> {
+        // SAFETY: the token handle is opened and closed in this block; all buffers passed to the token/SID APIs are sized from the API's own length query and outlive the calls.
         unsafe {
             let mut token = HANDLE::default();
             OpenProcessToken(GetCurrentProcess(), TOKEN_QUERY, &mut token).map_err(io::Error::other)?;
@@ -91,6 +94,7 @@ mod win {
             let sddl = format!("D:P(A;;GA;;;{})", current_user_sid_string()?);
             let wide: Vec<u16> = sddl.encode_utf16().chain(std::iter::once(0)).collect();
             let mut sd = PSECURITY_DESCRIPTOR::default();
+            // SAFETY: `wide` is NUL-terminated and outlives the call; ownership of the allocated descriptor moves into PipeSecurity, which frees it in Drop.
             unsafe {
                 ConvertStringSecurityDescriptorToSecurityDescriptorW(PCWSTR(wide.as_ptr()), SDDL_REVISION_1, &mut sd, None)
                     .map_err(io::Error::other)?;
@@ -160,6 +164,7 @@ mod win {
             let name = format!(r"\\.\pipe\sonix-mcp-test-dacl-{}", std::process::id());
             let _listener = bind(&name).unwrap();
             let client = std::fs::OpenOptions::new().read(true).write(true).open(&name).unwrap();
+            // SAFETY: test only: the pipe handle is open for the whole block; out-pointers are valid locals; the returned descriptor is freed with LocalFree.
             let sddl = unsafe {
                 let mut sd = PSECURITY_DESCRIPTOR::default();
                 let err = GetSecurityInfo(
@@ -192,6 +197,7 @@ mod win {
 
         fn canonical_dacl_sddl(sddl: &str) -> String {
             let wide: Vec<u16> = sddl.encode_utf16().chain(std::iter::once(0)).collect();
+            // SAFETY: `wide` is NUL-terminated and outlives the call; the descriptor allocated by the API is freed with LocalFree before returning.
             unsafe {
                 let mut sd = PSECURITY_DESCRIPTOR::default();
                 ConvertStringSecurityDescriptorToSecurityDescriptorW(PCWSTR(wide.as_ptr()), SDDL_REVISION_1, &mut sd, None)

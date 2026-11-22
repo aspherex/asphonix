@@ -72,12 +72,14 @@ mod imp {
         if t.tx.send(r).is_err() {
             return false;
         }
+        // SAFETY: `wake` is the ticker thread's event handle, valid for the lifetime of the Ticker that owns it.
         unsafe { SetEvent(t.wake as *mut c_void) };
         true
     }
 
     fn start() -> Option<Ticker> {
         let (tx, rx) = channel::<Req>();
+        // SAFETY: creating an unnamed auto-reset event and a high-resolution waitable timer; null security attributes and names are allowed.
         let (wake, timer) = unsafe {
             let mut timer = CreateWaitableTimerExW(std::ptr::null(), std::ptr::null(), HIGH_RESOLUTION, TIMER_ALL_ACCESS);
             if timer.is_null() {
@@ -105,9 +107,11 @@ mod imp {
             }
             let handles = [wake as *mut c_void, timer as *mut c_void];
             match service(&mut q) {
+                // SAFETY: `handles` holds valid handles owned by this thread for its whole lifetime; the array outlives the wait.
                 None => unsafe {
                     WaitForMultipleObjects(1, handles.as_ptr(), 0, INFINITE);
                 },
+                // SAFETY: `handles` holds two valid event/timer handles owned by this thread for its whole lifetime; the array outlives the wait.
                 Some(due) => unsafe {
                     // relative due time in 100 ns units (negative = relative)
                     let left = due.saturating_duration_since(Instant::now());

@@ -20,7 +20,9 @@ impl log::Log for L {
 #[ignore]
 fn login_profiles_restore_logout() {
     let tmp = std::env::temp_dir().join(format!("sonix-real-test-{}", std::process::id()));
+    // SAFETY: single-threaded test setup before any other thread reads the environment.
     unsafe { std::env::set_var("APPDATA", &tmp) };
+    // SAFETY: single-threaded test setup before any other thread reads the environment.
     unsafe { std::env::set_var("LOCALAPPDATA", &tmp) };
     let kv = env_file();
     let get = |k: &str| kv.iter().find(|(a, _)| a == k).map(|(_, v)| v.clone()).unwrap();

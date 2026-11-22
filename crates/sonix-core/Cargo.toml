@@ -1,25 +1,28 @@
 [package]
 name = "sonix-core"
 version.workspace = true
-edition = "2021"
+edition.workspace = true
 publish.workspace = true
 license.workspace = true
 repository.workspace = true
+
+[lints]
+workspace = true
 
 [dependencies]
 serde.workspace = true
 serde_json.workspace = true
 thiserror = "1"
-tokio = { version = "1", features = ["rt-multi-thread", "macros", "time", "sync", "fs", "net"] }
-log = "0.4"
+tokio = { workspace = true, features = ["rt-multi-thread", "macros", "time", "sync", "fs", "net"] }
+log.workspace = true
 reqwest = { version = "0.12", default-features = false, features = ["json", "gzip", "rustls-tls", "stream"] }
-url = "2"
+url.workspace = true
 md-5 = "0.10"
-rand = { version = "0.8", features = ["small_rng"] }
+rand = { workspace = true, features = ["small_rng"] }
 keyring = "3"
 futures-util = "0.3"
-rusqlite = { version = "0.31", features = ["bundled"] }
-chrono = { version = "0.4", features = ["serde"] }
+rusqlite = { version = "0.43", features = ["bundled"] }
+chrono = { workspace = true, features = ["serde"] }
 symphonia = { version = "0.5.5", features = ["flac", "wav", "aiff", "mp3", "isomp4", "aac", "vorbis", "alac", "pcm"] }
 rtrb = "0.4"
 realfft = "3.5"

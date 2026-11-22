@@ -6,17 +6,20 @@ publish.workspace = true
 license.workspace = true
 repository.workspace = true
 
+[lints]
+workspace = true
+
 [dependencies]
 sonix-api = { path = "../sonix-api" }
 sonix-core = { path = "../sonix-core" }
-tokio = { version = "1", features = ["rt-multi-thread", "time", "sync"] }
+tokio = { workspace = true, features = ["rt-multi-thread", "time", "sync"] }
 serde.workspace = true
 serde_json.workspace = true
-image = { version = "0.25", default-features = false, features = ["jpeg", "png", "webp", "gif"] }
-chrono = "0.4"
-rand = "0.8"
-log = "0.4"
+image = { workspace = true, features = ["jpeg", "png", "webp", "gif"] }
+chrono.workspace = true
+rand.workspace = true
+log.workspace = true
 
 [dev-dependencies]
 sonix-mcp = { path = "../sonix-mcp" }
-url = "2"
+url.workspace = true
