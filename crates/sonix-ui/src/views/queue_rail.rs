@@ -236,7 +236,9 @@ impl Render for QueueRail {
         if self.top_pending.is_some() {
             match take_pending_top(&mut self.top_pending, f32::from(self.scroll.bounds().size.height)) {
                 Some(pos) => self.scroll.scroll_to_top_of_item(pos),
-                None => cx.notify(), // paint the list once so its bounds exist, then apply
+                // paint the list once so its bounds exist, then apply (a notify inside render is lost: GPUI clears the
+                // view's dirty flag after this render)
+                None => window.request_animation_frame(),
             }
         }
         if self.drag_dy != 0.0 {

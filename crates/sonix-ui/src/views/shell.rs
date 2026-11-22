@@ -719,6 +719,12 @@ impl Shell {
         if let Ok(st) = st {
             self.player.update(cx, |p, cx| p.apply_state(st, true, cx));
         }
+        // track / status changes while minimized were applied without an event (`apply_state(.., false, ..)`): the views that
+        // keep their own copy (Tracks, tables, library pages: playing row, bars, play buttons) learn them now
+        self.player.update(cx, |_, cx| {
+            cx.emit(crate::app::PlayerEvent::TrackOrStatus);
+            cx.notify();
+        });
         self.refresh_source(cx);
         self.np.update(cx, |n, cx| n.set_suspended(false, cx));
         self.tracks.update(cx, |t, cx| t.restore(cx));
@@ -801,7 +807,7 @@ impl Render for Shell {
         };
 
         // cached parts (`shell_cache.rs`): re-rendered when the shell notifies, reused on live-layer frames
-        let [title, top, side] = self.chrome_views(vw, cx);
+        let [title, top, side] = self.chrome_views(vw, window, cx);
         let live_key = (route.clone(), docked, !docked && !on_np && self.queue_drawer, self.suspended);
         if self.live_key.as_ref() != Some(&live_key) {
             // pages that left the screen keep no animated slots; the next frame re-renders everything uncached, so the
