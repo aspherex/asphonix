@@ -70,6 +70,11 @@ impl Overlays {
         Self { modal: None, add_menu: None, add_scroll: gpui::ScrollHandle::new(), toast: None, toast_gen: 0, focus: cx.focus_handle(), want_focus: false, upd: UpdState::default() }
     }
 
+    /// A modal or the Add-to-playlist popover is open (`shortcuts.ts: overlayOpen`).
+    pub fn is_open(&self) -> bool {
+        self.modal.is_some() || self.add_menu.is_some()
+    }
+
     /// Escape: closes the topmost overlay; true when one was open.
     pub fn escape(&mut self, cx: &mut Context<Self>) -> bool {
         if self.modal.is_some() {

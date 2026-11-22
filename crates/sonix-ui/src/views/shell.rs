@@ -710,6 +710,12 @@ impl Render for Shell {
             .on_action(cx.listener(|this, _: &ToggleTheme, _, cx| this.toggle_theme(cx)))
             .on_action(cx.listener(|this, _: &NavBack, _, cx| this.go_back(cx)))
             .on_action(cx.listener(|this, _: &NavForward, _, cx| this.go_forward(cx)))
+            // `shortcuts.ts`: L likes the current track, `/` opens search, mouse side buttons walk the history
+            .on_action(cx.listener(|this, _: &super::shell_keys::LikeCurrent, _, cx| this.like_current(cx)))
+            .on_action(cx.listener(|this, _: &super::shell_keys::SlashSearch, window, cx| this.slash_search(window, cx)))
+            .on_key_down(cx.listener(|this, ev: &gpui::KeyDownEvent, window, cx| this.feel_key_down(ev, window, cx)))
+            .on_mouse_up(gpui::MouseButton::Navigate(gpui::NavigationDirection::Back), cx.listener(|this, _, _, cx| this.go_back(cx)))
+            .on_mouse_up(gpui::MouseButton::Navigate(gpui::NavigationDirection::Forward), cx.listener(|this, _, _, cx| this.go_forward(cx)))
             .on_action(cx.listener(|_, _: &library::TabNext, window, _| {
                 crate::widgets::text_input::note_tab_nav();
                 crate::widgets::set_key_nav(true);

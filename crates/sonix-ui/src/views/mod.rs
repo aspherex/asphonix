@@ -8,4 +8,5 @@ pub mod nowplaying;
 pub mod overlay_card;
 pub mod queue_rail;
 pub mod shell;
+pub mod shell_keys;
 pub mod tracks;

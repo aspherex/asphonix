@@ -181,6 +181,8 @@ fn bind_keys(cx: &mut App) {
         KeyBinding::new("ctrl-k", shell::FocusSearch, Some("Root")),
         KeyBinding::new("alt-left", shell::NavBack, Some("Root")),
         KeyBinding::new("alt-right", shell::NavForward, Some("Root")),
+        // `shortcuts.ts`: plain L = like/unlike the current track (global, not while typing)
+        KeyBinding::new("l", views::shell_keys::LikeCurrent, Some("Root && !TextInput")),
     ]);
 }
 
