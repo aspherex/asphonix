@@ -1,4 +1,4 @@
-//! Tiny local UI preferences (theme), stored as `ui.json` in the app's config dir (`sonix_real::config_dir`).
+//! Tiny local UI preferences (theme, language), stored as `ui.json` in the app's config dir (`sonix_real::config_dir`).
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 
@@ -6,6 +6,9 @@ use std::path::PathBuf;
 #[serde(default, rename_all = "camelCase")]
 pub struct UiPrefs {
     pub light: bool,
+    /// UI language tag (`"en"`, `"de"`); absent = follow the OS language.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub language: Option<String>,
 }
 
 fn path() -> Option<PathBuf> {
@@ -33,6 +36,13 @@ pub fn save(p: &UiPrefs) {
     }
 }
 
+/// Load, change one field, save: a theme toggle keeps the stored language and vice versa.
+pub fn update(f: impl FnOnce(&mut UiPrefs)) {
+    let mut p = load();
+    f(&mut p);
+    save(&p);
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -40,8 +50,12 @@ mod tests {
     fn prefs_round_trip_and_default() {
         let p: UiPrefs = serde_json::from_str("{}").unwrap();
         assert!(!p.light);
-        let s = serde_json::to_string(&UiPrefs { light: true }).unwrap();
+        assert_eq!(p.language, None);
+        let s = serde_json::to_string(&UiPrefs { light: true, language: None }).unwrap();
         assert_eq!(s, r#"{"light":true}"#);
         assert!(serde_json::from_str::<UiPrefs>(&s).unwrap().light);
+        let s = serde_json::to_string(&UiPrefs { light: false, language: Some("de".into()) }).unwrap();
+        assert_eq!(s, r#"{"light":false,"language":"de"}"#);
+        assert_eq!(serde_json::from_str::<UiPrefs>(&s).unwrap().language.as_deref(), Some("de"));
     }
 }

@@ -8,7 +8,7 @@ use super::tracks::{TracksEvent, TracksView};
 use crate::app::{self, PlayerModel, Services};
 use crate::perf::FrameStats;
 use crate::router::{Route, Router, initial_route};
-use crate::settings::{self, UiPrefs};
+use crate::settings;
 use crate::theme::{MONO, Theme};
 use crate::widgets::context_menu::ContextMenu;
 use crate::widgets::text_input::{InputEvent, TextInput};
@@ -105,7 +105,7 @@ impl Shell {
         let np = cx.new(|cx| NowPlayingView::new(backend.clone(), art_cache.clone(), &player, cx));
         let dock = cx.new(|cx| DockView::new(backend.clone(), art_cache.clone(), &player, cx));
         let queue = cx.new(|cx| QueueRail::new(backend.clone(), art_cache.clone(), &player, &menu, cx));
-        let search = cx.new(|cx| TextInput::new(cx, "SEARCH ARCHIVE", &th, MONO, 12.0, 16.0, 500.0));
+        let search = cx.new(|cx| TextInput::new(cx, &search_placeholder(), &th, MONO, 12.0, 16.0, 500.0));
         let focus = cx.focus_handle();
         window.focus(&focus);
         let nav = cx.new(|_| NavBus);
@@ -536,7 +536,7 @@ impl Shell {
         self.th = self.th.toggled();
         let th = self.th;
         cx.set_global(th);
-        settings::save(&UiPrefs { light: th.light });
+        settings::update(|p| p.light = th.light);
         self.search.update(cx, |i, _| i.set_theme(&th));
         self.menu.update(cx, |m, _| m.set_theme(th));
         self.tracks.update(cx, |t, _| t.set_theme(&th));
@@ -548,6 +548,25 @@ impl Shell {
         cx.notify();
     }
 
+    /// Settings > Language: persist the choice (with the current theme, so a first-run user who followed the OS theme
+    /// keeps it), switch the catalog, refresh text held in state (the search placeholder), then re-render every
+    /// window with view caching bypassed (`refresh_windows`), so no cached part keeps the old language.
+    pub fn set_language(&mut self, pref: Option<sonix_i18n::Lang>, cx: &mut Context<Self>) {
+        let light = self.th.light;
+        settings::update(|p| {
+            p.light = light;
+            p.language = pref.map(|l| l.tag().to_string());
+        });
+        if crate::i18n::switch(cx, pref) {
+            crate::log(&format!("language: {}", sonix_i18n::lang().tag()));
+            self.search.update(cx, |i, cx| {
+                i.placeholder = search_placeholder();
+                cx.notify();
+            });
+            cx.refresh_windows();
+        }
+        cx.notify();
+    }
     // -------------------------------------------------------------- background mode
     fn install_minimize_hook(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         #[cfg(windows)]
@@ -1031,8 +1050,8 @@ impl Shell {
                     }
                     let count = ids.len();
                     Some(match b.playlists_add_tracks(sonix_api::AddToPlaylistRequest { id: id2, track_ids: ids }) {
-                        Ok(()) => format!("Added {} to \"{}\"", crate::dnd::describe(&p2, count), n2),
-                        Err(_) => format!("Could not add to \"{}\"", n2),
+                        Ok(()) => sonix_i18n::tr!(ToastAddedToPlaylist, what = crate::dnd::describe(&p2, count), playlist = n2.as_str()),
+                        Err(_) => sonix_i18n::tr!(ToastAddFailed, playlist = n2.as_str()),
                     })
                 })
                 .await;
@@ -1046,4 +1065,9 @@ impl Shell {
         })
         .detach();
     }
+}
+
+/// The top bar search placeholder (upper-cased at render time, like the label-caps specs).
+fn search_placeholder() -> gpui::SharedString {
+    sonix_i18n::tr!(SearchPlaceholder).to_uppercase().into()
 }

@@ -38,6 +38,8 @@ pub enum ListsEvent {
     Back,
     /// Settings > "Show track preview" / its corner changed (the shell owns the track-change card)
     TrackOverlay(bool, sonix_api::OverlayCorner),
+    /// Settings > Language changed (`None` = follow the OS)
+    Language(Option<sonix_i18n::Lang>),
 }
 
 /// `--shadow-hot*`: accent in dark, ink in light.
@@ -388,6 +390,7 @@ impl Shell {
         match ev {
             ListsEvent::Navigate(r) => self.navigate(r.clone(), cx),
             ListsEvent::TrackOverlay(on, corner) => self.apply_track_overlay(*on, *corner),
+            ListsEvent::Language(l) => self.set_language(*l, cx),
             ListsEvent::PlaylistsChanged | ListsEvent::SmartChanged => {
                 self.load_static(cx);
                 if matches!(ev, ListsEvent::SmartChanged)

@@ -9,7 +9,7 @@ use crate::widgets::button::ghost_icon;
 use crate::widgets::tooltip::{Tip, tip};
 use crate::widgets::{icon, icon_g};
 use gpui::{AnyElement, Context, CursorStyle, Div, IntoElement, SharedString, Stateful, Window, WindowControlArea, div, prelude::*, px};
-use sonix_api::format as fmt;
+use sonix_i18n::{Key, tr};
 
 /// The wordmark: Space Grotesk 18/24 600 caps with 0.04em tracking.
 const LOGO: TypeSpec = TypeSpec { family: Family::Display, size: HEADLINE_SM.size, line: HEADLINE_SM.line, tracking_em: 0.04, weight: 600.0, caps: true };
@@ -85,10 +85,10 @@ impl Shell {
                         .px(px(8.))
                         .py(px(2.))
                         .bg(th.accent)
-                        .tip("A new version is available", th)
+                        .tip(tr!(UpdateBadgeTip), th)
                         .cursor(CursorStyle::PointingHand)
                         .hover(|s| s.opacity(0.85))
-                        .child(txt(&th, LABEL_CAPS, format!("Update {}", u.version.clone().unwrap_or_default())).color(th.accent_text))
+                        .child(txt(&th, LABEL_CAPS, tr!(UpdateBadge, version = u.version.clone().unwrap_or_default())).color(th.accent_text))
                         .on_click(cx.listener(move |this, _, _, cx| {
                             let playing = this.player.read(cx).state.status == sonix_api::PlaybackStatus::Playing;
                             crate::overlays::open_update(cx, u.clone(), playing);
@@ -111,12 +111,13 @@ impl Shell {
         let can_back = self.router.can_back();
         let can_fwd = self.router.can_forward();
         let connected = self.status.as_ref().map(|s| s.state == sonix_api::ConnectionState::Connected).unwrap_or(false);
-        let state_label = if connected { "CONNECTED" } else { "DISCONNECTED" };
+        let state_label = if connected { tr!(StatusConnected) } else { tr!(StatusDisconnected) };
         let ping = self.status.as_ref().and_then(|s| s.ping_ms).map(|p| format!("{p}MS")).unwrap_or_else(|| "—".into());
         let search_focused = self.search.read(cx).focus_handle.is_focused(window);
-        let count = |n: Option<usize>| n.map(|n| fmt::short_count(n as u64)).unwrap_or_else(|| "—".into());
+        let count = |n: Option<usize>| n.map(|n| sonix_i18n::fmt::short_count(n as u64)).unwrap_or_else(|| "—".into());
         // bold 600 number, then a text space and the label.
-        let stat = move |n: String, label: &'static str| {
+        let stat = move |n: String, label: Key| {
+            let label = tr(label);
             div().flex().flex_row().child(txt(&th, MONO_CODE, n).weight(600.0).color(th.text)).child(txt(&th, MONO_CODE, format!(" {label}")).color(th.muted)).into_any_element()
         };
         let nav = div()
@@ -125,9 +126,9 @@ impl Shell {
             .flex_none()
             .border_1()
             .border_color(th.border)
-            .child(ghost_icon("nav-back", th, "chevron-left", top::ICON_NAV, top::ICON_LINK, false, !can_back).tip("Back · ALT+←", th).on_click(cx.listener(|this, _, _, cx| this.go_back(cx))))
+            .child(ghost_icon("nav-back", th, "chevron-left", top::ICON_NAV, top::ICON_LINK, false, !can_back).tip(tr!(TopbarBack), th).on_click(cx.listener(|this, _, _, cx| this.go_back(cx))))
             // the 1 px rule between the two nav buttons lives inside the second button's 28 px box.
-            .child(ghost_icon("nav-fwd", th, "chevron-right", top::ICON_NAV, top::ICON_LINK, false, !can_fwd).border_l_1().border_color(th.border).tip("Forward · ALT+→", th).on_click(cx.listener(|this, _, _, cx| this.go_forward(cx))));
+            .child(ghost_icon("nav-fwd", th, "chevron-right", top::ICON_NAV, top::ICON_LINK, false, !can_fwd).border_l_1().border_color(th.border).tip(tr!(TopbarForward), th).on_click(cx.listener(|this, _, _, cx| this.go_forward(cx))));
         let pill = div()
             .flex()
             .flex_row()
@@ -141,7 +142,7 @@ impl Shell {
             .border_color(th.border)
             .text_color(if connected { th.text } else { th.muted })
             .child(div().size(px(top::DOT)).flex_none().bg(if connected { th.accent } else { th.muted }))
-            .child(txt(&th, MONO_DATA, state_label))
+            .child(txt(&th, TypeSpec { caps: true, ..MONO_DATA }, state_label))
             .when(connected, |d| d.child(txt(&th, MONO_DATA, "·").color(th.border)).child(txt(&th, MONO_DATA, ping)));
         let mut search = div()
             .flex_1()
@@ -158,13 +159,20 @@ impl Shell {
             .text_color(th.muted)
             .child(icon("search", top::ICON_SEARCH, th.muted))
             .child(div().flex_1().min_w_0().child(self.search.clone()))
-            .child(div().px(px(top::KBD_PAD_X)).py(px(top::KBD_PAD_Y)).bg(th.high).flex_none().child(txt(&th, MONO_CODE, "CTRL K").color(th.muted)));
+            .child(div().px(px(top::KBD_PAD_X)).py(px(top::KBD_PAD_Y)).bg(th.high).flex_none().child(txt(&th, MONO_CODE, tr!(TopbarSearchKbd)).color(th.muted)));
         // the search (max 420 px) and the right-aligned collection counts: the search takes the free
         // space first (up to its max), the spacer only what is left (grow 1000:1 approximates "first").
         search.style().flex_grow = Some(1000.0);
         // tooltip of the collection counts: full numbers with thousands separators
-        let full = |n: Option<usize>| n.map(|n| fmt::fmt_int(n as u64)).unwrap_or_else(|| "—".into());
-        let counts_title = format!("{} tracks · {} albums · {} artists", full(self.counts.tracks), full(self.counts.albums), full(self.counts.artists));
+        let full = |n: Option<usize>, k: Key| {
+            let mut a = sonix_i18n::FluentArgs::new();
+            match n {
+                Some(n) => a.set("count", n),
+                None => a.set("count", "—"),
+            }
+            sonix_i18n::tr_args(k, &a)
+        };
+        let counts_title = [full(self.counts.tracks, Key::CountTracks), full(self.counts.albums, Key::CountAlbums), full(self.counts.artists, Key::CountArtists)].join(" · ");
         let collection = div()
             .id("topbar-collection")
             .tip(counts_title, th)
@@ -172,11 +180,11 @@ impl Shell {
             .flex_row()
             .gap(px(top::COLLECTION_GAP))
             .flex_none()
-            .child(stat(count(self.counts.tracks), "TRK"))
-            .when(vw >= crate::metrics::bp::COMPACT_BELOW, |d| d.child(stat(count(self.counts.albums), "ALB")).child(stat(count(self.counts.artists), "ART")));
+            .child(stat(count(self.counts.tracks), Key::TopbarStatTracks))
+            .when(vw >= crate::metrics::bp::COMPACT_BELOW, |d| d.child(stat(count(self.counts.albums), Key::TopbarStatAlbums)).child(stat(count(self.counts.artists), Key::TopbarStatArtists)));
         let theme_btn = tip(
             ghost_icon("theme", th, if th.light { "moon" } else { "sun" }, top::ICON_NAV, top::ICON_LINK, false, false).border_1().border_color(th.border),
-            if th.light { "Dark mode" } else { "Light mode" },
+            if th.light { tr!(ThemeDark) } else { tr!(ThemeLight) },
             th,
         )
         .on_click(cx.listener(|this, _, _, cx| this.toggle_theme(cx)));
@@ -224,21 +232,22 @@ impl Shell {
 
     pub(crate) fn sidebar(&self, vw: f32, route: &Route, window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
         let th = self.th;
-        let nav_items: [(Route, &str, &str); 6] = [
-            (Route::Home, "home", "Home"),
-            (Route::Albums, "album", "Albums"),
-            (Route::Artists, "artist", "Artists"),
-            (Route::Tracks, "track", "Tracks"),
-            (Route::Genres, "grid", "Genres"),
-            (Route::History, "list", "History"),
+        let nav_items: [(Route, &str, Key); 6] = [
+            (Route::Home, "home", Key::NavHome),
+            (Route::Albums, "album", Key::NavAlbums),
+            (Route::Artists, "artist", Key::NavArtists),
+            (Route::Tracks, "track", Key::NavTracks),
+            (Route::Genres, "grid", Key::NavGenres),
+            (Route::History, "list", Key::NavHistory),
         ];
         let title_pad = |d: Div| d.px(px(sb::TITLE_PAD_X)).pt(px(sb::TITLE_PAD_TOP)).pb(px(sb::TITLE_PAD_BOTTOM));
         let mut library = div().flex().flex_col().pt(px(sb::SECTION_PAD_TOP)).pb(px(sb::SECTION_PAD_BOTTOM));
-        library = library.child(title_pad(div().flex().flex_row().child(txt(&th, LABEL_CAPS, "Library").color(th.muted))));
+        library = library.child(title_pad(div().flex().flex_row().child(txt(&th, LABEL_CAPS, tr!(NavLibrary)).color(th.muted))));
         for (r, ic, label) in nav_items {
             let active = *route == r;
             let target = r.clone();
-            library = library.child(self.nav_row(SharedString::from(format!("nav-{label}")), th, active, ic, label).on_click(cx.listener(move |this, _, _, cx| this.navigate(target.clone(), cx))));
+            // the element id stays language-independent (focus/hover state survives a language switch)
+            library = library.child(self.nav_row(SharedString::from(format!("nav-{}", r.path())), th, active, ic, tr(label)).on_click(cx.listener(move |this, _, _, cx| this.navigate(target.clone(), cx))));
         }
 
         // Playlist rows: mono-data name (mixed case, ellipsis), mono-code count on the right.
@@ -284,25 +293,25 @@ impl Shell {
                 .px(px(sb::TITLE_PAD_X))
                 .pt(px(sb::TITLE_PAD_TOP))
                 .pb(px(sb::TITLE_PAD_BOTTOM))
-                .child(div().id("pl-title").tab_index(0).flex().cursor(CursorStyle::PointingHand).child(txt(&th, LABEL_CAPS, "Playlists").color(if *route == Route::Playlists { th.accent_fg } else { th.muted })).on_click(cx.listener(|this, _, _, cx| this.navigate(Route::Playlists, cx))))
+                .child(div().id("pl-title").tab_index(0).flex().cursor(CursorStyle::PointingHand).child(txt(&th, LABEL_CAPS, tr!(NavPlaylists)).color(if *route == Route::Playlists { th.accent_fg } else { th.muted })).on_click(cx.listener(|this, _, _, cx| this.navigate(Route::Playlists, cx))))
                 .child(
                     div()
                         .flex()
                         .flex_row()
                         .gap(px(sb::ADD_GAP))
-                        .child(div().id("pl-add-smart").tab_index(0).flex().cursor(CursorStyle::PointingHand).child(icon("bolt", sb::ADD_ICON, th.muted)).tip("New smart playlist (local)", th).on_click(cx.listener(|this, _, _, cx| this.lists_new_smart(cx))))
-                        .child(div().id("pl-add").tab_index(0).flex().cursor(CursorStyle::PointingHand).child(icon("add", sb::ADD_ICON, th.muted)).tip("New playlist", th).on_click(cx.listener(|this, _, _, cx| this.lists_new_playlist(cx)))),
+                        .child(div().id("pl-add-smart").tab_index(0).flex().cursor(CursorStyle::PointingHand).child(icon("bolt", sb::ADD_ICON, th.muted)).tip(tr!(SidebarNewSmart), th).on_click(cx.listener(|this, _, _, cx| this.lists_new_smart(cx))))
+                        .child(div().id("pl-add").tab_index(0).flex().cursor(CursorStyle::PointingHand).child(icon("add", sb::ADD_ICON, th.muted)).tip(tr!(SidebarNewPlaylist), th).on_click(cx.listener(|this, _, _, cx| this.lists_new_playlist(cx)))),
                 ));
-        let liked = self.counts.liked.map(|n| fmt::fmt_int(n as u64)).unwrap_or_else(|| "—".into());
-        lists = lists.child(pl_row("pl-liked".into(), *route == Route::Liked, "heart-filled", "Liked Songs".into(), liked)
+        let liked = self.counts.liked.map(|n| sonix_i18n::fmt::int(n as u64)).unwrap_or_else(|| "—".into());
+        lists = lists.child(pl_row("pl-liked".into(), *route == Route::Liked, "heart-filled", tr!(LikedSongs).into(), liked)
                 .on_click(cx.listener(|this, _, _, cx| this.navigate(Route::Liked, cx)))
                 .on_mouse_down(gpui::MouseButton::Right, cx.listener(|this, ev: &gpui::MouseDownEvent, window, cx| this.lists_liked_menu(ev.position, window, cx))));
         for sp in &self.lists.smart_side {
             let active = *route == Route::Smart(sp.id.clone());
             let id = sp.id.clone();
             let spc = sp.clone();
-            lists = lists.child(pl_row(SharedString::from(format!("sm-{}", sp.id)), active, "bolt", sp.input.name.clone(), fmt::fmt_int(sp.track_count as u64))
-                    .tip("Local smart playlist", th)
+            lists = lists.child(pl_row(SharedString::from(format!("sm-{}", sp.id)), active, "bolt", sp.input.name.clone(), sonix_i18n::fmt::int(sp.track_count as u64))
+                    .tip(tr!(SidebarSmartLocal), th)
                     .on_click(cx.listener(move |this, _, _, cx| this.navigate(Route::Smart(id.clone()), cx)))
                     .on_mouse_down(gpui::MouseButton::Right, cx.listener(move |this, ev: &gpui::MouseDownEvent, window, cx| this.lists_smart_menu(&spc, ev.position, window, cx))));
         }
@@ -314,7 +323,7 @@ impl Shell {
             lists = lists.child({
                     let pc = p.clone();
                     let row = pl_row(SharedString::from(format!("pl-{}", p.id)), active, icon_name, p.name.clone(), p.song_count.to_string())
-                        .tip_opt(p.read_only.then_some(if p.smart { "Smart playlist (read-only)" } else { "Read-only playlist" }), th)
+                        .tip_opt(p.read_only.then_some(if p.smart { tr!(PlaylistSmartReadonly) } else { tr!(PlaylistReadonly) }), th)
                         .relative()
                         .on_click(cx.listener(move |this, _, _, cx| this.navigate(Route::Playlist(id.clone()), cx)))
                         .on_mouse_down(gpui::MouseButton::Right, cx.listener(move |this, ev: &gpui::MouseDownEvent, window, cx| this.lists_playlist_menu(&pc, ev.position, window, cx)));
@@ -337,7 +346,7 @@ impl Shell {
         let server = self.status.as_ref().and_then(|s| s.server_url.clone()).map(|u| host(&u)).unwrap_or_default();
         let profile = div()
             .id("profile")
-            .tip("Switch profile", th)
+            .tip(tr!(ProfileSwitch), th)
             .tab_index(0)
             .group("hv")
             .flex()
@@ -380,7 +389,7 @@ impl Shell {
                     .min_w_0()
                     .flex()
                     .flex_col()
-                    .child(div().flex().child(txt(&th, MONO_DATA, user.unwrap_or_else(|| "Not signed in".into())).weight(600.0).color(th.text).ellipsis()))
+                    .child(div().flex().child(txt(&th, MONO_DATA, user.unwrap_or_else(|| tr!(ProfileNotSignedIn).into())).weight(600.0).color(th.text).ellipsis()))
                     .child(div().flex().child(txt(&th, MONO_CODE, server).ellipsis())),
             )
             .child(icon_g("more", sb::ICON, th.muted, th.text));
@@ -390,7 +399,7 @@ impl Shell {
             .border_t_1()
             .border_color(th.frame)
             .py(px(sb::FOOTER_PAD_Y))
-            .child(self.nav_row("nav-settings", th, *route == Route::Settings, "settings", "Settings").on_click(cx.listener(|this, _, _, cx| this.navigate(Route::Settings, cx))))
+            .child(self.nav_row("nav-settings", th, *route == Route::Settings, "settings", tr!(NavSettings)).on_click(cx.listener(|this, _, _, cx| this.navigate(Route::Settings, cx))))
             .child(profile);
 
         div()
