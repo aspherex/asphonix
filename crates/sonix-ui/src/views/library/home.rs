@@ -45,6 +45,9 @@ pub struct HomeView {
     recent: Vec<HistoryEntry>,
     offer: Option<ServerQueueOffer>,
     pager: Pager<Album>,
+    /// First row of the last rendered range: the pager's eviction centre (a fixed 0 evicted the viewport's own pages
+    /// once more than `MAX_PAGES` were resident, so they were re-fetched every frame).
+    vis_start: usize,
     list: UniformListScrollHandle,
     sb: ScrollbarHandle,
     page: PageScroll,
@@ -72,6 +75,7 @@ impl HomeView {
             recent: Vec::new(),
             offer: None,
             pager: Pager::default(),
+            vis_start: 0,
             list: UniformListScrollHandle::new(),
             sb: scrollbar::new_handle(),
             page: PageScroll::new(),
@@ -120,7 +124,7 @@ impl HomeView {
             let _ = this.update(cx, |t, cx| {
                 match r {
                     Ok(p) => {
-                        if t.pager.insert(epoch, page, p.items, 0) {
+                        if t.pager.insert(epoch, page, p.items, t.vis_start) {
                             t.pager.total = p.total;
                         }
                     }
@@ -315,6 +319,7 @@ impl HomeView {
             total,
             cx.processor(move |this: &mut Self, range: Range<usize>, _window, cx| {
                 let th = app::theme(cx);
+                this.vis_start = range.start;
                 range
                     .map(|ix| {
                         let Some(a) = this.pager.get(ix).cloned() else {
