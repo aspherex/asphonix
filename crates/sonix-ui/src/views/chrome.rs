@@ -8,7 +8,7 @@ use crate::text::txt;
 use crate::theme::Theme;
 use crate::tracking::{Family, HEADLINE_SM, LABEL_CAPS, MONO_CODE, MONO_DATA, TypeSpec};
 use crate::widgets::button::ghost_icon;
-use crate::widgets::tooltip::tip;
+use crate::widgets::tooltip::{Tip, tip};
 use crate::widgets::{icon, icon_g};
 use gpui::{AnyElement, Context, CursorStyle, Div, IntoElement, SharedString, Stateful, Window, WindowControlArea, div, prelude::*, px};
 use sonix_api::format as fmt;
@@ -92,6 +92,7 @@ impl Shell {
                         .px(px(8.))
                         .py(px(2.))
                         .bg(th.accent)
+                        .tip("A new version is available", th)
                         .cursor(CursorStyle::PointingHand)
                         .hover(|s| s.opacity(0.85))
                         .child(txt(&th, LABEL_CAPS, format!("Update {}", u.version.clone().unwrap_or_default())).color(th.accent_text))
@@ -132,11 +133,11 @@ impl Shell {
             .flex_none()
             .border_1()
             .border_color(th.border)
-            .child(pid("topbar.nav.back", ghost_icon("nav-back", th, "chevron-left", top::ICON_NAV, top::ICON_LINK, false, !can_back).on_click(cx.listener(|this, _, _, cx| this.go_back(cx)))))
+            .child(pid("topbar.nav.back", ghost_icon("nav-back", th, "chevron-left", top::ICON_NAV, top::ICON_LINK, false, !can_back).tip("Back · ALT+←", th).on_click(cx.listener(|this, _, _, cx| this.go_back(cx)))))
             // `.nav .icon-link + .icon-link { border-left: 1px }` lives inside the second button's 28 px box.
             .child(pid(
                 "topbar.nav.fwd",
-                ghost_icon("nav-fwd", th, "chevron-right", top::ICON_NAV, top::ICON_LINK, false, !can_fwd).border_l_1().border_color(th.border).on_click(cx.listener(|this, _, _, cx| this.go_forward(cx))),
+                ghost_icon("nav-fwd", th, "chevron-right", top::ICON_NAV, top::ICON_LINK, false, !can_fwd).border_l_1().border_color(th.border).tip("Forward · ALT+→", th).on_click(cx.listener(|this, _, _, cx| this.go_forward(cx))),
             ));
         let pill = div()
             .flex()
@@ -172,7 +173,12 @@ impl Shell {
         // `.search { flex: 1; max-width: 420px }` next to `.collection { margin-left: auto }`: the search takes the free
         // space first (up to its max), the spacer only what is left (grow 1000:1 approximates "first").
         search.style().flex_grow = Some(1000.0);
+        // `.collection title={countsTitle}`: full numbers (`toLocaleString`)
+        let full = |n: Option<usize>| n.map(|n| fmt::fmt_int(n as u64)).unwrap_or_else(|| "—".into());
+        let counts_title = format!("{} tracks · {} albums · {} artists", full(self.counts.tracks), full(self.counts.albums), full(self.counts.artists));
         let collection = div()
+            .id("topbar-collection")
+            .tip(counts_title, th)
             .flex()
             .flex_row()
             .gap(px(top::COLLECTION_GAP))
@@ -300,8 +306,8 @@ impl Shell {
                         .flex()
                         .flex_row()
                         .gap(px(sb::ADD_GAP))
-                        .child(div().id("pl-add-smart").tab_index(0).flex().cursor(CursorStyle::PointingHand).child(icon("bolt", sb::ADD_ICON, th.muted)).on_click(cx.listener(|this, _, _, cx| this.lists_new_smart(cx))))
-                        .child(div().id("pl-add").tab_index(0).flex().cursor(CursorStyle::PointingHand).child(icon("add", sb::ADD_ICON, th.muted)).on_click(cx.listener(|this, _, _, cx| this.lists_new_playlist(cx)))),
+                        .child(div().id("pl-add-smart").tab_index(0).flex().cursor(CursorStyle::PointingHand).child(icon("bolt", sb::ADD_ICON, th.muted)).tip("New smart playlist (local)", th).on_click(cx.listener(|this, _, _, cx| this.lists_new_smart(cx))))
+                        .child(div().id("pl-add").tab_index(0).flex().cursor(CursorStyle::PointingHand).child(icon("add", sb::ADD_ICON, th.muted)).tip("New playlist", th).on_click(cx.listener(|this, _, _, cx| this.lists_new_playlist(cx)))),
                 ),
         ));
         let liked = self.counts.liked.map(|n| fmt::fmt_int(n as u64)).unwrap_or_else(|| "—".into());
@@ -318,6 +324,7 @@ impl Shell {
             lists = lists.child(pid(
                 format!("sidebar.pl.sm{i}"),
                 pl_row(SharedString::from(format!("sm-{}", sp.id)), active, "bolt", sp.input.name.clone(), fmt::fmt_int(sp.track_count as u64))
+                    .tip("Local smart playlist", th)
                     .on_click(cx.listener(move |this, _, _, cx| this.navigate(Route::Smart(id.clone()), cx)))
                     .on_mouse_down(gpui::MouseButton::Right, cx.listener(move |this, ev: &gpui::MouseDownEvent, window, cx| this.lists_smart_menu(&spc, ev.position, window, cx))),
             ));
@@ -332,6 +339,7 @@ impl Shell {
                 {
                     let pc = p.clone();
                     let row = pl_row(SharedString::from(format!("pl-{}", p.id)), active, icon_name, p.name.clone(), p.song_count.to_string())
+                        .tip_opt(p.read_only.then_some(if p.smart { "Smart playlist (read-only)" } else { "Read-only playlist" }), th)
                         .relative()
                         .on_click(cx.listener(move |this, _, _, cx| this.navigate(Route::Playlist(id.clone()), cx)))
                         .on_mouse_down(gpui::MouseButton::Right, cx.listener(move |this, ev: &gpui::MouseDownEvent, window, cx| this.lists_playlist_menu(&pc, ev.position, window, cx)));
@@ -355,6 +363,7 @@ impl Shell {
         let server = self.status.as_ref().and_then(|s| s.server_url.clone()).map(|u| host(&u)).unwrap_or_default();
         let profile = div()
             .id("profile")
+            .tip("Switch profile", th)
             .tab_index(0)
             .group("hv")
             .flex()

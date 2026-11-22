@@ -11,7 +11,7 @@ use crate::theme::Theme;
 use crate::tracking::{BODY_LG, MONO_CODE, MONO_DATA};
 use crate::widgets::button::{ghost_icon, ghost_icon_with};
 use crate::widgets::slider::{self, SliderHandle, slider};
-use crate::widgets::tooltip::tip;
+use crate::widgets::tooltip::{Tip, tip};
 use crate::widgets::{hard_shadow, icon, icon_g};
 use gpui::{Context, CursorStyle, Entity, EventEmitter, IntoElement, MouseButton, Render, ScrollWheelEvent, SharedString, Subscription, Window, div, prelude::*, px};
 use sonix_api::format as fmt;
@@ -153,7 +153,7 @@ impl Render for DockView {
                 let (id, on) = (t.id.clone(), starred);
                 pid(
                     "dock.like",
-                    ghost_icon("dock-like", th, if starred { "heart-filled" } else { "heart" }, dk::ICON_LIKE, dk::T_BTN, starred, false).on_click(cx.listener(move |_, _, _, cx| {
+                    ghost_icon("dock-like", th, if starred { "heart-filled" } else { "heart" }, dk::ICON_LIKE, dk::T_BTN, starred, false).tip(if starred { "Liked - click or press L to unlike" } else { "Like (L)" }, th).on_click(cx.listener(move |_, _, _, cx| {
                         let id = id.clone();
                         app::call(cx, move |b| {
                             let req = StarRequest { id, kind: StarTargetType::Track };
@@ -281,13 +281,14 @@ impl Render for DockView {
         };
         let vol_id = ps.volume;
         let output: gpui::AnyElement = if let Some(e) = &ps.error {
-            div().max_w(px(dk::WARN_MAX_W)).flex().min_w_0().child(txt(&th, MONO_CODE, e.clone()).color(th.clip).ellipsis()).into_any_element()
+            div().id("dock-out-err").tip(e.clone(), th).max_w(px(dk::WARN_MAX_W)).flex().min_w_0().child(txt(&th, MONO_CODE, e.clone()).color(th.clip).ellipsis()).into_any_element()
         } else if loading {
             txt(&th, MONO_CODE, "LOADING…").color(th.muted).into_any_element()
         } else {
             let full = vw >= bp::FULL_READOUT_FROM;
-            let text = if full { format!("{readout}{}", if bit_perfect { " · BIT-PERFECT" } else { "" }) } else { short };
-            div().flex().min_w_0().child(txt(&th, MONO_CODE, text).color(if bit_perfect { th.accent_fg } else { th.muted }).ellipsis()).into_any_element()
+            let title = format!("{readout}{}", if bit_perfect { " · BIT-PERFECT" } else { "" });
+            let text = if full { title.clone() } else { short };
+            div().id("dock-out").tip(title, th).flex().min_w_0().child(txt(&th, MONO_CODE, text).color(if bit_perfect { th.accent_fg } else { th.muted }).ellipsis()).into_any_element()
         };
         let aux = pid(
             "dock.aux",
@@ -330,7 +331,7 @@ impl Render for DockView {
                         .child(icon("volume", dk::ICON_SMALL, th.muted))
                         .child(pid("dock.volume.fader", div().w(px(dk::VOLUME_FADER_W)).child(slider("dock-vol", th, &self.vol, ps.volume as f32, None, vol_cb))))
                         .child(pid("dock.volume.db", div().min_w(px(dk::DB_MIN_W)).flex_none().flex().justify_end().child(txt(&th, MONO_CODE, vol_label).color(th.muted))))
-                        .children(rg.map(|r| div().flex_none().child(txt(&th, MONO_CODE, r).color(th.muted)))),
+                        .children(rg.map(|r| div().id("dock-rg").tip("ReplayGain applied to this track (dB)", th).flex_none().child(txt(&th, MONO_CODE, r).color(th.muted)))),
                 ))
                 .child({
                     let q = ps.queue_length;
