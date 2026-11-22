@@ -24,6 +24,8 @@ image = { version = "0.25.1", default-features = false, features = ["png"] }
 # Parity automation hook (local control channel, test clock, bounds/state dump, PNG capture).
 # NEVER enabled in release builds; see docs/PARITY.md.
 parity = []
+# Heap accounting for memory work (counting allocator + big-allocation backtraces). Never in a release build.
+memprof = []
 
 [build-dependencies]
 embed-resource = "3"
