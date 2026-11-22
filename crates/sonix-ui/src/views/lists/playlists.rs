@@ -17,8 +17,8 @@ use crate::widgets::ui::{Tone, badge};
 use crate::widgets::{hard_shadow, icon, icon_g};
 use crate::widgets::tooltip::Tip;
 use gpui::{AnyElement, ClickEvent, Context, CursorStyle, Entity, EventEmitter, IntoElement, MouseButton, MouseDownEvent, Render, ScrollHandle, Window, div, prelude::*, px};
-use sonix_api::format as fmt;
 use sonix_api::*;
+use sonix_i18n::tr;
 use std::sync::Arc;
 
 impl EventEmitter<ListsEvent> for PlaylistsView {}
@@ -69,7 +69,7 @@ impl PlaylistsView {
 
     fn create(&mut self, cx: &mut Context<Self>) {
         let this = cx.entity().downgrade();
-        crate::overlays::prompt(cx, "New playlist", "Playlist name", "Create", "", move |name, cx| {
+        crate::overlays::prompt(cx, tr!(DialogNewPlaylist), tr!(DialogPlaylistName), tr!(DialogCreate), "", move |name, cx| {
             let b = app::backend(cx);
             cx.spawn(async move |cx| {
                 let r = cx.background_executor().spawn(async move { b.playlists_create(CreatePlaylistRequest { name, track_ids: vec![] }) }).await;
@@ -97,7 +97,7 @@ impl PlaylistsView {
         if smart {
             let sp = self.smart[ix].clone();
             title = sp.input.name.clone();
-            sub = format!("{} TRACKS · {}", fmt::fmt_int(sp.track_count as u64), fmt::format_total_duration(sp.duration));
+            sub = format!("{} · {}", tr!(CountTracks, count = sp.track_count).to_uppercase(), crate::views::library::fmtx::total_duration(sp.duration));
             rules = Some(describe_smart(&sp.input));
             id = sp.id.clone();
             art_el = icon("bolt", 20., th.accent_fg).into_any_element();
@@ -105,7 +105,7 @@ impl PlaylistsView {
         } else {
             let pl = self.lists[ix].clone();
             title = pl.name.clone();
-            sub = format!("{} TRACKS · {}", pl.song_count, fmt::format_total_duration(pl.duration));
+            sub = format!("{} · {}", tr!(CountTracks, count = pl.song_count).to_uppercase(), crate::views::library::fmtx::total_duration(pl.duration));
             rules = None;
             id = pl.id.clone();
             art_el = if pl.song_count > 0 { art::cover_bucket(&self.art, &self.backend, Some(&art::mosaic_key(&pl)), lm::CARD_ART, bucket_for((64.0 * window.scale_factor()).ceil() as u32), window, cx) } else { icon("queue", 20., th.muted).into_any_element() };
@@ -116,8 +116,8 @@ impl PlaylistsView {
                         .flex_row()
                         .gap(px(space::XS))
                         .mt(px(2.))
-                        .children(pl.smart.then(|| badge(&th, Tone::Accent, "Smart")))
-                        .child(badge(&th, Tone::Default, "Read-only")),
+                        .children(pl.smart.then(|| badge(&th, Tone::Accent, tr!(PlaylistBadgeSmart))))
+                        .child(badge(&th, Tone::Default, tr!(PlaylistBadgeReadonly))),
                 );
             }
             pl_for_menu = Some(pl);
@@ -213,12 +213,12 @@ impl PlaylistsView {
             let mut actions = div().flex().flex_row().gap(px(lm::CARD_ACTIONS_GAP)).flex_none();
             if !pl.read_only {
                 let p2 = pl.clone();
-                actions = actions.child(btn("edit", "pl-rename").tip("Rename", th).on_click(cx.listener(move |this, _, _, cx| {
+                actions = actions.child(btn("edit", "pl-rename").tip(tr!(MenuRename), th).on_click(cx.listener(move |this, _, _, cx| {
                     cx.stop_propagation();
                     let (id, name, me) = (p2.id.clone(), p2.name.clone(), cx.entity().downgrade());
                     let _ = this;
                     let name0 = name.clone();
-                    crate::overlays::prompt(cx, "Rename playlist", "", "Rename", &name0, move |n, cx| {
+                    crate::overlays::prompt(cx, tr!(DialogRenamePlaylist), "", tr!(MenuRename), &name0, move |n, cx| {
                         let Some(n) = Some(n).filter(|n| *n != name) else { return };
                         let id2 = id.clone();
                         app::call(cx, move |b| {
@@ -230,10 +230,10 @@ impl PlaylistsView {
                     });
                 })));
                 let p3 = pl.clone();
-                actions = actions.child(btn("trash", "pl-delete").tip("Delete", th).on_click(cx.listener(move |_, _, _, cx| {
+                actions = actions.child(btn("trash", "pl-delete").tip(tr!(MenuDelete), th).on_click(cx.listener(move |_, _, _, cx| {
                     cx.stop_propagation();
                     let (id, name, me) = (p3.id.clone(), p3.name.clone(), cx.entity().downgrade());
-                    crate::overlays::confirm(cx, "Delete playlist", &format!("Delete \"{name}\"? This cannot be undone."), "Delete", true, move |cx| {
+                    crate::overlays::confirm(cx, tr!(DialogDeletePlaylist), &tr!(DialogDeletePlaylistBody, name = name.as_str()), tr!(MenuDelete), true, move |cx| {
                         let id2 = id.clone();
                         app::call(cx, move |b| {
                             let _ = b.playlists_delete(DeletePlaylistRequest { id: id2 });
@@ -333,24 +333,24 @@ impl Render for PlaylistsView {
                     .child(icon(icon_name, lm::NEW_ICON, fg))
                     .child(txt(&th, LABEL_CAPS, label).color(fg))
             };
-            let header = div().flex().flex_row().items_center().justify_between().child(txt(&th, HEADLINE_MD, "Playlists // Vectors").color(th.text)).child(
+            let header = div().flex().flex_row().items_center().justify_between().child(txt(&th, HEADLINE_MD, tr!(HomePlaylistsVectors)).color(th.text)).child(
                 div()
                     .flex()
                     .flex_row()
                     .gap(px(space::SM))
-                    .child(new_btn("new-smart", "New smart playlist", "bolt", true).on_click(cx.listener(|_, _, _, cx| cx.emit(ListsEvent::EditSmart(None)))))
-                    .child(new_btn("new-pl", "New playlist", "add", false).on_click(cx.listener(|this, _, _, cx| this.create(cx)))),
+                    .child(new_btn("new-smart", tr!(PlaylistsNewSmart), "bolt", true).on_click(cx.listener(|_, _, _, cx| cx.emit(ListsEvent::EditSmart(None)))))
+                    .child(new_btn("new-pl", tr!(SidebarNewPlaylist), "add", false).on_click(cx.listener(|this, _, _, cx| this.create(cx)))),
             );
             let mut page = div().flex().flex_col().gap(px(lm::PAGE_GAP)).p(px(lm::PAGE_PAD)).w_full().child(header);
             let grid = |cards: Vec<AnyElement>| div().flex().flex_row().flex_wrap().gap(px(lm::GRID_GAP)).children(cards);
             if !self.smart.is_empty() {
-                page = page.child(txt(&th, LABEL_CAPS, "Smart playlists · local, evaluated on this machine").color(th.muted));
+                page = page.child(txt(&th, LABEL_CAPS, tr!(PlaylistsSmartSection)).color(th.muted));
                 let cards = (0..self.smart.len()).map(|i| self.card(th, true, i, cw, window, cx)).collect();
                 page = page.child(grid(cards));
-                page = page.child(txt(&th, LABEL_CAPS, "Server playlists").color(th.muted));
+                page = page.child(txt(&th, LABEL_CAPS, tr!(PlaylistsServerSection)).color(th.muted));
             }
             if self.loaded && self.lists.is_empty() {
-                page = page.child(txt(&th, BODY_SM, "No playlists yet.").color(th.muted));
+                page = page.child(txt(&th, BODY_SM, tr!(PlaylistsEmpty)).color(th.muted));
             } else {
                 let cards = (0..self.lists.len()).map(|i| self.card(th, false, i, cw, window, cx)).collect();
                 page = page.child(grid(cards));

@@ -18,8 +18,8 @@ use crate::widgets::icon;
 use crate::widgets::ui::{Tone, badge};
 use crate::widgets::tooltip::Tip;
 use gpui::{AnyElement, ClickEvent, Context, CursorStyle, Entity, EventEmitter, IntoElement, Render, Subscription, Window, div, prelude::*, px};
-use sonix_api::format as fmt;
 use sonix_api::*;
+use sonix_i18n::tr;
 use std::rc::Rc;
 use std::sync::Arc;
 
@@ -68,7 +68,7 @@ fn table_cfg(kind: &PageKind, read_only: bool) -> TableCfg {
             multi: true,
             arrows: Arrows::CursorOnly,
             action_count: if read_only { 3 } else { 4 },
-            empty: if read_only { "No tracks right now. This playlist is read-only and fills itself." } else { "No tracks yet. Use \"Add to playlist\" from any track to fill this up." },
+            empty: if read_only { sonix_i18n::Key::PlaylistEmptyReadonly } else { sonix_i18n::Key::PlaylistEmpty },
         },
         PageKind::Liked => TableCfg {
             head: true,
@@ -79,7 +79,7 @@ fn table_cfg(kind: &PageKind, read_only: bool) -> TableCfg {
             multi: true,
             arrows: Arrows::Select,
             action_count: 3,
-            empty: "Nothing liked yet. Press L while a track plays, or tap the heart on any track.",
+            empty: sonix_i18n::Key::LikedEmpty,
         },
         PageKind::Smart(_) => TableCfg {
             head: true,
@@ -90,7 +90,7 @@ fn table_cfg(kind: &PageKind, read_only: bool) -> TableCfg {
             multi: true,
             arrows: Arrows::Select,
             action_count: 3,
-            empty: "No tracks match these rules.",
+            empty: sonix_i18n::Key::SmartEmpty,
         },
     }
 }
@@ -463,7 +463,7 @@ impl TrackPage {
             let r = cx.background_executor().spawn(async move { b.playlists_reorder(ReorderPlaylistRequest { id, track_ids: ids }) }).await;
             if r.is_err() {
                 let _ = this.update(cx, |t, cx| {
-                    crate::overlays::show_toast(cx, "Could not reorder playlist");
+                    crate::overlays::show_toast(cx, tr!(PlaylistReorderFailed));
                     t.reload(cx);
                 });
             }
@@ -479,7 +479,7 @@ impl TrackPage {
         let (id, name) = (d.playlist.id.clone(), d.playlist.name.clone());
         let this = cx.entity().downgrade();
         let shown = name.clone();
-        crate::overlays::prompt(cx, "Rename playlist", "", "Rename", &shown, move |new, cx| {
+        crate::overlays::prompt(cx, tr!(DialogRenamePlaylist), "", tr!(MenuRename), &shown, move |new, cx| {
             let Some(new) = Some(new).filter(|n| *n != name) else { return };
             let (id2, n2) = (id.clone(), new.clone());
             app::call(cx, move |b| {
@@ -504,7 +504,7 @@ impl TrackPage {
         }
         let (id, name) = (d.playlist.id.clone(), d.playlist.name.clone());
         let this = cx.entity().downgrade();
-        crate::overlays::confirm(cx, "Delete playlist", &format!("Delete \"{name}\"? This cannot be undone."), "Delete", true, move |cx| {
+        crate::overlays::confirm(cx, tr!(DialogDeletePlaylist), &tr!(DialogDeletePlaylistBody, name = name.as_str()), tr!(MenuDelete), true, move |cx| {
             let id2 = id.clone();
             app::call(cx, move |b| {
                 let _ = b.playlists_delete(DeletePlaylistRequest { id: id2 });
@@ -587,8 +587,8 @@ impl Render for TrackPage {
             }
             Load::Error => {
                 let msg = match self.kind {
-                    PageKind::Playlist(_) => "PLAYLIST UNAVAILABLE.",
-                    _ => "SMART PLAYLIST NOT FOUND.",
+                    PageKind::Playlist(_) => tr!(PlaylistUnavailable),
+                    _ => tr!(SmartNotFound),
                 };
                 return status_line(&th, msg, true).into_any_element();
             }
@@ -599,7 +599,6 @@ impl Render for TrackPage {
             (t.total(), t.selected_count())
         };
         let empty = total == 0;
-        let int = |n: usize| fmt::fmt_int(n as u64);
 
         // ---- info block
         let mut info = div().flex().flex_col().gap(px(lm::INFO_GAP)).justify_end().min_w_0();
@@ -610,27 +609,27 @@ impl Render for TrackPage {
                 let pl = &d.playlist;
                 name = pl.name.clone();
                 if pl.read_only {
-                    let note = if pl.smart { "Rule-based on the server; contents update automatically.".to_string() } else { format!("Owned by {}.", pl.owner.as_deref().unwrap_or("another user")) };
+                    let note = if pl.smart { tr!(PlaylistServerSmartNote).to_string() } else { match pl.owner.as_deref() { Some(o) => tr!(PlaylistOwnedBy, owner = o), None => tr!(PlaylistOwnedByOther).to_string() } };
                     info = info.child(
                         div()
                             .flex()
                             .flex_row()
                             .items_center()
                             .gap(px(lm::INFO_GAP))
-                            .children(pl.smart.then(|| badge(&th, Tone::Accent, "Smart")))
-                            .child(badge(&th, Tone::Default, "Read-only"))
+                            .children(pl.smart.then(|| badge(&th, Tone::Accent, tr!(PlaylistBadgeSmart))))
+                            .child(badge(&th, Tone::Default, tr!(PlaylistBadgeReadonly)))
                             .child(txt(&th, MONO_CODE, note).color(th.muted)),
                     );
                 }
             }
             PageKind::Liked => {
-                name = "Liked Songs".into();
-                info = info.child(div().flex().child(txt(&th, LABEL_CAPS, "Playlist // pinned").color(th.muted)));
+                name = tr!(LikedSongs).into();
+                info = info.child(div().flex().child(txt(&th, LABEL_CAPS, tr!(LikedPinned)).color(th.muted)));
             }
             PageKind::Smart(_) => {
                 let s = self.smart.as_ref().unwrap();
                 name = s.input.name.clone();
-                info = info.child(div().flex().flex_row().gap(px(lm::INFO_GAP)).child(badge(&th, Tone::Accent, "Smart playlist")).child(badge(&th, Tone::Default, "Local · not on server")));
+                info = info.child(div().flex().flex_row().gap(px(lm::INFO_GAP)).child(badge(&th, Tone::Accent, tr!(SmartBadge))).child(badge(&th, Tone::Default, tr!(SmartBadgeLocal))));
             }
         }
         let name_el = div().flex().child(txt(&th, HEADLINE_LG, name).color(th.text));
@@ -642,24 +641,24 @@ impl Render for TrackPage {
         match &self.kind {
             PageKind::Playlist(_) => {
                 let d = self.detail.as_ref().unwrap();
-                stats = stats.child(stat(format!("{} TRACKS", d.playlist.song_count))).child(dot()).child(stat(fmt::format_total_duration(d.playlist.duration)));
+                stats = stats.child(stat(tr!(CountTracks, count = d.playlist.song_count).to_uppercase())).child(dot()).child(stat(crate::views::library::fmtx::total_duration(d.playlist.duration)));
                 if !d.tracks.is_empty() {
-                    stats = stats.child(dot()).child(stat(fmt::summarize_formats(&d.tracks)));
+                    stats = stats.child(dot()).child(stat(crate::views::library::fmtx::summarize_formats(&d.tracks)));
                 }
             }
             PageKind::Liked => {
                 let n = self.liked.as_ref().map(|s| s.count).unwrap_or(total);
-                stats = stats.child(stat(format!("{} TRACKS", int(n))));
+                stats = stats.child(stat(tr!(CountTracks, count = n).to_uppercase()));
                 if let Some(s) = &self.liked {
-                    stats = stats.child(dot()).child(stat(fmt::format_total_duration(s.duration)));
+                    stats = stats.child(dot()).child(stat(crate::views::library::fmtx::total_duration(s.duration)));
                 }
-                stats = stats.child(dot()).child(stat(if selected > 1 { format!("{} SELECTED", int(selected)) } else { "NEWEST FIRST".into() }));
+                stats = stats.child(dot()).child(stat(if selected > 1 { tr!(CountSelected, count = selected) } else { tr!(LikedNewestFirst).to_string() }.to_uppercase()));
             }
             PageKind::Smart(_) => {
                 let s = self.smart.as_ref().unwrap();
-                stats = stats.child(stat(format!("{} TRACKS", int(s.track_count)))).child(dot()).child(stat(fmt::format_total_duration(s.duration)));
+                stats = stats.child(stat(tr!(CountTracks, count = s.track_count).to_uppercase())).child(dot()).child(stat(crate::views::library::fmtx::total_duration(s.duration)));
                 if selected > 1 {
-                    stats = stats.child(dot()).child(stat(format!("{} SELECTED", int(selected))));
+                    stats = stats.child(dot()).child(stat(tr!(CountSelected, count = selected).to_uppercase()));
                 }
             }
         }
@@ -678,14 +677,14 @@ impl Render for TrackPage {
         });
         let mut actions = div().flex().flex_row().items_center().gap(px(lm::ACTIONS_GAP)).mt(px(lm::ACTIONS_MT));
         actions = actions
-            .child(play_btn("pg-play", &th, "PLAY", empty, pst).when(!empty, |b| b.on_click(cx.listener(move |this, _, _, cx| if pst.active() { crate::playback::toggle(cx) } else { this.play_source(None, false, cx) }))))
-            .child(sec_btn("pg-shuffle", &th, "shuffle", "SHUFFLE", empty).when(!empty, |b| b.on_click(cx.listener(|this, _, _, cx| this.play_source(None, true, cx)))))
-            .child(sec_btn("pg-flow", &th, "sliders", "FLOW", empty).tip("Order by tempo, key and genre, keeping bit-perfect playback", th).relative().child(crate::flow::bounds_probe(self.flow_btn.clone())).when(!empty, |b| b.on_click(cx.listener(|this, _, window, cx| this.open_flow(window, cx)))));
+            .child(play_btn("pg-play", &th, &tr!(MenuPlay).to_uppercase(), empty, pst).when(!empty, |b| b.on_click(cx.listener(move |this, _, _, cx| if pst.active() { crate::playback::toggle(cx) } else { this.play_source(None, false, cx) }))))
+            .child(sec_btn("pg-shuffle", &th, "shuffle", &tr!(MenuShuffle).to_uppercase(), empty).when(!empty, |b| b.on_click(cx.listener(|this, _, _, cx| this.play_source(None, true, cx)))))
+            .child(sec_btn("pg-flow", &th, "sliders", &tr!(FlowMenu).to_uppercase(), empty).tip(tr!(FlowButtonTip), th).relative().child(crate::flow::bounds_probe(self.flow_btn.clone())).when(!empty, |b| b.on_click(cx.listener(|this, _, window, cx| this.open_flow(window, cx)))));
         match &self.kind {
             PageKind::Playlist(_) => {
                 actions = actions
-                    .child(icon_btn40("pg-rename", &th, "edit", ro).tip(if ro { "Read-only playlist" } else { "Rename" }, th).when(!ro, |b| b.on_click(cx.listener(|this, _, _, cx| this.rename(cx)))))
-                    .child(icon_btn40("pg-delete", &th, "trash", ro).tip(if ro { "Read-only playlist" } else { "Delete" }, th).when(!ro, |b| b.on_click(cx.listener(|this, _, _, cx| this.delete(cx)))))
+                    .child(icon_btn40("pg-rename", &th, "edit", ro).tip(if ro { tr!(PlaylistReadonly) } else { tr!(MenuRename) }, th).when(!ro, |b| b.on_click(cx.listener(|this, _, _, cx| this.rename(cx)))))
+                    .child(icon_btn40("pg-delete", &th, "trash", ro).tip(if ro { tr!(PlaylistReadonly) } else { tr!(MenuDelete) }, th).when(!ro, |b| b.on_click(cx.listener(|this, _, _, cx| this.delete(cx)))))
                     .child(icon_btn40("pg-more", &th, "more", false).on_click(cx.listener(|this, ev: &ClickEvent, _, cx| {
                             let Some(d) = &this.detail else { return };
                             let items = menus::playlist_menu_items(cx.entity().downgrade(), &d.playlist, true);
@@ -701,24 +700,24 @@ impl Render for TrackPage {
                         .cursor(CursorStyle::PointingHand)
                         .text_color(th.muted)
                         .hover(move |s| s.text_color(th.accent_fg))
-                        .child(txt(&th, LABEL_CAPS, "Starred albums →"))
+                        .child(txt(&th, LABEL_CAPS, tr!(LikedStarredAlbums)))
                         .on_click(cx.listener(|_, _, _, cx| cx.emit(ListsEvent::Navigate(Route::Favorites)))));
             }
             PageKind::Smart(_) => {
                 let random = self.smart.as_ref().map(|s| s.input.sort == SmartSort::Random).unwrap_or(false);
                 if random {
-                    actions = actions.child(icon_btn40("pg-reroll", &th, "sync", false).tip("Re-roll the random pick", th).on_click(cx.listener(|this, _, _, cx| {
+                    actions = actions.child(icon_btn40("pg-reroll", &th, "sync", false).tip(tr!(SmartReroll), th).on_click(cx.listener(|this, _, _, cx| {
                         this.seed = (this.seed.wrapping_mul(1_103_515_245).wrapping_add(12_345)) % 999_999 + 1;
                         this.reload(cx);
                     })));
                 }
                 actions = actions
-                    .child(icon_btn40("pg-edit", &th, "sliders", false).tip("Edit rules", th).on_click(cx.listener(|this, _, _, cx| {
+                    .child(icon_btn40("pg-edit", &th, "sliders", false).tip(tr!(SmartEditRules), th).on_click(cx.listener(|this, _, _, cx| {
                         if let Some(s) = this.smart.clone() {
                             cx.emit(ListsEvent::EditSmart(Some(Box::new(s))));
                         }
                     })))
-                    .child(icon_btn40("pg-dup", &th, "add", false).tip("Duplicate", th).on_click(cx.listener(|this, _, _, cx| {
+                    .child(icon_btn40("pg-dup", &th, "add", false).tip(tr!(MenuDuplicate), th).on_click(cx.listener(|this, _, _, cx| {
                         let Some(s) = this.smart.clone() else { return };
                         let b = this.backend.clone();
                         cx.spawn(async move |this, cx| {

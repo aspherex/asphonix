@@ -15,6 +15,7 @@ use crate::widgets::{hard_shadow, icon, icon_g};
 use gpui::{Context, CursorStyle, Entity, EventEmitter, IntoElement, MouseButton, Render, ScrollWheelEvent, SharedString, Subscription, Window, div, prelude::*, px};
 use sonix_api::format as fmt;
 use sonix_api::*;
+use sonix_i18n::tr;
 use std::rc::Rc;
 use std::sync::Arc;
 
@@ -67,9 +68,9 @@ impl Render for DockView {
         let loading = ps.status == PlaybackStatus::Loading;
         let bit_perfect = has && ps.bit_perfect;
         let seek_ratio = self.seek_preview.unwrap_or(if ps.duration_sec > 0.0 { (ps.position_sec / ps.duration_sec) as f32 } else { 0.0 });
-        let readout = fmt::output_readout(&ps, "OUTPUT: —");
+        let readout = fmt::output_readout(&ps, &format!("{}: —", tr!(DockOutput).to_uppercase()));
         let short = fmt::output_short(&ps, "—");
-        let vol_label = fmt::volume_label(&ps);
+        let vol_label = crate::views::library::fmtx::volume_label(&ps);
         let rg = ps.replay_gain_db.map(|g| format!("RG {}{g:.1}", if g > 0.0 { "+" } else { "" }));
         let backend_for_art = self.backend.clone();
         let cover = art::cover(&self.art, &backend_for_art, track.as_ref().and_then(|t| t.cover_art.as_deref()), dk::ART, window, cx);
@@ -79,13 +80,13 @@ impl Render for DockView {
         let t_btn = |id: &'static str, name: &str, size: f32, on: bool| ghost_icon_with(id, th, name, size, dk::T_BTN, on, !has, th.muted);
 
         // --- now playing zone: cover + meta (content-sized, shrinks) then the like button
-        let title = track.as_ref().map(|t| t.title.clone()).unwrap_or_else(|| "No track loaded".into());
+        let title = track.as_ref().map(|t| t.title.clone()).unwrap_or_else(|| tr!(DockNoTrack).into());
         let subtitle = match &track {
             Some(t) => match &t.album {
                 Some(a) => format!("{} · {}", t.artist, a),
                 None => t.artist.clone(),
             },
-            None => "Pick an album or track to play".into(),
+            None => tr!(DockPickSomething).into(),
         };
         let np = div()
             .flex_1()
@@ -116,7 +117,7 @@ impl Render for DockView {
                                 this.art_hover = *h;
                                 cx.notify();
                             }))
-                            .when(has, |d| d.child(cover)), "Now Playing (N)", th)
+                            .when(has, |d| d.child(cover)), tr!(DockNowPlayingTip), th)
                             .on_click(cx.listener(|_, _, _, cx| cx.emit(DockEvent::OpenNowPlaying))))
                     .child(
                         div()
@@ -135,7 +136,7 @@ impl Render for DockView {
                                             cx.notify();
                                         }))
                                         .child(txt(&th, BODY_LG, title).color(if self.title_hover || self.art_hover { th.accent_fg } else { th.text }).ellipsis()),
-                                    "Now Playing (N)",
+                                    tr!(DockNowPlayingTip),
                                     th,
                                 )
                                 .on_click(cx.listener(|_, _, _, cx| cx.emit(DockEvent::OpenNowPlaying))))
@@ -273,12 +274,13 @@ impl Render for DockView {
         };
         let vol_id = ps.volume;
         let output: gpui::AnyElement = if let Some(e) = &ps.error {
-            div().id("dock-out-err").tip(e.clone(), th).max_w(px(dk::WARN_MAX_W)).flex().min_w_0().child(txt(&th, MONO_CODE, e.clone()).color(th.clip).ellipsis()).into_any_element()
+            // the engine detail (English) stays in the tooltip
+            div().id("dock-out-err").tip(e.clone(), th).max_w(px(dk::WARN_MAX_W)).flex().min_w_0().child(txt(&th, MONO_CODE, tr!(PlayerError).to_uppercase()).color(th.clip).ellipsis()).into_any_element()
         } else if loading {
-            txt(&th, MONO_CODE, "LOADING…").color(th.muted).into_any_element()
+            txt(&th, MONO_CODE, tr!(Loading).to_uppercase()).color(th.muted).into_any_element()
         } else {
             let full = vw >= bp::FULL_READOUT_FROM;
-            let title = format!("{readout}{}", if bit_perfect { " · BIT-PERFECT" } else { "" });
+            let title = format!("{readout}{}", if bit_perfect { format!(" · {}", tr!(NpBitPerfect).to_uppercase()) } else { String::new() });
             let text = if full { title.clone() } else { short };
             div().id("dock-out").tip(title, th).flex().min_w_0().child(txt(&th, MONO_CODE, text).color(if bit_perfect { th.accent_fg } else { th.muted }).ellipsis()).into_any_element()
         };
@@ -319,7 +321,7 @@ impl Render for DockView {
                         .child(icon("volume", dk::ICON_SMALL, th.muted))
                         .child(div().w(px(dk::VOLUME_FADER_W)).child(slider("dock-vol", th, &self.vol, ps.volume as f32, None, vol_cb)))
                         .child(div().min_w(px(dk::DB_MIN_W)).flex_none().flex().justify_end().child(txt(&th, MONO_CODE, vol_label).color(th.muted)))
-                        .children(rg.map(|r| div().id("dock-rg").tip("ReplayGain applied to this track (dB)", th).flex_none().child(txt(&th, MONO_CODE, r).color(th.muted)))))
+                        .children(rg.map(|r| div().id("dock-rg").tip(tr!(DockRgTip), th).flex_none().child(txt(&th, MONO_CODE, r).color(th.muted)))))
                 .child({
                     let q = ps.queue_length;
                     tip(
@@ -343,7 +345,7 @@ impl Render for DockView {
                                         .bg(th.base)
                                         .child(txt(&th, MONO_CODE, q.to_string()).color(th.accent_fg))
                                 })),
-                            "Toggle queue rail",
+                            tr!(DockToggleQueue),
                             th,
                         )
                         .on_click(cx.listener(|_, _, _, cx| cx.emit(DockEvent::ToggleQueue)))

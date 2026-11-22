@@ -6,6 +6,7 @@ use crate::text::txt;
 use crate::tracking::MONO_DATA;
 use gpui::{App, Context, Entity, IntoElement, Pixels, Point, Render, SharedString, Window, div, prelude::*, px};
 use sonix_api::Backend;
+use sonix_i18n::tr;
 
 #[derive(Clone, Debug)]
 pub enum DragPayload {
@@ -22,10 +23,9 @@ pub struct SonixDrag(pub DragPayload);
 
 /// Text of a drag with `count` resolved tracks ("3 tracks", "Name (12 tracks)").
 pub fn describe(p: &DragPayload, count: usize) -> String {
-    let n = if count == 1 { "track" } else { "tracks" };
     match p {
-        DragPayload::Tracks(_) => format!("{count} {n}"),
-        DragPayload::Album { name, .. } | DragPayload::Artist { name, .. } => format!("{name} ({count} {n})"),
+        DragPayload::Tracks(_) => tr!(CountTracks, count = count),
+        DragPayload::Album { name, .. } | DragPayload::Artist { name, .. } => tr!(DragNamedTracks, name = name.as_str(), count = count),
     }
 }
 
@@ -54,8 +54,8 @@ impl Render for Ghost {
 pub fn ghost_label(p: &DragPayload) -> String {
     match p {
         DragPayload::Tracks(ids) => describe(p, ids.len()),
-        DragPayload::Album { name, .. } => format!("album: {name}"),
-        DragPayload::Artist { name, .. } => format!("artist: {name}"),
+        DragPayload::Album { name, .. } => tr!(DragAlbum, name = name.as_str()),
+        DragPayload::Artist { name, .. } => tr!(DragArtist, name = name.as_str()),
     }
 }
 

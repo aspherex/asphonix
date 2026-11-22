@@ -8,6 +8,7 @@ use crate::tracking::{BODY_LG, HEADLINE_SM, LABEL_CAPS, MONO_CODE, MONO_DATA};
 use crate::widgets::tooltip::Tip;
 use gpui::{AnyElement, Context, CursorStyle, IntoElement, MouseButton, ScrollHandle, ScrollWheelEvent, Window, div, point, prelude::*, px};
 use sonix_api::*;
+use sonix_i18n::tr;
 use std::collections::HashMap;
 use std::rc::Rc;
 
@@ -124,7 +125,7 @@ impl NowPlayingView {
         let (sbar, overflow) = crate::widgets::scrollbar::passive(th, &self.ly.scroll);
         let content_w = (panel_w - 2.0 - 48.0 - if overflow { crate::metrics::tracks::SCROLLBAR_W } else { 0.0 }).max(0.0);
         let pad_block = 0.3 * content_w; // 30 % of the list width above the first and below the last line
-        let head_right: Option<String> = lyrics.as_ref().map(|l| format!("{} · {}", if l.synced { "SYNCED" } else { "PLAIN" }, if l.source == LyricsSource::Opensubsonic { "OPENSUBSONIC" } else { "SUBSONIC" }));
+        let head_right: Option<String> = lyrics.as_ref().map(|l| format!("{} · {}", if l.synced { tr!(LyricsSynced).to_uppercase() } else { tr!(LyricsPlain).to_uppercase() }, if l.source == LyricsSource::Opensubsonic { "OPENSUBSONIC" } else { "SUBSONIC" }));
         let head = div()
                 .flex()
                 .flex_row()
@@ -136,7 +137,7 @@ impl NowPlayingView {
                 .bg(th.mid)
                 .border_b_1()
                 .border_color(th.border)
-                .child(txt(&th, LABEL_CAPS, "LYRICS").color(th.accent_fg))
+                .child(txt(&th, LABEL_CAPS, tr!(NpLyrics)).color(th.accent_fg))
                 .children(head_right.map(|r| txt(&th, MONO_CODE, r).color(th.muted)));
         let mut scroll = div()
             .id("np-lyrics-scroll")
@@ -154,8 +155,8 @@ impl NowPlayingView {
             }))
             .on_mouse_down(MouseButton::Left, cx.listener(|this, _, _, _| this.ly.last_user = crate::clock::now()));
         match (&self.ly.load, &lyrics) {
-            (Load::Loading, _) => scroll = scroll.child(div().flex().justify_center().pt(px(24.)).child(txt(&th, MONO_DATA, "LOADING…").color(th.muted))),
-            (Load::None, _) | (Load::Ok(_), None) => scroll = scroll.child(div().flex().justify_center().pt(px(24.)).child(txt(&th, MONO_DATA, "No lyrics available").color(th.muted))),
+            (Load::Loading, _) => scroll = scroll.child(div().flex().justify_center().pt(px(24.)).child(txt(&th, MONO_DATA, tr!(Loading).to_uppercase()).color(th.muted))),
+            (Load::None, _) | (Load::Ok(_), None) => scroll = scroll.child(div().flex().justify_center().pt(px(24.)).child(txt(&th, MONO_DATA, tr!(LyricsNone)).color(th.muted))),
             (Load::Ok(_), Some(l)) => {
                 // child 0 = top spacer, 1.. = the lines (so `bounds_for_item(i + 1)` is line i), last = bottom spacer
                 scroll = scroll.child(div().h(px(pad_block)).flex_none());
@@ -169,7 +170,7 @@ impl NowPlayingView {
                         let spec = crate::tracking::TypeSpec { caps: false, ..HEADLINE_SM };
                         row = row
                             .cursor(CursorStyle::PointingHand)
-                            .tip("Seek to this line", th)
+                            .tip(tr!(LyricsSeek), th)
                             .text_color(col)
                             .hover(move |s| if cur { s } else { s.text_color(th.text) })
                             .child(crate::typo::ts(&th, spec).child(text))

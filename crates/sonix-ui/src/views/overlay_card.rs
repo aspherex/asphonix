@@ -164,7 +164,7 @@ impl Render for CardView {
                                     .items_center()
                                     .gap(px(4.))
                                     .child(icon("next", 10., th.accent_fg))
-                                    .child(txt(&th, LABEL_CAPS, "Now playing").color(th.accent_fg))
+                                    .child(txt(&th, LABEL_CAPS, sonix_i18n::tr!(OverlayNowPlaying)).color(th.accent_fg))
                                     .child(div().flex_1())
                                     .child(div().flex().flex_row().child(txt(&th, LABEL_CAPS, "SONIX").color(th.muted)).child(txt(&th, LABEL_CAPS, "//").color(th.accent_fg))),
                             )

@@ -13,10 +13,17 @@ use crate::widgets::ui::segmented;
 use crate::widgets::{hard_shadow, icon};
 use crate::widgets::tooltip::Tip;
 use gpui::{AnyElement, ClickEvent, ClipboardItem, Context, CursorStyle, Entity, EventEmitter, IntoElement, Render, ScrollHandle, Subscription, Timer, WeakEntity, Window, div, prelude::*, px};
-use sonix_api::format as fmt;
 use sonix_api::*;
 use std::sync::Arc;
 use std::time::Duration;
+use sonix_i18n::{Lang, tr};
+
+/// The last "Check now" result (translated at render time, so a language switch re-labels it).
+enum UpdateMsg {
+    Available(String),
+    UpToDate,
+    Failed,
+}
 
 impl EventEmitter<ListsEvent> for SettingsView {}
 
@@ -29,7 +36,7 @@ pub struct SettingsView {
     devices: Vec<OutputDevice>,
     out: Option<OutputStatus>,
     art: Option<ArtCacheStatus>,
-    update_msg: Option<String>,
+    update_msg: Option<UpdateMsg>,
     checking: bool,
     copied: bool,
     threshold: Entity<TextInput>,
@@ -56,7 +63,12 @@ fn js_number(t: &str) -> f64 {
 }
 
 fn onoff() -> [(&'static str, &'static str); 2] {
-    [("on", "On"), ("off", "Off")]
+    [("on", tr!(SettingsOn)), ("off", tr!(SettingsOff))]
+}
+
+/// A device's label in the box and the menu: its name, marked when it is the system default.
+fn device_label(d: &OutputDevice) -> String {
+    if d.is_default { tr!(SettingsDeviceDefault, name = d.name.as_str()) } else { d.name.clone() }
 }
 
 impl SettingsView {
@@ -228,9 +240,9 @@ impl SettingsView {
             let _ = this.update(cx, |t, cx| {
                 t.checking = false;
                 t.update_msg = Some(match r {
-                    Ok(i) if i.available => format!("Update {} available", i.version.unwrap_or_default()),
-                    Ok(_) => "You are up to date".into(),
-                    Err(_) => "Could not check for updates".into(),
+                    Ok(i) if i.available => UpdateMsg::Available(i.version.unwrap_or_default()),
+                    Ok(_) => UpdateMsg::UpToDate,
+                    Err(_) => UpdateMsg::Failed,
                 });
                 cx.notify();
             });
@@ -241,7 +253,7 @@ impl SettingsView {
 
     // ------------------------------------------------------------ render helpers
     fn row(th: &Theme, label: &str, right: impl IntoElement) -> gpui::Div {
-        div().flex().flex_row().items_center().justify_between().gap(px(space::MD)).child(div().flex_none().child(txt(th, BODY_SM, label.to_string()).color(th.muted))).child(right)
+        div().flex().flex_row().items_center().justify_between().gap(px(space::MD)).child(div().flex().min_w_0().child(txt(th, BODY_SM, label.to_string()).color(th.muted).ellipsis())).child(div().flex().flex_none().child(right))
     }
     fn value(th: &Theme, v: impl Into<String>) -> impl IntoElement {
         div().flex().child(txt(th, MONO_DATA, v.into()).color(th.text))
@@ -306,7 +318,7 @@ impl Render for SettingsView {
             // ---- Output
             let dev_label = {
                 let id = self.out.as_ref().and_then(|o| o.device_id.clone()).or_else(|| self.devices.iter().find(|d| d.is_default).map(|d| d.id.clone())).unwrap_or_default();
-                self.devices.iter().find(|d| d.id == id).map(|d| format!("{}{}", d.name, if d.is_default { " (default)" } else { "" })).unwrap_or_default()
+                self.devices.iter().find(|d| d.id == id).map(device_label).unwrap_or_default()
             };
             let devs = self.devices.clone();
             let this_d = this.clone();
@@ -317,7 +329,7 @@ impl Render for SettingsView {
                         .iter()
                         .map(|d| {
                             let (id, this) = (d.id.clone(), this_d.clone());
-                            MenuItem::action(format!("{}{}", d.name, if d.is_default { " (default)" } else { "" }), move |_, cx| {
+                            MenuItem::action(device_label(d), move |_, cx| {
                                 let id2 = id.clone();
                                 app::call(cx, move |b| {
                                     let _ = b.output_set_device(&id2);
@@ -336,7 +348,7 @@ impl Render for SettingsView {
                 }));
             let mode = self.out.as_ref().map(|o| if o.exclusive_error.is_some() { OutputMode::Exclusive } else { o.mode }).unwrap_or(OutputMode::Shared);
             let this_m = this.clone();
-            let mode_tog = segmented("set-mode", &th, &[("exclusive", "Exclusive"), ("shared", "Shared")], if mode == OutputMode::Exclusive { "exclusive" } else { "shared" }, move |v, _, cx| {
+            let mode_tog = segmented("set-mode", &th, &[("exclusive", tr!(SettingsModeExclusive)), ("shared", tr!(SettingsModeShared))], if mode == OutputMode::Exclusive { "exclusive" } else { "shared" }, move |v, _, cx| {
                 let m = if v == "exclusive" { OutputMode::Exclusive } else { OutputMode::Shared };
                 let b = app::backend(cx);
                 if let Some(t) = this_m.upgrade() {
@@ -356,10 +368,11 @@ impl Render for SettingsView {
                     .detach();
                 }
             });
-            let mut out_rows: Vec<AnyElement> = vec![Self::row(&th, "Device", device_sel).into_any_element(), Self::row(&th, "Mode", mode_tog).into_any_element()];
+            let mut out_rows: Vec<AnyElement> = vec![Self::row(&th, tr!(SettingsDevice), device_sel).into_any_element(), Self::row(&th, tr!(SettingsMode), mode_tog).into_any_element()];
             if let Some(o) = &self.out {
                 if let Some(e) = &o.exclusive_error {
-                    out_rows.push(Self::row(&th, "Exclusive unavailable", div().id("excl-err").tip(e.clone(), th).flex().child(txt(&th, MONO_DATA, e.clone()).color(th.clip))).into_any_element());
+                    // the engine reason (device/driver detail, English) stays in the tooltip; the row says what happens
+                    out_rows.push(Self::row(&th, tr!(SettingsExclusiveUnavailable), div().id("excl-err").tip(e.clone(), th).flex().child(txt(&th, MONO_DATA, tr!(SettingsExclusiveFallback)).color(th.clip))).into_any_element());
                 }
                 if let Some(sr) = o.sample_rate {
                     let khz = (sr as f64 / 1000.0 * 10.0).round() / 10.0;
@@ -369,23 +382,36 @@ impl Render for SettingsView {
                     } else {
                         format!("EXCLUSIVE · {}/{} · {label}", o.bit_depth.map(|b| b.to_string()).unwrap_or_else(|| "—".into()), (sr as f64 / 1000.0).round())
                     };
-                    out_rows.push(Self::row(&th, "Current stream", Self::value(&th, text)).into_any_element());
+                    out_rows.push(Self::row(&th, tr!(SettingsCurrentStream), Self::value(&th, text)).into_any_element());
                 }
             }
+            // ---- Language ("System" follows the OS language; a choice here overrides $SONIX_LOCALE)
+            let cur = crate::i18n::pref(cx).map(|l| l.tag()).unwrap_or("system");
+            let mut lang_opts: Vec<(&str, &str)> = vec![("system", tr!(SettingsLanguageSystem))];
+            // each language is offered in its own name, whatever the current UI language
+            lang_opts.extend(Lang::SHIPPED.iter().map(|l| (l.tag(), l.native_name())));
+            let this_l = this.clone();
+            let language = vec![Self::row(&th, tr!(SettingsLanguage), segmented("set-lang", &th, &lang_opts, cur, move |v, _, cx| {
+                let pref = Lang::parse(v).filter(|l| Lang::SHIPPED.contains(l));
+                if let Some(t) = this_l.upgrade() {
+                    t.update(cx, |_, cx| cx.emit(ListsEvent::Language(pref)));
+                }
+            }))
+            .into_any_element()];
             // ---- Scrobbling
             let scrobble = vec![
-                Self::row(&th, "Submit plays to Navidrome", self.toggle(&th, "set-scrobble", self.s.scrobbling_enabled, SettingChange::Scrobbling, cx)).into_any_element(),
-                Self::row(&th, "Count a play after (seconds, history and scrobbles)", Self::number_box(&th, &self.threshold)).into_any_element(),
+                Self::row(&th, tr!(SettingsScrobbleSubmit), self.toggle(&th, "set-scrobble", self.s.scrobbling_enabled, SettingChange::Scrobbling, cx)).into_any_element(),
+                Self::row(&th, tr!(SettingsPlayThreshold), Self::number_box(&th, &self.threshold)).into_any_element(),
             ];
             let shuffle = vec![
-                Self::row(&th, "Spread artists in shuffle", self.toggle(&th, "set-spread", self.s.spread_artists_in_shuffle, SettingChange::SpreadArtists, cx)).into_any_element(),
-                Self::row(&th, "Queue window", Self::number_box(&th, &self.window_size)).into_any_element(),
+                Self::row(&th, tr!(SettingsSpreadArtists), self.toggle(&th, "set-spread", self.s.spread_artists_in_shuffle, SettingChange::SpreadArtists, cx)).into_any_element(),
+                Self::row(&th, tr!(SettingsQueueWindow), Self::number_box(&th, &self.window_size)).into_any_element(),
             ];
             // ---- Playback
             let mut playback = vec![
-                Self::row(&th, "Autoplay similar music when the queue ends", self.toggle(&th, "set-autoplay", self.s.autoplay_enabled, SettingChange::Autoplay, cx)).into_any_element(),
-                Self::row(&th, "Sync play queue with server", self.toggle(&th, "set-syncq", self.s.sync_play_queue, SettingChange::SyncPlayQueue, cx)).into_any_element(),
-                Self::row(&th, "Show track preview when SONIX is in the background", self.toggle(&th, "set-overlay", self.s.track_overlay, SettingChange::TrackOverlay, cx)).into_any_element(),
+                Self::row(&th, tr!(SettingsAutoplay), self.toggle(&th, "set-autoplay", self.s.autoplay_enabled, SettingChange::Autoplay, cx)).into_any_element(),
+                Self::row(&th, tr!(SettingsSyncQueue), self.toggle(&th, "set-syncq", self.s.sync_play_queue, SettingChange::SyncPlayQueue, cx)).into_any_element(),
+                Self::row(&th, tr!(SettingsTrackPreview), self.toggle(&th, "set-overlay", self.s.track_overlay, SettingChange::TrackOverlay, cx)).into_any_element(),
             ];
             if self.s.track_overlay {
                 let this_c = this.clone();
@@ -398,8 +424,8 @@ impl Render for SettingsView {
                 playback.push(
                     Self::row(
                         &th,
-                        "Track preview position",
-                        segmented("set-corner", &th, &[("topLeft", "Top left"), ("topRight", "Top right"), ("bottomLeft", "Bottom left"), ("bottomRight", "Bottom right")], c, move |v, _, cx| {
+                        tr!(SettingsTrackPreviewPosition),
+                        segmented("set-corner", &th, &[("topLeft", tr!(SettingsCornerTopLeft)), ("topRight", tr!(SettingsCornerTopRight)), ("bottomLeft", tr!(SettingsCornerBottomLeft)), ("bottomRight", tr!(SettingsCornerBottomRight))], c, move |v, _, cx| {
                             let c = match v {
                                 "topRight" => OverlayCorner::TopRight,
                                 "bottomLeft" => OverlayCorner::BottomLeft,
@@ -414,7 +440,7 @@ impl Render for SettingsView {
                     .into_any_element(),
                 );
             }
-            playback.push(Self::row(&th, "Free memory when minimized (UI reloads on restore)", self.toggle(&th, "set-freemem", self.s.free_memory_when_minimized, SettingChange::FreeMemoryWhenMinimized, cx)).into_any_element());
+            playback.push(Self::row(&th, tr!(SettingsFreeMemory), self.toggle(&th, "set-freemem", self.s.free_memory_when_minimized, SettingChange::FreeMemoryWhenMinimized, cx)).into_any_element());
             let rg = match self.s.replay_gain_mode {
                 ReplayGainMode::Off => "off",
                 ReplayGainMode::Track => "track",
@@ -424,8 +450,8 @@ impl Render for SettingsView {
             playback.push(
                 Self::row(
                     &th,
-                    "Volume normalization (ReplayGain)",
-                    segmented("set-rg", &th, &[("off", "Off"), ("track", "Track"), ("album", "Album")], rg, move |v, _, cx| {
+                    tr!(SettingsReplaygain),
+                    segmented("set-rg", &th, &[("off", tr!(SettingsOff)), ("track", tr!(SettingsReplaygainTrack)), ("album", tr!(SettingsReplaygainAlbum))], rg, move |v, _, cx| {
                         let m = match v {
                             "track" => ReplayGainMode::Track,
                             "album" => ReplayGainMode::Album,
@@ -439,54 +465,59 @@ impl Render for SettingsView {
                 .into_any_element(),
             );
             if self.s.replay_gain_mode != ReplayGainMode::Off {
-                playback.push(Self::hint(&th, window, "Applies the file's ReplayGain tag as digital gain, so output is no longer bit-perfect while a gain is applied. Tracks without a tag play unchanged.", false));
+                playback.push(Self::hint(&th, window, tr!(SettingsReplaygainHint), false));
             }
             // ---- Server
             let st = self.status.clone();
             let dash = || "—".to_string();
             let mut server = vec![
-                Self::row(&th, "URL", Self::value(&th, st.as_ref().and_then(|s| s.server_url.clone()).unwrap_or_else(dash))).into_any_element(),
-                Self::row(&th, "User", Self::value(&th, st.as_ref().and_then(|s| s.username.clone()).unwrap_or_else(dash))).into_any_element(),
-                Self::row(&th, "Server version", Self::value(&th, st.as_ref().and_then(|s| s.server_version.clone()).unwrap_or_else(dash))).into_any_element(),
-                Self::row(&th, "API version", Self::value(&th, st.as_ref().and_then(|s| s.api_version.clone()).unwrap_or_else(dash))).into_any_element(),
-                Self::row(&th, "Ping", Self::value(&th, st.as_ref().and_then(|s| s.ping_ms).map(|p| format!("{p}MS")).unwrap_or_else(dash))).into_any_element(),
-                Self::row(&th, "Tracks indexed", Self::value(&th, st.as_ref().and_then(|s| s.track_count).map(fmt::fmt_int).unwrap_or_else(dash))).into_any_element(),
+                Self::row(&th, tr!(SettingsServerUrl), Self::value(&th, st.as_ref().and_then(|s| s.server_url.clone()).unwrap_or_else(dash))).into_any_element(),
+                Self::row(&th, tr!(SettingsServerUser), Self::value(&th, st.as_ref().and_then(|s| s.username.clone()).unwrap_or_else(dash))).into_any_element(),
+                Self::row(&th, tr!(SettingsServerVersion), Self::value(&th, st.as_ref().and_then(|s| s.server_version.clone()).unwrap_or_else(dash))).into_any_element(),
+                Self::row(&th, tr!(SettingsApiVersion), Self::value(&th, st.as_ref().and_then(|s| s.api_version.clone()).unwrap_or_else(dash))).into_any_element(),
+                Self::row(&th, tr!(SettingsPing), Self::value(&th, st.as_ref().and_then(|s| s.ping_ms).map(|p| format!("{p}MS")).unwrap_or_else(dash))).into_any_element(),
+                Self::row(&th, tr!(SettingsTracksIndexed), Self::value(&th, st.as_ref().and_then(|s| s.track_count).map(sonix_i18n::fmt::int).unwrap_or_else(dash))).into_any_element(),
             ];
             if let Some(a) = self.art.as_ref().filter(|a| a.total > 0) {
-                server.push(Self::row(&th, "Artwork cache", Self::value(&th, format!("{} / {} · {} MB", fmt::fmt_int(a.cached), fmt::fmt_int(a.total), (a.bytes as f64 / 1048576.0).round()))).into_any_element());
+                server.push(Self::row(&th, tr!(SettingsArtworkCache), Self::value(&th, format!("{} / {} · {} MB", sonix_i18n::fmt::int(a.cached), sonix_i18n::fmt::int(a.total), (a.bytes as f64 / 1048576.0).round()))).into_any_element());
             }
             // ---- Updates
             let this_u = this.clone();
-            let check = Self::select_box(&th, "set-check", txt(&th, LABEL_CAPS, if self.checking { "Checking…" } else { "Check now" }).color(th.text).into_any_element())
+            let check = Self::select_box(&th, "set-check", txt(&th, LABEL_CAPS, if self.checking { tr!(SettingsChecking) } else { tr!(SettingsCheckNow) }).color(th.text).into_any_element())
                 .when(self.checking, |d| d.opacity(0.5).cursor(CursorStyle::OperationNotAllowed))
                 .when(!self.checking, |d| d.on_click(cx.listener(|t, _, _, cx| t.check_now(cx))));
             let _ = this_u;
             let mut upd_row = div().flex().flex_row().items_center().justify_between().gap(px(space::MD)).child(check);
             if let Some(m) = &self.update_msg {
-                upd_row = upd_row.child(txt(&th, BODY_SM, m.clone()).color(th.muted));
+                let m = match m {
+                    UpdateMsg::Available(v) => tr!(SettingsUpdateAvailable, version = v.as_str()),
+                    UpdateMsg::UpToDate => tr!(SettingsUpToDate).to_string(),
+                    UpdateMsg::Failed => tr!(SettingsUpdateCheckFailed).to_string(),
+                };
+                upd_row = upd_row.child(txt(&th, BODY_SM, m).color(th.muted));
             }
             let updates = vec![
-                Self::row(&th, "Current version", Self::value(&th, "v0.6.1")).into_any_element(),
-                Self::row(&th, "Check for updates automatically", self.toggle(&th, "set-autoupd", self.s.auto_check_updates, SettingChange::AutoCheckUpdates, cx)).into_any_element(),
+                Self::row(&th, tr!(SettingsCurrentVersion), Self::value(&th, "v0.6.1")).into_any_element(),
+                Self::row(&th, tr!(SettingsAutoUpdates), self.toggle(&th, "set-autoupd", self.s.auto_check_updates, SettingChange::AutoCheckUpdates, cx)).into_any_element(),
                 upd_row.into_any_element(),
             ];
             // ---- Diagnostics
-            let diagnostics = vec![Self::row(&th, "Verbose logging", self.toggle(&th, "set-verbose-log", self.s.verbose_logging, SettingChange::VerboseLogging, cx)).into_any_element()];
+            let diagnostics = vec![Self::row(&th, tr!(SettingsVerboseLogging), self.toggle(&th, "set-verbose-log", self.s.verbose_logging, SettingChange::VerboseLogging, cx)).into_any_element()];
             // ---- MCP
             let mut mcp_rows: Vec<AnyElement> = vec![
                 Self::hint(
                     &th,
                     window,
-                    "Lets Claude Code or Claude Desktop read your library, listening history and play queue through a local-only connection (no network port). Everything Claude reads is sent to Claude (Anthropic) as part of your conversation: track, album and artist names, playlists, play history, what is playing. It never sees your server address, password or file paths, and this version cannot change anything on the server (no playlist edits, likes or ratings).",
+                    tr!(SettingsMcpHint),
                     false,
                 ),
-                Self::row(&th, "Let Claude read my library", self.toggle(&th, "set-mcp", self.mcp.as_ref().map(|m| m.enabled).unwrap_or(false), SettingChange::McpEnabled, cx)).into_any_element(),
+                Self::row(&th, tr!(SettingsMcpEnable), self.toggle(&th, "set-mcp", self.mcp.as_ref().map(|m| m.enabled).unwrap_or(false), SettingChange::McpEnabled, cx)).into_any_element(),
             ];
             if let Some(m) = self.mcp.clone().filter(|m| m.enabled) {
-                mcp_rows.push(Self::row(&th, "Allow playback control (play, skip, queue, volume)", self.toggle(&th, "set-mcp-ctl", m.allow_control, SettingChange::McpAllowControl, cx)).into_any_element());
-                mcp_rows.push(Self::row(&th, "Connection", Self::value(&th, if m.listening { "Listening" } else { "Not listening" })).into_any_element());
+                mcp_rows.push(Self::row(&th, tr!(SettingsMcpControl), self.toggle(&th, "set-mcp-ctl", m.allow_control, SettingChange::McpAllowControl, cx)).into_any_element());
+                mcp_rows.push(Self::row(&th, tr!(SettingsMcpConnection), Self::value(&th, if m.listening { tr!(SettingsMcpListening) } else { tr!(SettingsMcpNotListening) })).into_any_element());
                 if let Some(cmd) = m.register_command.clone() {
-                    mcp_rows.push(Self::hint(&th, window, "Register it once in Claude Code:", false));
+                    mcp_rows.push(Self::hint(&th, window, tr!(SettingsMcpRegister), false));
                     let lines = wrap_text(&th, window, &cmd, MONO_DATA, 584.0 - 2.0 - 2.0 * space::SM);
                     mcp_rows.push(
                         div()
@@ -501,7 +532,7 @@ impl Render for SettingsView {
                             .into_any_element(),
                     );
                     let cmd2 = cmd.clone();
-                    let copy = Self::select_box(&th, "set-copy", txt(&th, LABEL_CAPS, if self.copied { "Copied" } else { "Copy command" }).color(th.text).into_any_element()).on_click(cx.listener(move |t, _, _, cx| {
+                    let copy = Self::select_box(&th, "set-copy", txt(&th, LABEL_CAPS, if self.copied { tr!(SettingsCopied) } else { tr!(SettingsCopyCommand) }).color(th.text).into_any_element()).on_click(cx.listener(move |t, _, _, cx| {
                         cx.write_to_clipboard(ClipboardItem::new_string(cmd2.clone()));
                         t.copied = true;
                         cx.notify();
@@ -517,7 +548,7 @@ impl Render for SettingsView {
                     mcp_rows.push(div().flex().flex_row().child(copy).into_any_element());
                 }
                 if !m.bridge_exists {
-                    mcp_rows.push(Self::hint(&th, window, "sonix-mcp was not found next to SONIX. The Windows installer puts it there, so reinstalling or updating SONIX fixes this. Development builds and macOS: build it with npm run build:mcp (or cargo build --release in tools/sonix-mcp) and put it at that path.", true));
+                    mcp_rows.push(Self::hint(&th, window, tr!(SettingsMcpMissing), true));
                 }
             }
             // ---- logout
@@ -536,7 +567,7 @@ impl Render for SettingsView {
                 .cursor(CursorStyle::PointingHand)
                 .hover(move |s| s.bg(th.clip))
                 .child(icon("logout", 14., th.text))
-                .child(txt(&th, LABEL_CAPS, "Log out").color(th.text))
+                .child(txt(&th, LABEL_CAPS, tr!(SettingsLogout)).color(th.text))
                 .on_click(cx.listener(|t, _, _, cx| {
                     let b = t.backend.clone();
                     cx.spawn(async move |this, cx| {
@@ -552,15 +583,16 @@ impl Render for SettingsView {
                 .gap(px(space::LG))
                 .p(px(space::LG))
                 .max_w(px(640.))
-                .child(div().flex().child(txt(&th, HEADLINE_MD, "Settings").color(th.text)))
-                .child(Self::panel(&th, "Output", out_rows))
-                .child(Self::panel(&th, "Scrobbling", scrobble))
-                .child(Self::panel(&th, "Shuffle", shuffle))
-                .child(Self::panel(&th, "Playback", playback))
-                .child(Self::panel(&th, "Server", server))
-                .child(Self::panel(&th, "Updates", updates))
-                .child(Self::panel(&th, "Diagnostics", diagnostics))
-                .child(Self::panel(&th, "Claude (MCP)", mcp_rows))
+                .child(div().flex().child(txt(&th, HEADLINE_MD, tr!(NavSettings)).color(th.text)))
+                .child(Self::panel(&th, tr!(SettingsPanelLanguage), language))
+                .child(Self::panel(&th, tr!(SettingsPanelOutput), out_rows))
+                .child(Self::panel(&th, tr!(SettingsPanelScrobbling), scrobble))
+                .child(Self::panel(&th, tr!(SettingsPanelShuffle), shuffle))
+                .child(Self::panel(&th, tr!(SettingsPanelPlayback), playback))
+                .child(Self::panel(&th, tr!(SettingsPanelServer), server))
+                .child(Self::panel(&th, tr!(SettingsPanelUpdates), updates))
+                .child(Self::panel(&th, tr!(SettingsPanelDiagnostics), diagnostics))
+                .child(Self::panel(&th, tr!(SettingsPanelMcp), mcp_rows))
                 .child(div().flex().flex_row().child(logout))
                 .into_any_element()
         })

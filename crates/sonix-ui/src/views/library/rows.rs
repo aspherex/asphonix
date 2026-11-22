@@ -15,6 +15,7 @@ use gpui::{AnyElement, App, Bounds, CursorStyle, Div, IntoElement, Pixels, Point
 use sonix_api::Track;
 use sonix_api::format as fmt;
 use std::cell::Cell;
+use sonix_i18n::tr;
 use std::rc::Rc;
 
 #[derive(Clone, Copy)]
@@ -48,17 +49,17 @@ pub fn head(th: &Theme, o: RowOpts) -> AnyElement {
         .border_b_1()
         .border_color(th.border)
         .child(div().w(px(tr::IDX_W)).flex_none())
-        .child(flex_cell(tr::TITLE_GROW).flex().child(label("Title")));
+        .child(flex_cell(tr::TITLE_GROW).flex().child(label(tr!(ColTitle))));
     if o.show_artist {
-        r = r.child(flex_cell(tr::ARTIST_GROW).flex().child(label("Artist")));
+        r = r.child(flex_cell(tr::ARTIST_GROW).flex().child(label(tr!(ColArtist))));
     }
     if o.cols.year {
-        r = r.child(right(tr::YEAR_W).child(label("Year")));
+        r = r.child(right(tr::YEAR_W).child(label(tr!(ColYear))));
     }
     if o.cols.added {
-        r = r.child(right(tr::ADDED_W).child(label("Added")));
+        r = r.child(right(tr::ADDED_W).child(label(tr!(ColAdded))));
     }
-    r = r.child(right(tr::FORMAT_W).child(label("Format"))).child(right(tr::TIME_W).child(label("Time")));
+    r = r.child(right(tr::FORMAT_W).child(label(tr!(ColFormat)))).child(right(tr::TIME_W).child(label(tr!(ColTime))));
     for _ in 0..o.actions {
         r = r.child(spacer());
     }

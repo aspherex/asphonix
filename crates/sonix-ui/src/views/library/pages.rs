@@ -12,8 +12,8 @@ use crate::theme::Theme;
 use crate::tracking::{BODY_SM, HEADLINE_LG, HEADLINE_MD, LABEL_CAPS, MONO_CODE, MONO_DATA};
 use crate::widgets::button::{Variant, button};
 use gpui::{AnyElement, Context, IntoElement, Render, Subscription, Window, div, prelude::*, px};
-use sonix_api::format::fmt_int;
 use sonix_api::*;
+use sonix_i18n::tr;
 
 fn loading_cell(th: &Theme, geo: Geo) -> AnyElement {
     div().w(px(geo.cell_w)).h(px(geo.cell_h)).flex_none().bg(th.low).into_any_element()
@@ -118,13 +118,13 @@ impl Render for AlbumsView {
         let this = cx.entity().downgrade();
         let this2 = this.clone();
         let options: [(AlbumSort, &'static str); 5] =
-            [(AlbumSort::Alphabetical, "A-Z"), (AlbumSort::Artist, "Artist"), (AlbumSort::Newest, "Newest"), (AlbumSort::Year, "Year"), (AlbumSort::Random, "Random")];
+            [(AlbumSort::Alphabetical, "A-Z"), (AlbumSort::Artist, tr!(SortArtist)), (AlbumSort::Newest, tr!(SortNewest)), (AlbumSort::Year, tr!(SortYear)), (AlbumSort::Random, tr!(SortRandom))];
         let controls = div()
             .flex()
             .flex_row()
             .items_center()
             .gap(px(m::CONTROLS_GAP))
-            .child(checkbox(&th, "starred-only", self.starred_only, "Starred only", move |v, _, cx| {
+            .child(checkbox(&th, "starred-only", self.starred_only, tr!(AlbumsStarredOnly), move |v, _, cx| {
                     let _ = this.update(cx, |t, cx| {
                         t.starred_only = v;
                         t.reload(cx);
@@ -136,7 +136,7 @@ impl Render for AlbumsView {
                         t.reload(cx);
                     });
                 }));
-        let header = header_row().child(txt(&th, HEADLINE_MD, "Albums").color(th.text)).child(controls);
+        let header = header_row().child(txt(&th, HEADLINE_MD, tr!(NavAlbums)).color(th.text)).child(controls);
         let body = grid_element(self, th, window, cx);
         page_shell(header, body)
     }
@@ -216,8 +216,8 @@ impl Render for ArtistsView {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let th = app::theme(cx);
         let this = cx.entity().downgrade();
-        let options: [(ArtistSort, &'static str); 2] = [(ArtistSort::Alphabetical, "A-Z"), (ArtistSort::Random, "Random")];
-        let header = header_row().child(txt(&th, HEADLINE_MD, "Artists").color(th.text)).child(segmented(&th, "lib.seg", &options, self.sort, move |v, _, cx| {
+        let options: [(ArtistSort, &'static str); 2] = [(ArtistSort::Alphabetical, "A-Z"), (ArtistSort::Random, tr!(SortRandom))];
+        let header = header_row().child(txt(&th, HEADLINE_MD, tr!(NavArtists)).color(th.text)).child(segmented(&th, "lib.seg", &options, self.sort, move |v, _, cx| {
                     let _ = this.update(cx, |t, cx| {
                         t.sort = v;
                         t.reload(cx);
@@ -325,32 +325,32 @@ impl Render for GenreDetailView {
             .flex_col()
             .gap(px(crate::metrics::space::XS))
             .min_w_0()
-            .child(div().flex().child(txt(&th, LABEL_CAPS, "Genre").color(th.muted)))
+            .child(div().flex().child(txt(&th, LABEL_CAPS, tr!(InfoGenre)).color(th.muted)))
             .child(div().flex().child(txt(&th, HEADLINE_LG, self.name.clone()).color(th.text)))
             .when_some(self.info.clone(), |d, g| {
                 d.child(div()
                         .flex()
                         .flex_row()
                         .gap(px(crate::metrics::space::XS))
-                        .child(txt(&th, MONO_DATA, format!("{} ALBUMS", fmt_int(g.album_count as u64))).color(th.muted))
+                        .child(txt(&th, MONO_DATA, tr!(CountAlbums, count = g.album_count).to_uppercase()).color(th.muted))
                         .child(txt(&th, MONO_DATA, "·").color(th.muted))
-                        .child(txt(&th, MONO_DATA, format!("{} TRACKS", fmt_int(g.track_count as u64))).color(th.muted)))
+                        .child(txt(&th, MONO_DATA, tr!(CountTracks, count = g.track_count).to_uppercase()).color(th.muted)))
             });
         let actions = div()
             .flex()
             .flex_row()
             .gap(px(crate::metrics::space::SM))
-            .child(button("genre-play", th, Variant::Secondary, "Play", Some(pst.icon()), !ready, window).when(pst.active(), |b| b.border_color(th.accent)).on_click(move |_, _, cx| {
+            .child(button("genre-play", th, Variant::Secondary, tr!(MenuPlay), Some(pst.icon()), !ready, window).when(pst.active(), |b| b.border_color(th.accent)).on_click(move |_, _, cx| {
                 if pst.active() {
                     crate::playback::toggle(cx);
                 } else {
                     menus::play_genre(cx, n1.clone(), false)
                 }
             }))
-            .child(button("genre-shuffle", th, Variant::Primary, "Shuffle", Some("shuffle"), !ready, window).on_click(move |_, _, cx| menus::play_genre(cx, n2.clone(), true)))
+            .child(button("genre-shuffle", th, Variant::Primary, tr!(MenuShuffle), Some("shuffle"), !ready, window).on_click(move |_, _, cx| menus::play_genre(cx, n2.clone(), true)))
             .child({
                 let (cell, menu, n3) = (self.flow_btn.clone(), self.ctx.menu.clone(), self.name.clone());
-                button("genre-flow", th, Variant::Secondary, "Flow", Some("sliders"), !ready, window).relative().child(crate::flow::bounds_probe(cell.clone())).on_click(move |_, window, cx| {
+                button("genre-flow", th, Variant::Secondary, tr!(FlowMenu), Some("sliders"), !ready, window).relative().child(crate::flow::bounds_probe(cell.clone())).on_click(move |_, window, cx| {
                     let name = n3.clone();
                     let play: crate::flow::Play = std::rc::Rc::new(move |arc, cx| crate::playback::play_genre(cx, name.clone(), false, Some(arc)));
                     crate::flow::open_menu(menu.clone(), cell.get(), crate::flow::pool(sonix_api::FlowPoolKind::Genre, Some(n3.clone()), None), "genre", play, window, cx);
@@ -358,9 +358,9 @@ impl Render for GenreDetailView {
             });
         let header = div().flex().flex_row().items_end().justify_between().gap(px(crate::metrics::space::MD)).flex_wrap().flex_none().child(title).child(actions);
         let body: AnyElement = if self.missing {
-            txt(&th, MONO_CODE, format!("NO TRACKS TAGGED “{}”.", self.name.to_uppercase())).color(th.muted).into_any_element_wrapped()
+            txt(&th, MONO_CODE, tr!(GenreNoTracks, genre = self.name.as_str()).to_uppercase()).color(th.muted).into_any_element_wrapped()
         } else if self.grid.loaded && self.grid.pager.total == 0 {
-            txt(&th, BODY_SM, "No albums are tagged with this genre (tracks may still be).").color(th.muted).into_any_element_wrapped()
+            txt(&th, BODY_SM, tr!(GenreNoAlbums)).color(th.muted).into_any_element_wrapped()
         } else {
             grid_element(self, th, window, cx)
         };

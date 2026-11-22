@@ -1,6 +1,6 @@
 [workspace]
 resolver = "2"
-members = ["crates/sonix-api", "crates/sonix-core", "crates/sonix-real", "crates/sonix-ui", "crates/sonix-mcp", "crates/sonix-mcp-protocol", "crates/sonix-logging"]
+members = ["crates/sonix-api", "crates/sonix-core", "crates/sonix-real", "crates/sonix-ui", "crates/sonix-mcp", "crates/sonix-mcp-protocol", "crates/sonix-logging", "crates/sonix-i18n"]
 
 [workspace.package]
 version = "0.1.0"
@@ -26,6 +26,12 @@ rand = "0.8"
 chrono = "0.4"
 url = "2"
 image = { version = "0.25.1", default-features = false }
+# i18n (sonix-i18n): Project Fluent, OS locale detection
+fluent-bundle = "0.16"
+fluent-syntax = "0.12"
+unic-langid = "0.9"
+sys-locale = "0.3"
+intl-memoizer = "0.5"
 
 [profile.release]
 opt-level = 3

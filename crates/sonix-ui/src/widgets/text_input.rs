@@ -1062,26 +1062,27 @@ impl TextInput {
         }
         let Some(menu) = cx.try_global::<InputMenu>().and_then(|m| m.0.upgrade()) else { return };
         let me = cx.entity().downgrade();
-        let item = |label: &'static str, hint: &'static str, enabled: bool, op: InputOp| {
+        let ctrl = sonix_i18n::tr!(KbdCtrl);
+        let item = |label: &'static str, key: char, enabled: bool, op: InputOp| {
             let me = me.clone();
             super::context_menu::MenuItem::action(label, move |window, cx| {
                 if let Some(e) = me.upgrade() {
                     e.update(cx, |i, cx| op(i, window, cx));
                 }
             })
-            .hint(hint)
+            .hint(format!("{ctrl}+{key}"))
             .disabled(!enabled)
         };
         let sel = !self.selected_range.is_empty() && !self.mask;
         let items = vec![
-            item("Undo", "Ctrl+Z", !self.history.undo.is_empty(), |i, w, cx| i.undo(&Undo, w, cx)),
-            item("Redo", "Ctrl+Y", !self.history.redo.is_empty(), |i, w, cx| i.redo(&Redo, w, cx)),
+            item(sonix_i18n::tr!(EditUndo), 'Z', !self.history.undo.is_empty(), |i, w, cx| i.undo(&Undo, w, cx)),
+            item(sonix_i18n::tr!(EditRedo), 'Y', !self.history.redo.is_empty(), |i, w, cx| i.redo(&Redo, w, cx)),
             super::context_menu::MenuItem::separator(),
-            item("Cut", "Ctrl+X", sel, |i, w, cx| i.cut(&Cut, w, cx)),
-            item("Copy", "Ctrl+C", sel, |i, w, cx| i.copy(&Copy, w, cx)),
-            item("Paste", "Ctrl+V", true, |i, w, cx| i.paste(&Paste, w, cx)),
+            item(sonix_i18n::tr!(EditCut), 'X', sel, |i, w, cx| i.cut(&Cut, w, cx)),
+            item(sonix_i18n::tr!(EditCopy), 'C', sel, |i, w, cx| i.copy(&Copy, w, cx)),
+            item(sonix_i18n::tr!(EditPaste), 'V', true, |i, w, cx| i.paste(&Paste, w, cx)),
             super::context_menu::MenuItem::separator(),
-            item("Select all", "Ctrl+A", !self.content.is_empty(), |i, w, cx| i.select_all(&SelectAll, w, cx)),
+            item(sonix_i18n::tr!(EditSelectAll), 'A', !self.content.is_empty(), |i, w, cx| i.select_all(&SelectAll, w, cx)),
         ];
         let pos = ev.position;
         menu.update(cx, |m, cx| m.show(items, pos, window, cx));

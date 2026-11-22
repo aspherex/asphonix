@@ -8,6 +8,7 @@ mod clock;
 mod columns;
 mod dnd;
 mod flow;
+mod i18n;
 mod icons_gen;
 mod metrics;
 mod overlays;
@@ -150,6 +151,7 @@ fn main() {
         // first run (no stored choice): follow the OS app theme
         let os_light = !settings::has_stored() && matches!(cx.window_appearance(), gpui::WindowAppearance::Light | gpui::WindowAppearance::VibrantLight);
         cx.set_global(if prefs.light || os_light { theme::Theme::light() } else { theme::Theme::dark() });
+        i18n::init(cx, i18n::resolve(prefs.language.as_deref()));
         cx.set_global(app::Services { backend, art: art::new_handle(24 * 1024 * 1024) });
         widgets::text_input::bind_keys(cx);
         bind_keys(cx);

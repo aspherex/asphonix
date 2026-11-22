@@ -17,6 +17,7 @@ use crate::widgets::{hard_shadow, icon, icon_g};
 use crate::widgets::tooltip::Tip;
 use gpui::{AnyElement, ClickEvent, Context, CursorStyle, Entity, EventEmitter, IntoElement, MouseButton, Render, SharedString, Subscription, Timer, WeakEntity, Window, div, prelude::*, px, rgba};
 use sonix_api::*;
+use sonix_i18n::tr;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -161,7 +162,7 @@ impl SmartEditor {
         let o = self.open.as_ref().ok_or_else(String::new)?;
         let name = self.name.read(cx).content.trim().to_string();
         if name.is_empty() {
-            return Err("Give it a name.".into());
+            return Err(tr!(SmartErrName).into());
         }
         let mut rules = Vec::new();
         for r in &o.rows {
@@ -173,13 +174,13 @@ impl SmartEditor {
             let t = r.input.read(cx).content.trim().to_string();
             if meta.kind == Kind::Text {
                 if t.is_empty() {
-                    return Err(format!("{}: enter a value", meta.label));
+                    return Err(tr!(SmartErrValue, field = meta.label));
                 }
                 rules.push(SmartRule { field: r.field, op: r.op, value: Some(SmartValue::Text(t)) });
             } else {
                 match t.parse::<f64>() {
                     Ok(n) if n.is_finite() => rules.push(SmartRule { field: r.field, op: r.op, value: Some(SmartValue::Num(n)) }),
-                    _ => return Err(format!("{}: enter a number", meta.label)),
+                    _ => return Err(tr!(SmartErrNumber, field = meta.label)),
                 }
             }
         }
@@ -188,7 +189,7 @@ impl SmartEditor {
         if !ls.is_empty() {
             match ls.parse::<u32>() {
                 Ok(l) if (1..=10_000).contains(&l) => limit = Some(l),
-                _ => return Err("Limit must be a whole number from 1 to 10,000.".into()),
+                _ => return Err(tr!(SmartErrLimit, max = 10_000)),
             }
         }
         Ok(SmartInput { name, match_mode: o.mode, rules, sort: o.sort, limit })
@@ -225,7 +226,7 @@ impl SmartEditor {
                             Err(e) => {
                                 t.preview_total = None;
                                 t.preview_tracks.clear();
-                                t.preview_error = if e.message.is_empty() { "Preview failed.".into() } else { e.message };
+                                t.preview_error = crate::i18n::api_error(&e);
                             }
                         }
                         cx.notify();
@@ -267,7 +268,7 @@ impl SmartEditor {
                             cx.emit(ListsEvent::Navigate(Route::Smart(saved.id)));
                         }
                     }
-                    Err(e) => t.save_error = if e.message.is_empty() { "Could not save.".into() } else { e.message },
+                    Err(e) => t.save_error = tr!(SmartErrSave, reason = crate::i18n::api_error(&e)),
                 }
                 cx.notify();
             });
@@ -423,7 +424,8 @@ impl SmartEditor {
 
     fn apply_preset(&mut self, p: &SmartPreset, cx: &mut Context<Self>) {
         let th = app::theme(cx);
-        self.name.update(cx, |i, cx| i.set_content(&p.input.name, cx));
+        let name = preset_text(p).0;
+        self.name.update(cx, |i, cx| i.set_content(&name, cx));
         let lim = p.input.limit.map(|l| l.to_string()).unwrap_or_default();
         self.limit.update(cx, |i, cx| i.set_content(&lim, cx));
         let rows: Vec<Row> = p.input.rules.iter().map(|r| self.make_row(&th, r.field, r.op, value_text(&r.value), cx)).collect();
@@ -459,7 +461,7 @@ impl Render for SmartEditor {
         let draft = self.draft(cx);
 
         let mut body = div().flex().flex_col().gap(px(space::MD)).p(px(space::MD));
-        let note = wrap_text(&th, window, "LOCAL ONLY — evaluated on this machine from your synced library; never sent to the server.", MONO_CODE, inner_w);
+        let note = wrap_text(&th, window, &tr!(SmartLocalNote).to_uppercase(), MONO_CODE, inner_w);
         body = body.child(div().flex().flex_col().children(note.into_iter().map(|l| txt(&th, MONO_CODE, l).color(th.accent_fg))));
         if !editing && !self.presets.is_empty() {
             let mut chips = div().flex().flex_row().flex_wrap().gap(px(space::XS)).mt(px(space::XS));
@@ -468,7 +470,7 @@ impl Render for SmartEditor {
                 chips = chips.child(
                     div()
                         .id(("ed-chip", i))
-                        .tip(p.description.clone(), th)
+                        .tip(preset_text(p).1, th)
                         .px(px(space::SM))
                         .py(px(4.))
                         .bg(th.high)
@@ -477,18 +479,18 @@ impl Render for SmartEditor {
                         .text_color(th.text)
                         .cursor(CursorStyle::PointingHand)
                         .hover(move |s| s.border_color(th.focus).text_color(th.accent_fg))
-                        .child(txt(&th, LABEL_CAPS, p.input.name.clone()))
+                        .child(txt(&th, LABEL_CAPS, preset_text(p).0))
                         .on_click(cx.listener(move |t, _, _, cx| t.apply_preset(&pc, cx))),
                 );
             }
-            body = body.child(div().flex().flex_col().child(div().flex().items_center().h(px(18.)).child(txt(&th, LABEL_CAPS, "Start from a preset").color(th.muted))).child(chips));
+            body = body.child(div().flex().flex_col().child(div().flex().items_center().h(px(18.)).child(txt(&th, LABEL_CAPS, tr!(SmartPresetTitle)).color(th.muted))).child(chips));
         }
-        body = body.child(field(&th, &self.name, Some("//"), "Playlist name", window, cx));
+        body = body.child(field(&th, &self.name, Some("//"), tr!(DialogPlaylistName), window, cx));
         let t_m = this.clone();
-        body = body.child(div().flex().flex_row().items_center().gap(px(space::MD)).child(txt(&th, LABEL_CAPS, "Match").color(th.muted)).child(segmented(
+        body = body.child(div().flex().flex_row().items_center().gap(px(space::MD)).child(txt(&th, LABEL_CAPS, tr!(SmartMatch)).color(th.muted)).child(segmented(
                 "ed-match",
                 &th,
-                &[("all", "All rules"), ("any", "Any rule")],
+                &[("all", tr!(SmartMatchAll)), ("any", tr!(SmartMatchAny))],
                 if mode == SmartMatchMode::All { "all" } else { "any" },
                 move |v, _, cx| {
                     if let Some(t) = t_m.upgrade() {
@@ -526,7 +528,7 @@ impl Render for SmartEditor {
                         .border_color(th.border)
                         .map(|d| if can_add { d.cursor(CursorStyle::PointingHand).hover(move |s| s.text_color(th.accent_fg).border_color(th.focus)) } else { d.opacity(0.5).cursor(CursorStyle::OperationNotAllowed) })
                         .child(icon("add", 12., th.muted))
-                        .child(txt(&th, LABEL_CAPS, "Add rule"))
+                        .child(txt(&th, LABEL_CAPS, tr!(SmartAddRule)))
                         .when(can_add, |d| {
                             d.on_click(cx.listener(|t, _, _, cx| {
                                 let th = app::theme(cx);
@@ -542,7 +544,7 @@ impl Render for SmartEditor {
                 ),
         );
         if n_rows == 0 {
-            rules = rules.child(txt(&th, BODY_SM, "No rules: every track in your library matches.").color(th.muted));
+            rules = rules.child(txt(&th, BODY_SM, tr!(SmartNoRules)).color(th.muted));
         }
         body = body.child(rules);
         // sort + limit
@@ -579,26 +581,26 @@ impl Render for SmartEditor {
             .border_1()
             .border_color(th.border)
             .child(div().flex_1().min_w_0().child(self.limit.clone()))
-            .when(lim_empty, |d| d.child(div().absolute().left(px(space::SM)).child(txt(&th, MONO_DATA, "no limit").color(th.muted))));
+            .when(lim_empty, |d| d.child(div().absolute().left(px(space::SM)).child(txt(&th, MONO_DATA, tr!(SmartNoLimit)).color(th.muted))));
         body = body.child(div()
                 .flex()
                 .flex_row()
                 .gap(px(space::LG))
-                .child(div().flex().flex_col().gap(px(space::XS)).child(txt(&th, LABEL_CAPS, "Sort").color(th.muted)).child(sort_sel))
-                .child(div().flex().flex_col().gap(px(space::XS)).child(txt(&th, LABEL_CAPS, "Limit (optional)").color(th.muted)).child(limit_box)));
+                .child(div().flex().flex_col().gap(px(space::XS)).child(txt(&th, LABEL_CAPS, tr!(SmartSort)).color(th.muted)).child(sort_sel))
+                .child(div().flex().flex_col().gap(px(space::XS)).child(txt(&th, LABEL_CAPS, tr!(SmartLimit)).color(th.muted)).child(limit_box)));
         // preview
         let mut prev = div().flex().flex_col().min_h(px(40.)).px(px(space::MD)).py(px(space::SM)).bg(th.low).border_1().border_color(th.border);
         match (&draft, &self.preview_error, self.preview_total) {
             (Err(e), _, _) => prev = prev.child(txt(&th, MONO_CODE, e.clone()).color(th.muted)),
             (_, e, _) if !e.is_empty() => prev = prev.child(txt(&th, MONO_CODE, e.clone()).color(th.clip)),
-            (_, _, None) => prev = prev.child(txt(&th, MONO_CODE, "EVALUATING…").color(th.muted)),
+            (_, _, None) => prev = prev.child(txt(&th, MONO_CODE, tr!(SmartEvaluating).to_uppercase()).color(th.muted)),
             (_, _, Some(n)) => {
                 prev = prev.child(
                     div()
                         .flex()
                         .flex_row()
-                        .child(txt(&th, crate::tracking::TypeSpec { weight: 700.0, ..MONO_DATA }, sonix_api::format::fmt_int(n as u64)).color(th.accent_fg))
-                        .child(txt(&th, MONO_DATA, " MATCHING TRACKS").color(th.text)),
+                        .child(txt(&th, crate::tracking::TypeSpec { weight: 700.0, ..MONO_DATA }, sonix_i18n::fmt::int(n as u64)).color(th.accent_fg))
+                        .child(txt(&th, MONO_DATA, format!(" {}", tr!(SmartMatching, count = n).to_uppercase())).color(th.text)),
                 );
                 if !self.preview_tracks.is_empty() {
                     prev = prev.child(div().flex().flex_col().mt(px(space::XS)).children(self.preview_tracks.iter().map(|t| div().flex().min_w_0().child(txt(&th, BODY_SM, format!("{} — {}", t.artist, t.title)).color(th.muted).ellipsis()))));
@@ -609,11 +611,11 @@ impl Render for SmartEditor {
         if !self.save_error.is_empty() {
             body = body.child(txt(&th, MONO_CODE, self.save_error.clone()).color(th.clip));
         }
-        let cancel = button("ed-cancel", th, Variant::Secondary, "Cancel", None, false, window).on_click(cx.listener(|t, _, window, cx| t.close(window, cx)));
-        let ok = button("ed-ok", th, Variant::Primary, if editing { "Save" } else { "Create" }, None, draft.is_err() || self.saving, window).on_click(cx.listener(|t, _, _, cx| t.save(cx)));
+        let cancel = button("ed-cancel", th, Variant::Secondary, tr!(DialogCancel), None, false, window).on_click(cx.listener(|t, _, window, cx| t.close(window, cx)));
+        let ok = button("ed-ok", th, Variant::Primary, if editing { tr!(DialogSave) } else { tr!(DialogCreate) }, None, draft.is_err() || self.saving, window).on_click(cx.listener(|t, _, _, cx| t.save(cx)));
         body = body.child(div().flex().flex_row().justify_end().gap(px(space::SM)).child(cancel).child(ok));
 
-        let title: SharedString = if editing { "Edit smart playlist" } else { "New smart playlist" }.into();
+        let title: SharedString = if editing { tr!(SmartEditTitle) } else { tr!(PlaylistsNewSmart) }.into();
         let _ = ctl::FIELD_H;
         let (bar, overflow) = crate::widgets::scrollbar::passive(th, &self.body_scroll);
         let body = div()
@@ -646,5 +648,22 @@ impl Render for SmartEditor {
                     .child(panel(&th, &title, body)),
             )
             .into_any_element()
+    }
+}
+
+/// A preset's name and description, translated by its stable key (the backend's English text for an unknown key).
+fn preset_text(p: &SmartPreset) -> (String, String) {
+    let keys = match p.key.as_str() {
+        "hi-res" => Some((sonix_i18n::Key::PresetHiResName, sonix_i18n::Key::PresetHiResDesc)),
+        "24-bit" => Some((sonix_i18n::Key::Preset24BitName, sonix_i18n::Key::Preset24BitDesc)),
+        "top-rated" => Some((sonix_i18n::Key::PresetTopRatedName, sonix_i18n::Key::PresetTopRatedDesc)),
+        "stale" => Some((sonix_i18n::Key::PresetStaleName, sonix_i18n::Key::PresetStaleDesc)),
+        "recent" => Some((sonix_i18n::Key::PresetRecentName, sonix_i18n::Key::PresetRecentDesc)),
+        "never-played" => Some((sonix_i18n::Key::PresetNeverPlayedName, sonix_i18n::Key::PresetNeverPlayedDesc)),
+        _ => None,
+    };
+    match keys {
+        Some((n, d)) => (sonix_i18n::tr(n).to_string(), sonix_i18n::tr(d).to_string()),
+        None => (p.input.name.clone(), p.description.clone()),
     }
 }

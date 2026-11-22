@@ -16,6 +16,7 @@ workspace = true
 [dependencies]
 sonix-api = { path = "../sonix-api" }
 sonix-real = { path = "../sonix-real" }
+sonix-i18n = { path = "../sonix-i18n" }
 gpui.workspace = true
 serde.workspace = true
 serde_json.workspace = true

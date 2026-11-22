@@ -1,14 +1,17 @@
-//! Formatting helpers of the library routes (total duration, format summary, relative time) and the
-//! short local date of the album telemetry panel.
+//! Formatting helpers of the library routes (total duration, format summary, relative time, day headers) and the
+//! short local date of the album telemetry panel, in the active UI language. Where the text is shown in caps the
+//! upper-casing happens here, at render time (translations stay in normal case).
 use sonix_api::Track;
 use sonix_api::format::format_track_format;
+use sonix_i18n::{Key, tr};
 use std::collections::BTreeSet;
 
-/// "2 HR 5 MIN" / "37 MIN".
+/// "2 HR 5 MIN" / "37 MIN" ("2 STD. 5 MIN." in German).
 pub fn total_duration(total_seconds: f64) -> String {
     let total_min = (total_seconds / 60.0).round() as i64;
     let (h, m) = (total_min / 60, total_min % 60);
-    if h > 0 { format!("{h} HR {m} MIN") } else { format!("{m} MIN") }
+    let s = if h > 0 { tr!(DurHoursMinutes, h = h, m = m) } else { tr!(DurMinutes, m = m) };
+    s.to_uppercase()
 }
 
 /// One label when every track agrees, else the suffixes.
@@ -29,7 +32,49 @@ pub fn summarize_formats(tracks: &[Track]) -> String {
             suffixes.push(s);
         }
     }
-    if suffixes.len() == 1 { format!("{} · MIXED RATES", suffixes[0]) } else { suffixes.join(" · ") }
+    if suffixes.len() == 1 { tr!(FormatsMixedRates, format = suffixes[0].as_str()).to_uppercase() } else { suffixes.join(" · ") }
+}
+
+/// Dock / Now Playing volume: "MUTE" (translated), "0.0 dB", "-45.0 dB" (locale decimal separator).
+pub fn volume_label(ps: &sonix_api::PlayerState) -> String {
+    if ps.volume <= 0.0 {
+        return tr!(VolumeMute).to_uppercase();
+    }
+    sonix_i18n::fmt::decimal(&sonix_api::format::volume_label(ps))
+}
+
+const WEEKDAYS: [Key; 7] = [Key::WeekdaySun, Key::WeekdayMon, Key::WeekdayTue, Key::WeekdayWed, Key::WeekdayThu, Key::WeekdayFri, Key::WeekdaySat];
+const MONTHS: [Key; 12] = [
+    Key::MonthJan,
+    Key::MonthFeb,
+    Key::MonthMar,
+    Key::MonthApr,
+    Key::MonthMay,
+    Key::MonthJun,
+    Key::MonthJul,
+    Key::MonthAug,
+    Key::MonthSep,
+    Key::MonthOct,
+    Key::MonthNov,
+    Key::MonthDec,
+];
+
+/// History day header of a local `YYYY-MM-DD`: "TODAY", "YESTERDAY", else "SAT 31 OCT 2026" ("SA., 31. OKT. 2026").
+pub fn day_header(day: &str, now_ms: i64) -> String {
+    let mut it = day.split('-').filter_map(|p| p.parse::<i64>().ok());
+    let (Some(y), Some(m), Some(d)) = (it.next(), it.next(), it.next()) else { return day.to_string() };
+    let this = days_from_civil(y, m, d);
+    let (ny, nm, nd, ..) = sonix_api::format::local_parts(now_ms);
+    let s = match days_from_civil(ny as i64, nm as i64, nd as i64) - this {
+        0 => tr!(DayToday).to_string(),
+        1 => tr!(DayYesterday).to_string(),
+        _ => {
+            let dow = (this + 4).rem_euclid(7) as usize;
+            // day and year as text: numbers would be grouped ("2,026")
+            tr!(DayHeader, weekday = tr(WEEKDAYS[dow]), day = d.to_string(), month = tr(MONTHS[(m - 1).clamp(0, 11) as usize]), year = y.to_string())
+        }
+    };
+    s.to_uppercase()
 }
 
 /// Days since 1970-01-01 of a proleptic Gregorian date (Howard Hinnant's algorithm).
@@ -101,62 +146,35 @@ fn local_offset_ms(_: i64) -> i64 {
     0
 }
 
-/// The user's short date format for a calendar date (the OS regional settings).
-#[cfg(windows)]
-fn system_short_date(y: i64, m: i64, d: i64) -> Option<String> {
-    #[repr(C)]
-    #[derive(Default)]
-    struct SystemTime {
-        year: u16,
-        month: u16,
-        dow: u16,
-        day: u16,
-        hour: u16,
-        minute: u16,
-        second: u16,
-        ms: u16,
-    }
-    unsafe extern "system" {
-        fn GetDateFormatEx(locale: *const u16, flags: u32, date: *const SystemTime, format: *const u16, out: *mut u16, cch: i32, cal: *const u16) -> i32;
-    }
-    let st = SystemTime { year: y as u16, month: m as u16, day: d as u16, ..Default::default() };
-    let mut buf = [0u16; 64];
-    // SAFETY: `st` and `buf` outlive the call; null locale/format/calendar select the user default and the short date format (DATE_SHORTDATE = 1).
-    let n = unsafe { GetDateFormatEx(std::ptr::null(), 1, &st, std::ptr::null(), buf.as_mut_ptr(), buf.len() as i32, std::ptr::null()) };
-    (n > 1).then(|| String::from_utf16_lossy(&buf[..n as usize - 1]))
-}
-
-/// The date of `iso` in the local time zone: the OS short date format, else `M/D/YYYY`.
+/// The date of `iso` in the local time zone, as the UI language's short date (the OS format on Windows).
 pub fn locale_date(iso: &str) -> String {
-    let Some(ms) = parse_iso_ms(iso) else { return "Invalid Date".into() };
+    let Some(ms) = parse_iso_ms(iso) else { return tr!(DateInvalid).to_string() };
     let (y, m, d) = civil_from_days((ms + local_offset_ms(ms)).div_euclid(86_400_000));
-    #[cfg(windows)]
-    if let Some(s) = system_short_date(y, m, d) {
-        return s;
-    }
-    format!("{m}/{d}/{y}")
+    sonix_i18n::fmt::short_date(y, m, d)
 }
 
 pub fn now_ms() -> i64 {
     std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_millis() as i64).unwrap_or(0)
 }
 
-/// Relative time ("JUST NOW", "3MIN AGO", ...) against `now`.
+/// Relative time ("JUST NOW", "3MIN AGO", ...) against `now`, upper case.
 pub fn relative_time(iso: Option<&str>, now: i64) -> String {
     let Some(then) = iso.and_then(parse_iso_ms) else { return "—".into() };
     let diff_sec = ((now - then) / 1000).max(0);
-    if diff_sec < 5 {
-        return "JUST NOW".into();
-    }
-    if diff_sec < 60 {
-        return format!("{diff_sec}S AGO");
-    }
     let min = diff_sec / 60;
-    if min < 60 {
-        return format!("{min}MIN AGO");
-    }
     let hr = min / 60;
-    if hr < 24 { format!("{hr}H AGO") } else { format!("{}D AGO", hr / 24) }
+    let s = if diff_sec < 5 {
+        tr!(TimeJustNow).to_string()
+    } else if diff_sec < 60 {
+        tr!(TimeSecondsAgo, n = diff_sec)
+    } else if min < 60 {
+        tr!(TimeMinutesAgo, n = min)
+    } else if hr < 24 {
+        tr!(TimeHoursAgo, n = hr)
+    } else {
+        tr!(TimeDaysAgo, n = hr / 24)
+    };
+    s.to_uppercase()
 }
 
 #[cfg(test)]

@@ -21,6 +21,7 @@ use crate::router::Route;
 use crate::theme::Theme;
 use gpui::{AnyElement, BoxShadow, Context, Entity, IntoElement, Subscription, Window, point, prelude::*, px};
 use sonix_api::SmartSummary;
+use sonix_i18n::tr;
 use track_page::PageKind;
 
 pub use crate::views::shell::SelectAll as SelectAllRows;
@@ -38,6 +39,8 @@ pub enum ListsEvent {
     Back,
     /// Settings > "Show track preview" / its corner changed (the shell owns the track-change card)
     TrackOverlay(bool, sonix_api::OverlayCorner),
+    /// Settings > Language changed (`None` = follow the OS)
+    Language(Option<sonix_i18n::Lang>),
 }
 
 /// `--shadow-hot*`: accent in dark, ink in light.
@@ -264,7 +267,7 @@ impl Shell {
     pub(crate) fn lists_new_playlist(&mut self, cx: &mut Context<Self>) {
         let Some(br) = self.lists.bridge.clone() else { return };
         let br = br.downgrade();
-        crate::overlays::prompt(cx, "New playlist", "Playlist name", "Create", "", move |name, cx| {
+        crate::overlays::prompt(cx, tr!(DialogNewPlaylist), tr!(DialogPlaylistName), tr!(DialogCreate), "", move |name, cx| {
             let b = app::backend(cx);
             cx.spawn(async move |cx| {
                 let r = cx.background_executor().spawn(async move { b.playlists_create(sonix_api::CreatePlaylistRequest { name, track_ids: vec![] }) }).await;
@@ -318,9 +321,8 @@ impl Shell {
                         }
                         // toast: the new profile or the error
                         let msg = match r {
-                            Ok(_) => format!("Switched to {label}"),
-                            Err(e) if !e.message.is_empty() => format!("Could not switch: {}", e.message),
-                            Err(_) => "Could not switch profile".to_string(),
+                            Ok(_) => tr!(ProfileSwitched, name = label.as_str()),
+                            Err(e) => tr!(ProfileSwitchFailed, reason = crate::i18n::api_error(&e)),
                         };
                         let _ = cx.update(|cx| crate::overlays::show_toast(cx, &msg));
                     })
@@ -342,7 +344,7 @@ impl Shell {
                         cx.spawn(async move |cx| {
                             let r = cx.background_executor().spawn(async move { b.profiles_remove(&id) }).await;
                             if r.is_ok() {
-                                let _ = cx.update(|cx| crate::overlays::show_toast(cx, "Profile removed"));
+                                let _ = cx.update(|cx| crate::overlays::show_toast(cx, tr!(ProfileRemoved)));
                             }
                         })
                         .detach();
@@ -350,12 +352,12 @@ impl Shell {
                     .danger()
                 })
                 .collect();
-            items.push(MenuItem::submenu("Remove saved profile", subs).icon("trash"));
+            items.push(MenuItem::submenu(tr!(ProfileRemoveSaved), subs).icon("trash"));
         }
         items.push(MenuItem::separator());
         let br_add = br.downgrade();
         items.push(
-            MenuItem::action("Add profile…", move |_, cx| {
+            MenuItem::action(tr!(ProfileAdd), move |_, cx| {
                 if let Some(t) = br_add.upgrade() {
                     t.update(cx, |_, cx| cx.emit(ListsEvent::Navigate(Route::Login)));
                 }
@@ -364,7 +366,7 @@ impl Shell {
         );
         let br_out = br.downgrade();
         items.push(
-            MenuItem::action("Sign out", move |_, cx| {
+            MenuItem::action(tr!(ProfileSignOut), move |_, cx| {
                 let br_out = br_out.clone();
                 let b = app::backend(cx);
                 cx.spawn(async move |cx| {
@@ -388,6 +390,7 @@ impl Shell {
         match ev {
             ListsEvent::Navigate(r) => self.navigate(r.clone(), cx),
             ListsEvent::TrackOverlay(on, corner) => self.apply_track_overlay(*on, *corner),
+            ListsEvent::Language(l) => self.set_language(*l, cx),
             ListsEvent::PlaylistsChanged | ListsEvent::SmartChanged => {
                 self.load_static(cx);
                 if matches!(ev, ListsEvent::SmartChanged)

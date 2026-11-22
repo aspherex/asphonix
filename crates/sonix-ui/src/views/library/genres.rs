@@ -9,9 +9,9 @@ use crate::router::Route;
 use crate::text::txt;
 use crate::tracking::{BODY_SM, HEADLINE_MD, HEADLINE_SM, MONO_CODE, MONO_DATA};
 use gpui::{AnyElement, Context, CursorStyle, IntoElement, Render, Window, div, prelude::*, px};
-use sonix_api::format::fmt_int;
 use sonix_api::*;
 use std::cell::Cell;
+use sonix_i18n::tr;
 use std::rc::Rc;
 
 pub struct GenresView {
@@ -60,7 +60,7 @@ impl Render for GenresView {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let th = app::theme(cx);
         let this = cx.entity().downgrade();
-        let options: [(GenreSort, &'static str); 2] = [(GenreSort::Tracks, "Most tracks"), (GenreSort::Alphabetical, "A-Z")];
+        let options: [(GenreSort, &'static str); 2] = [(GenreSort::Tracks, tr!(GenresSortMostTracks)), (GenreSort::Alphabetical, "A-Z")];
         let header = div()
             .flex()
             .flex_row()
@@ -69,13 +69,13 @@ impl Render for GenresView {
             .justify_between()
             .gap(px(sp::MD))
             .flex_none()
-            .child(txt(&th, HEADLINE_MD, "Genres").color(th.text))
+            .child(txt(&th, HEADLINE_MD, tr!(NavGenres)).color(th.text))
             .child(div()
                     .flex()
                     .flex_row()
                     .items_center()
                     .gap(px(m::CONTROLS_GAP))
-                    .child(txt(&th, MONO_CODE, format!("{} GENRES", fmt_int(self.items.len() as u64))).color(th.muted))
+                    .child(txt(&th, MONO_CODE, tr!(CountGenres, count = self.items.len()).to_uppercase()).color(th.muted))
                     .child(segmented(&th, "lib.seg", &options, self.sort, move |v, _, cx| {
                             let _ = this.update(cx, |t, cx| {
                                 t.sort = v;
@@ -106,9 +106,9 @@ impl Render for GenresView {
             }
             grid.into_any_element()
         } else if self.error {
-            div().flex().child(txt(&th, MONO_CODE, "GENRES UNAVAILABLE.").color(th.muted)).into_any_element()
+            div().flex().child(txt(&th, MONO_CODE, tr!(GenresUnavailable).to_uppercase()).color(th.muted)).into_any_element()
         } else if self.items.is_empty() {
-            div().flex().child(txt(&th, BODY_SM, "No genre tags in your library yet.").color(th.muted)).into_any_element()
+            div().flex().child(txt(&th, BODY_SM, tr!(GenresEmpty)).color(th.muted)).into_any_element()
         } else {
             let content_w = (self.w.get() - 2.0 * m::PAGE_PAD).max(1.0);
             let (_, cw) = auto_fill(content_w, m::GENRE_MIN_CELL, sp::MD);
@@ -142,7 +142,7 @@ impl Render for GenresView {
                     .hover(move |s| s.border_color(th.focus))
                     .when(focused, |d| d.child(super::cards::focus_ring()))
                     .child(div().flex().min_w_0().child(txt(&th, HEADLINE_SM, g.name.clone()).color(th.text).ellipsis()))
-                    .child(div().flex().min_w_0().child(txt(&th, MONO_DATA, format!("{} ALBUMS · {} TRACKS", fmt_int(g.album_count as u64), fmt_int(g.track_count as u64))).color(th.muted)))
+                    .child(div().flex().min_w_0().child(txt(&th, MONO_DATA, format!("{} · {}", tr!(CountAlbums, count = g.album_count), tr!(CountTracks, count = g.track_count)).to_uppercase()).color(th.muted)))
                     .child(div().mt(px(sp::XS)).h(px(m::GENRE_BAR_H)).bg(th.high).child(div().h_full().w(gpui::relative(pct / 100.0)).bg(th.accent)))
                     .on_click(move |_, _, cx| navigate(cx, Route::Genre(name.clone())));
                 grid = grid.child(c);

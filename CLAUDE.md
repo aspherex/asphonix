@@ -12,6 +12,12 @@ SONIX is a native GPUI desktop player for Navidrome/Subsonic. See README.md for 
 - **Look:** tokens in `src/theme.rs`, type scale in `src/tracking.rs`, zero radius, hard shadows only on small
   static elements, both themes. Every margin/padding/gap/size/timing lives in `src/metrics.rs`; single-line text
   goes through `text::txt` (letter-spacing, ellipsis, baseline).
+- **Text is translated.** Every user-facing string is a message in `crates/sonix-i18n/locales/en/sonix.ftl` with
+  its German translation in `locales/de/sonix.ftl`, used as `tr!(Key)` / `tr!(Key, n = 3)` (keys are generated, a
+  typo does not compile). Write normal case; upper-casing is a render-time style. Counts go through Fluent plurals,
+  numbers/dates through `sonix_i18n::fmt`. `crates/sonix-i18n/tests/usage.rs` fails on English literals passed to
+  `txt`/tooltips/menus/buttons and on unused keys. Logs, MCP tool texts and env vars stay English.
+  `SONIX_LOCALE=en-XA` shows the pseudo-locale (accented, bracketed, ~40 % longer) to spot hard-coded or clipped text.
 - **Perf budget** (docs/PERF.md): <= 40 MB private working set in normal use, refresh-rate animation, no CPU when
   nothing changes beyond GPUI's vsync thread; on minimize stop timers/animations, drop caches/rows,
   `EmptyWorkingSet`. Animation only via `request_animation_frame` while visible + playing + not suspended.
@@ -45,6 +51,10 @@ SONIX is a native GPUI desktop player for Navidrome/Subsonic. See README.md for 
   Log any URL through `sonix_core::redact::redact_url` (Subsonic auth is in the query string); never log
   passwords, tokens or keyring values; nothing logs periodically while idle; nothing logs between the
   `rt-path:begin`/`rt-path:end` markers in `audio/output/*` (counters + engine thread instead, test-enforced).
+- `sonix-i18n` (no GPUI): Fluent catalogs (`locales/<lang>/sonix.ftl`, only the active one + English parsed),
+  generated `Key` enum, argument-less messages pre-formatted per locale (a lookup on the render path), `fmt`
+  (separators/dates from the OS on Windows). `sonix-ui/src/i18n.rs` holds the `I18n` global; a switch
+  (Settings > Language) calls `refresh_windows`, which re-renders cached views too.
 
 ## GPUI gotchas
 

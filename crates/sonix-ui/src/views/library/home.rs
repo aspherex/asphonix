@@ -19,10 +19,10 @@ use crate::tracking::{BODY_MD, BODY_SM, HEADLINE_LG, HEADLINE_SM, LABEL_CAPS, MO
 use crate::widgets::icon;
 use crate::widgets::scrollbar::{self, ScrollbarHandle};
 use gpui::{AnyElement, Context, CursorStyle, IntoElement, Render, Subscription, UniformListScrollHandle, Window, div, prelude::*, px, uniform_list};
-use sonix_api::format::fmt_int;
 use sonix_api::*;
 use std::cell::Cell;
 use std::ops::Range;
+use sonix_i18n::tr;
 use std::rc::Rc;
 use std::sync::{Arc, Mutex};
 
@@ -143,10 +143,10 @@ impl HomeView {
         let st = self.status.as_ref();
         let connected = st.map(|s| s.state == ConnectionState::Connected).unwrap_or(false);
         let state_label = match st.map(|s| s.state) {
-            Some(ConnectionState::Connected) => "CONNECTED",
-            Some(ConnectionState::Connecting) => "CONNECTING",
-            Some(ConnectionState::Error) => "ERROR",
-            _ => "DISCONNECTED",
+            Some(ConnectionState::Connected) => tr!(StatusConnected),
+            Some(ConnectionState::Connecting) => tr!(StatusConnecting),
+            Some(ConnectionState::Error) => tr!(StatusError),
+            _ => tr!(StatusDisconnected),
         };
         let mut session = div()
             .flex()
@@ -154,12 +154,15 @@ impl HomeView {
             .items_center()
             .gap(px(sp::SM))
             .child(div().size(px(8.)).flex_none().bg(if connected { th.accent } else { th.muted }))
-            .child(txt(&th, MONO_CODE, state_label).color(th.text));
+            .child(txt(&th, MONO_CODE, state_label.to_uppercase()).color(th.text));
         if let Some(p) = st.and_then(|s| s.ping_ms) {
             session = session.child(txt(&th, MONO_CODE, format!("{p}ms")).color(th.muted));
         }
         let name = st.and_then(|s| s.username.clone());
-        let title = format!("Welcome back{}", name.map(|n| format!(", {n}")).unwrap_or_default());
+        let title = match name {
+            Some(n) => tr!(HomeWelcomeBackName, name = n),
+            None => tr!(HomeWelcomeBack).to_string(),
+        };
         let pill = |children: Vec<AnyElement>| {
             let mut p = div().flex().flex_row().items_center().gap(px(sp::XS)).px(px(sp::SM)).py(px(sp::XS)).bg(th.mid);
             for c in children {
@@ -169,22 +172,22 @@ impl HomeView {
         };
         let mut pills = div().flex().flex_row().flex_wrap().gap(px(sp::SM)).mt(px(sp::XS));
         if let Some(n) = st.and_then(|s| s.track_count) {
-            pills = pills.child(pill(vec![icon("library", 14.0, th.text).into_any_element(), txt(&th, MONO_DATA, format!("{} TRACKS INDEXED", fmt_int(n))).color(th.text).into_any_element()]));
+            pills = pills.child(pill(vec![icon("library", 14.0, th.text).into_any_element(), txt(&th, MONO_DATA, tr!(HomeTracksIndexed, count = n).to_uppercase()).color(th.text).into_any_element()]));
         }
         if let Some(at) = st.and_then(|s| s.last_sync_at.clone()) {
-            pills = pills.child(pill(vec![txt(&th, MONO_DATA, format!("SYNCED {}", fmtx::relative_time(Some(&at), fmtx::now_ms()))).color(th.text).into_any_element()]));
+            pills = pills.child(pill(vec![txt(&th, MONO_DATA, tr!(HomeSynced, when = fmtx::relative_time(Some(&at), fmtx::now_ms())).to_uppercase()).color(th.text).into_any_element()]));
         }
         match st.map(|s| s.state) {
             Some(ConnectionState::Disconnected) => {
-                pills = pills.child(pill(vec![txt(&th, MONO_DATA, "NOT CONNECTED — HEAD TO SETTINGS TO ADD A SERVER").color(th.muted).into_any_element()]));
+                pills = pills.child(pill(vec![txt(&th, MONO_DATA, tr!(HomeNotConnected).to_uppercase()).color(th.muted).into_any_element()]));
             }
             Some(ConnectionState::Error) => {
-                pills = pills.child(pill(vec![txt(&th, MONO_DATA, "SERVER UNREACHABLE — BROWSING LOCAL LIBRARY").color(th.muted).into_any_element()]));
+                pills = pills.child(pill(vec![txt(&th, MONO_DATA, tr!(HomeServerUnreachable).to_uppercase()).color(th.muted).into_any_element()]));
             }
             _ => {}
         }
         let key = |k: &'static str, rest: &'static str| {
-            div().flex().flex_row().child(txt(&th, MONO_CODE, k).weight(700.0).color(th.text)).child(txt(&th, MONO_CODE, format!(" {rest}")).color(th.muted))
+            div().flex().flex_row().child(txt(&th, MONO_CODE, k.to_uppercase()).weight(700.0).color(th.text)).child(txt(&th, MONO_CODE, format!(" {rest}")).color(th.muted))
         };
         let hotkeys = div()
             .flex()
@@ -195,10 +198,10 @@ impl HomeView {
             .pt(px(sp::SM))
             .border_t_1()
             .border_color(th.border)
-            .child(key("SPACE", "Play/Pause"))
-            .child(key("J / K", "Scroll"))
-            .child(div().flex().flex_row().child(txt(&th, MONO_CODE, "/").weight(700.0).color(th.text)).child(txt(&th, MONO_CODE, " or ").color(th.muted)).child(txt(&th, MONO_CODE, "CTRL+K").weight(700.0).color(th.text)).child(txt(&th, MONO_CODE, " Search").color(th.muted)))
-            .child(key("ENTER", "Play"));
+            .child(key(tr!(KbdSpace), tr!(HomeKeyPlayPause)))
+            .child(key("J / K", tr!(HomeKeyScroll)))
+            .child(div().flex().flex_row().child(txt(&th, MONO_CODE, "/").weight(700.0).color(th.text)).child(txt(&th, MONO_CODE, format!(" {} ", tr!(HomeKeyOr))).color(th.muted)).child(txt(&th, MONO_CODE, format!("{}+K", tr!(KbdCtrl).to_uppercase())).weight(700.0).color(th.text)).child(txt(&th, MONO_CODE, format!(" {}", tr!(HomeKeySearch))).color(th.muted)))
+            .child(key(tr!(KbdEnter), tr!(MenuPlay)));
         div()
             .flex()
             .flex_col()
@@ -217,8 +220,8 @@ impl HomeView {
     fn offer_bar(&self, th: &Theme, o: &ServerQueueOffer, cx: &mut Context<Self>) -> AnyElement {
         let th = *th;
         let prefix = match &o.changed_by {
-            Some(n) => format!("LAST PLAYED ON {}", n.to_uppercase()),
-            None => "QUEUE ON SERVER".into(),
+            Some(n) => tr!(HomeLastPlayedOn, device = n.as_str()).to_uppercase(),
+            None => tr!(HomeQueueOnServer).to_uppercase(),
         };
         let mono = |s: String, weight: Option<f32>, c| {
             let t = txt(&th, MONO_DATA, s).color(c);
@@ -249,7 +252,7 @@ impl HomeView {
             .border_color(th.accent_fg)
             .cursor(CursorStyle::PointingHand)
             .hover(move |s| s.border_color(th.focus))
-            .child(txt(&th, LABEL_CAPS, "Resume from server").color(th.accent_text))
+            .child(txt(&th, LABEL_CAPS, tr!(HomeResumeFromServer)).color(th.accent_text))
             .on_click(move |_, _, cx| {
                 let _ = this.update(cx, |t, cx| {
                     t.offer = None;
@@ -269,7 +272,7 @@ impl HomeView {
             .border_color(th.border)
             .cursor(CursorStyle::PointingHand)
             .hover(move |s| s.border_color(th.focus))
-            .child(txt(&th, LABEL_CAPS, "Dismiss").color(th.text))
+            .child(txt(&th, LABEL_CAPS, tr!(HomeDismiss)).color(th.text))
             .on_click(move |_, _, cx| {
                 if let Ok(mut d) = DISMISSED.lock() {
                     *d = Some(key.clone());
@@ -371,8 +374,8 @@ impl HomeView {
             .flex_col()
             .h(px(m::HOME_LIST_H))
             .flex_none()
-            .child(Self::block_title(&th, "Recently Ingested // Server Pipeline"))
-            .child(if self.list_unavailable { div().flex().child(txt(&th, BODY_SM, "Unavailable until a server is connected.").color(th.muted)).into_any_element() } else { wrap.into_any_element() })
+            .child(Self::block_title(&th, tr!(HomeRecentlyIngested)))
+            .child(if self.list_unavailable { div().flex().child(txt(&th, BODY_SM, tr!(HomeUnavailable)).color(th.muted)).into_any_element() } else { wrap.into_any_element() })
             .into_any_element()
     }
 }
@@ -396,7 +399,7 @@ impl Render for HomeView {
         if loading_sections {
             let (cols_t, _) = auto_fill(content_w, m::TILE_GRID_MIN, sp::MD);
             let t: Vec<AnyElement> = (0..cols_t.min(6)).map(|_| super::cards::tile_skeleton(&th, tile_w)).collect();
-            children.push(div().flex().flex_col().child(Self::block_title(&th, "Jump Back In // Sessions")).child(Self::grid(t, sp::MD)).into_any_element());
+            children.push(div().flex().flex_col().child(Self::block_title(&th, tr!(HomeJumpBackIn))).child(Self::grid(t, sp::MD)).into_any_element());
         }
         if let Some(s) = self.sections.clone().filter(|s| !s.recently_played.is_empty()) {
             let mut tiles = Vec::new();
@@ -429,7 +432,7 @@ impl Render for HomeView {
                 div()
                     .flex()
                     .flex_col()
-                    .child(Self::block_title(&th, "Jump Back In // Sessions"))
+                    .child(Self::block_title(&th, tr!(HomeJumpBackIn)))
                     .child(Self::grid(tiles, sp::MD))
                     .into_any_element(),
             );
@@ -470,13 +473,13 @@ impl Render for HomeView {
                 .cursor(CursorStyle::PointingHand)
                 .text_color(th.muted)
                 .hover(move |s| s.text_color(th.accent_fg))
-                .child(txt(&th, LABEL_CAPS, "View history"))
+                .child(txt(&th, LABEL_CAPS, tr!(HomeViewHistory)))
                 .on_click(move |_, _, cx| navigate(cx, Route::History));
             children.push(
                 div()
                     .flex()
                     .flex_col()
-                    .child(Self::block_title(&th, "Recently Played Tracks").child(view_all))
+                    .child(Self::block_title(&th, tr!(HomeRecentlyPlayed)).child(view_all))
                     .child(Self::grid(tiles, sp::MD))
                     .into_any_element(),
             );
@@ -485,15 +488,15 @@ impl Render for HomeView {
         // Heavy Rotation
         if let Some(s) = self.sections.clone().filter(|s| !s.frequent.is_empty()) {
             let cards: Vec<AnyElement> = s.frequent.iter().map(|a| card(&ctx, &th, CardItem::Album(a), card_w, None, window, cx)).collect();
-            children.push(div().flex().flex_col().child(Self::block_title(&th, "Heavy Rotation")).child(Self::grid(cards, sp::MD)).into_any_element());
+            children.push(div().flex().flex_col().child(Self::block_title(&th, tr!(HomeHeavyRotation))).child(Self::grid(cards, sp::MD)).into_any_element());
         }
         if loading_sections {
             let (cols_c, _) = auto_fill(content_w, m::CARD_GRID_MIN, sp::MD);
             let c: Vec<AnyElement> = (0..cols_c.min(5)).map(|_| super::cards::card_skeleton(&th, card_w)).collect();
-            children.push(div().flex().flex_col().child(Self::block_title(&th, "Heavy Rotation")).child(Self::grid(c, sp::MD)).into_any_element());
+            children.push(div().flex().flex_col().child(Self::block_title(&th, tr!(HomeHeavyRotation))).child(Self::grid(c, sp::MD)).into_any_element());
         }
         if self.sections.is_none() && self.sections_unavailable {
-            children.push(div().child(txt(&th, BODY_SM, "Unavailable until a server is connected.").color(th.muted)).into_any_element());
+            children.push(div().child(txt(&th, BODY_SM, tr!(HomeUnavailable)).color(th.muted)).into_any_element());
         }
 
         // Playlists // Vectors
@@ -515,7 +518,7 @@ impl Render for HomeView {
                 let t = tile(
                     &ctx,
                     &th,
-                    Tile { id: &p.id, art: TileArt::Mosaic((p.song_count > 0).then(|| crate::art::mosaic_key(p))), genre: None, title: &p.name, link: None, sub_text: format!("{} TRACKS", p.song_count), overlays: Some(overlays) },
+                    Tile { id: &p.id, art: TileArt::Mosaic((p.song_count > 0).then(|| crate::art::mosaic_key(p))), genre: None, title: &p.name, link: None, sub_text: tr!(CountTracks, count = p.song_count).to_uppercase(), overlays: Some(overlays) },
                     card_w,
                     window,
                     cx,
@@ -541,7 +544,7 @@ impl Render for HomeView {
                 });
                 tiles.push(t.into_any_element());
             }
-            children.push(div().flex().flex_col().child(Self::block_title(&th, "Playlists // Vectors")).child(Self::grid(tiles, sp::MD)).into_any_element());
+            children.push(div().flex().flex_col().child(Self::block_title(&th, tr!(HomePlaylistsVectors))).child(Self::grid(tiles, sp::MD)).into_any_element());
         }
 
         // Recently Ingested // Server Pipeline

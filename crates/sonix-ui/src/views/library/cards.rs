@@ -15,6 +15,7 @@ use gpui::{Point,
 };
 use sonix_api::*;
 use std::cell::Cell;
+use sonix_i18n::tr;
 use std::rc::Rc;
 
 gpui::actions!(sonix_library_card, [CardOpen, CardMenu]);
@@ -182,7 +183,7 @@ pub fn card<V: 'static>(
     // --- caption
     let sub: AnyElement = match &item {
         CardItem::Album(a) => div().flex().min_w_0().child(entity_link(&th, (Kind::Artist, a.artist_id.as_deref()), &a.artist, MONO_DATA, th.muted, "card", window)).into_any_element(),
-        CardItem::Artist(a) => div().flex().min_w_0().child(txt(&th, MONO_DATA, format!("{} ALBUMS", a.album_count)).color(th.muted)).into_any_element(),
+        CardItem::Artist(a) => div().flex().min_w_0().child(txt(&th, MONO_DATA, tr!(CountAlbums, count = a.album_count).to_uppercase()).color(th.muted)).into_any_element(),
     };
     let meta = div()
         .flex()

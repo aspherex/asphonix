@@ -76,6 +76,7 @@ crates/sonix-ui     the GPUI app, binary `sonix`
 crates/sonix-mcp    MCP stdio server `sonix-mcp` that connects to a running SONIX
 crates/sonix-mcp-protocol  bridge wire format, handshake and tool catalog shared by sonix-core and sonix-mcp
 crates/sonix-logging  structured JSON-lines logging (subscriber, daily files, runtime verbosity) for both binaries
+crates/sonix-i18n   UI translations (Project Fluent, locales/en + locales/de) and locale-aware number/date formatting
 assets/             fonts (TTF, SIL OFL), icons (SVG), pre-rendered backdrops
 scripts/            perf harness and memory tools (docs/PERF.md), font fix-up script
 docs/               PERF, GPUI-GAPS, UPDATES

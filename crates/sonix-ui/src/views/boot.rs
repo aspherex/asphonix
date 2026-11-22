@@ -9,6 +9,7 @@ use crate::theme::{DISPLAY, MONO, Theme};
 use gpui::{
     Bounds, BorderStyle, Context, ContentMask, EventEmitter, Hsla, IntoElement, Render, Rgba, SharedString, TextRun, Window, canvas, div, point, prelude::*, px, quad, size,
 };
+use sonix_i18n::tr;
 use std::sync::Arc;
 
 pub enum BootEvent {
@@ -247,7 +248,7 @@ impl Render for BootIntro {
                         // meta: mono-code 11 px, 14 px gap, 0.18em tracking
                         let meta_a = ease_out(prog(t, 0.45, 0.24)) * alpha_all;
                         let meta_top = bars_top + 34.0 + 22.0;
-                        let parts = [("BIT-PERFECT AUDIO TERMINAL".to_string(), muted), (format!("v{}", env!("CARGO_PKG_VERSION")), accent_fg)];
+                        let parts = [(tr!(BootTagline).to_uppercase(), muted), (format!("v{}", env!("CARGO_PKG_VERSION")), accent_fg)];
                         let mut mf = gpui::font(MONO);
                         mf.weight = gpui::FontWeight(400.0);
                         let tr = 0.18 * 11.0;

@@ -13,6 +13,7 @@ use crate::views::library::cards::{CardItem, card};
 use crate::views::library::grid::{Geo, GridHost, GridState, grid_element};
 use gpui::{AnyElement, Context, CursorStyle, EventEmitter, IntoElement, Render, Window, div, prelude::*, px};
 use sonix_api::*;
+use sonix_i18n::tr;
 
 impl EventEmitter<ListsEvent> for FavoritesView {}
 
@@ -79,7 +80,7 @@ impl Render for FavoritesView {
             .items_center()
             .justify_between()
             .flex_none()
-            .child(txt(&th, HEADLINE_MD, "Starred Crates").color(th.text))
+            .child(txt(&th, HEADLINE_MD, tr!(FavoritesTitle)).color(th.text))
             .child(
                 div()
                     .flex()
@@ -92,13 +93,13 @@ impl Render for FavoritesView {
                             .cursor(CursorStyle::PointingHand)
                             .text_color(th.muted)
                             .hover(move |s| s.text_color(th.accent_fg))
-                            .child(txt(&th, LABEL_CAPS, "Starred tracks → Liked Songs"))
+                            .child(txt(&th, LABEL_CAPS, tr!(FavoritesToLiked)))
                             .on_click(cx.listener(|_, _, _, cx| cx.emit(ListsEvent::Navigate(Route::Liked)))),
                     )
-                    .child(txt(&th, MONO_CODE, format!("{total} ALBUMS")).color(th.muted)),
+                    .child(txt(&th, MONO_CODE, tr!(CountAlbums, count = total).to_uppercase()).color(th.muted)),
             );
         let body: AnyElement = if total == 0 && self.grid.loaded {
-            let m = "No starred albums yet — tap the star on any album or track.";
+            let m = tr!(FavoritesEmpty);
             div().child(txt(&th, BODY_SM, m).color(th.muted)).into_any_element()
         } else {
             div().flex_1().min_h_0().child(grid_element(self, th, window, cx)).into_any_element()

@@ -17,6 +17,7 @@ use crate::widgets::{icon, hard_shadow};
 use gpui::{AnyElement, Context, CursorStyle, Entity, EventEmitter, IntoElement, MouseButton, MouseDownEvent, Render, ScrollHandle, Subscription, Timer, Window, div, prelude::*, px};
 use sonix_api::format as fmt;
 use sonix_api::*;
+use sonix_i18n::tr;
 use std::rc::Rc;
 use std::sync::Arc;
 use std::time::Duration;
@@ -258,11 +259,11 @@ impl SearchView {
             }
             Flat::Artist(i) => {
                 let a = &r.artists.items[*i];
-                (a.name.clone(), format!("{} ALBUMS", a.album_count), None, None)
+                (a.name.clone(), tr!(CountAlbums, count = a.album_count).to_uppercase(), None, None)
             }
             Flat::Playlist(i) => {
                 let p = &r.playlists.items[*i];
-                (p.name.clone(), format!("{} TRACKS", p.song_count), None, None)
+                (p.name.clone(), tr!(CountTracks, count = p.song_count).to_uppercase(), None, None)
             }
         };
         let is_track = matches!(item, Flat::Track(_));
@@ -331,7 +332,7 @@ impl Render for SearchView {
             };
             let _ = total;
             let all = counts.iter().sum::<usize>();
-            let tabs: [(Tab, &str, usize); 5] = [(Tab::All, "ALL", all), (Tab::Track, "TRACKS", counts[0]), (Tab::Album, "ALBUMS", counts[1]), (Tab::Artist, "ARTISTS", counts[2]), (Tab::Playlist, "PLAYLISTS", counts[3])];
+            let tabs: [(Tab, &str, usize); 5] = [(Tab::All, tr!(SearchTabAll), all), (Tab::Track, tr!(NavTracks), counts[0]), (Tab::Album, tr!(NavAlbums), counts[1]), (Tab::Artist, tr!(NavArtists), counts[2]), (Tab::Playlist, tr!(NavPlaylists), counts[3])];
             let mut tabs_row = div().flex().flex_row().gap(px(2.));
             for (i, (t, label, n)) in tabs.into_iter().enumerate() {
                 let active = self.tab == t;
@@ -352,16 +353,16 @@ impl Render for SearchView {
                             cx.notify();
                         })));
             }
-            let title = if self.query.is_empty() { "Index Search".to_string() } else { format!("// {}", self.query) };
+            let title = if self.query.is_empty() { tr!(SearchTitle).to_string() } else { format!("// {}", self.query) };
             let header = div().flex().flex_col().gap(px(space::SM)).child(div().flex().child(txt(&th, HEADLINE_MD, title).color(th.text))).child(tabs_row);
             let mut page = div().flex().flex_col().gap(px(lm::PAGE_GAP)).p(px(lm::PAGE_PAD)).w_full().child(header);
             let hint = |s: String| txt(&th, BODY_SM, s).color(th.muted);
             if self.query.is_empty() {
-                page = page.child(hint("Start typing to search tracks, albums, artists and playlists.".into()));
+                page = page.child(hint(tr!(SearchStart).into()));
             } else if (self.loading || !self.settled) && self.results.is_none() {
-                page = page.child(hint("Searching…".into()));
+                page = page.child(hint(tr!(SearchSearching).into()));
             } else if flat.is_empty() {
-                page = page.child(hint(format!("No matches for \"{}\".", self.query)));
+                page = page.child(hint(tr!(SearchNoMatches, query = self.query.as_str())));
             } else {
                 let r = self.results.clone().unwrap();
                 if self.tab == Tab::All {
@@ -373,15 +374,15 @@ impl Render for SearchView {
                         }
                         Flat::Album(i) => {
                             let a = &r.albums.items[*i];
-                            ("album", a.name.clone(), format!("{} · {} TRACKS", a.artist, a.song_count), a.cover_art.clone(), "album")
+                            ("album", a.name.clone(), format!("{} · {}", a.artist, tr!(CountTracks, count = a.song_count).to_uppercase()), a.cover_art.clone(), "album")
                         }
                         Flat::Artist(i) => {
                             let a = &r.artists.items[*i];
-                            ("artist", a.name.clone(), format!("{} ALBUMS", a.album_count), a.cover_art.clone(), "artist")
+                            ("artist", a.name.clone(), tr!(CountAlbums, count = a.album_count).to_uppercase(), a.cover_art.clone(), "artist")
                         }
                         Flat::Playlist(i) => {
                             let p = &r.playlists.items[*i];
-                            ("playlist", p.name.clone(), format!("{} TRACKS", p.song_count), None, "queue")
+                            ("playlist", p.name.clone(), tr!(CountTracks, count = p.song_count).to_uppercase(), None, "queue")
                         }
                     };
                     let selected = self.selected == 0;
@@ -408,7 +409,7 @@ impl Render for SearchView {
                                 .flex_col()
                                 .gap(px(2.))
                                 .min_w_0()
-                                .child(div().flex().child(txt(&th, LABEL_CAPS, format!("Best match // {tag}")).color(th.accent_fg)))
+                                .child(div().flex().child(txt(&th, LABEL_CAPS, format!("{} // {}", tr!(SearchBestMatch), search_tag(tag))).color(th.accent_fg)))
                                 .child(div().flex().child(txt(&th, HEADLINE_SM, name).color(th.text)))
                                 .child(div().flex().child(txt(&th, MONO_DATA, sub).color(th.muted))),
                         )
@@ -416,7 +417,7 @@ impl Render for SearchView {
                     page = page.child(hero);
                 }
                 // groups
-                let groups: [(&str, Tab, usize, usize); 4] = [("Tracks", Tab::Track, r.tracks.items.len(), 0), ("Albums", Tab::Album, r.albums.items.len(), 1), ("Artists", Tab::Artist, r.artists.items.len(), 2), ("Playlists", Tab::Playlist, r.playlists.items.len(), 3)];
+                let groups: [(&str, Tab, usize, usize); 4] = [(tr!(NavTracks), Tab::Track, r.tracks.items.len(), 0), (tr!(NavAlbums), Tab::Album, r.albums.items.len(), 1), (tr!(NavArtists), Tab::Artist, r.artists.items.len(), 2), (tr!(NavPlaylists), Tab::Playlist, r.playlists.items.len(), 3)];
                 let mut base = 0usize;
                 for (label, tab, n, kind) in groups {
                     if n == 0 || !(self.tab == Tab::All || self.tab == tab) {
@@ -439,5 +440,15 @@ impl Render for SearchView {
             let _ = hard_shadow;
             page.into_any_element()
         })
+    }
+}
+
+/// The best-match kind ("track", "album", ...) as shown text.
+fn search_tag(tag: &str) -> &'static str {
+    match tag {
+        "album" => tr!(SearchKindAlbum),
+        "artist" => tr!(SearchKindArtist),
+        "playlist" => tr!(SearchKindPlaylist),
+        _ => tr!(SearchKindTrack),
     }
 }

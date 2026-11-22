@@ -27,6 +27,7 @@ use gpui::{
 };
 use sonix_api::format as fmt;
 use sonix_api::*;
+use sonix_i18n::tr;
 use std::ops::Range;
 use std::sync::Arc;
 use std::time::Duration;
@@ -264,14 +265,14 @@ impl TracksView {
         let f2 = filter.clone();
         cx.spawn_in(window, async move |this, cx| {
             let cov = cx.background_executor().spawn(async move { b.flow_get_coverage(FlowCoverageRequest { kind: FlowPoolKind::AllTracks, id: None, filter: f2, seed: None }) }).await;
-            let hint = cov.ok().map(|c| fmt::coverage_hint(&c, "view")).unwrap_or_default();
+            let hint = cov.ok().map(|c| crate::flow::coverage_hint(&c, "view")).unwrap_or_default();
             let _ = this.update_in(cx, |t, window, cx| {
                 let mut items = Vec::new();
                 if !hint.is_empty() {
                     items.push(MenuItem::action(hint, |_, _| {}).disabled(true));
                     items.push(MenuItem::separator());
                 }
-                for (arc, label, h) in [(FlowArc::Steady, "Steady", "Smooth transitions, even energy"), (FlowArc::Build, "Build", "Energy rises over each ~40 tracks"), (FlowArc::Peak, "Peak", "Rise, then cool down")] {
+                for (arc, label, h) in crate::flow::ARCS.iter().map(|&(a, l, h)| (a, sonix_i18n::tr(l), sonix_i18n::tr(h))) {
                     let filter = filter.clone();
                     items.push(
                         MenuItem::action(label, move |_, cx| {
@@ -402,13 +403,13 @@ impl TracksView {
                 .border_b_1()
                 .border_color(th.border)
                 .child(div().w(px(tr::IDX_W)).flex_none())
-                .child(flex_cell(tr::TITLE_GROW).flex().child(self.header_cell("h-title", "Title", TrackSortField::Title, cx)))
-                .child(flex_cell(tr::ARTIST_GROW).flex().child(self.header_cell("h-artist", "Artist", TrackSortField::Artist, cx)))
-                .child(flex_cell(tr::ALBUM_GROW).flex().child(self.header_cell("h-album", "Album", TrackSortField::Album, cx)))
-                .when(cols.year, |d| d.child(div().w(px(tr::YEAR_W)).flex_none().flex().justify_end().child(self.header_cell("h-year", "Year", TrackSortField::Year, cx))))
-                .when(cols.added, |d| d.child(div().w(px(tr::ADDED_W)).flex_none().flex().justify_end().child(self.header_cell("h-added", "Added", TrackSortField::DateAdded, cx))))
-                .child(div().w(px(tr::FORMAT_W)).flex_none().flex().justify_end().child(self.header_cell("h-format", "Format", TrackSortField::Format, cx)))
-                .child(div().w(px(tr::TIME_W)).flex_none().flex().justify_end().child(self.header_cell("h-time", "Time", TrackSortField::Duration, cx)))
+                .child(flex_cell(tr::TITLE_GROW).flex().child(self.header_cell("h-title", tr!(ColTitle), TrackSortField::Title, cx)))
+                .child(flex_cell(tr::ARTIST_GROW).flex().child(self.header_cell("h-artist", tr!(ColArtist), TrackSortField::Artist, cx)))
+                .child(flex_cell(tr::ALBUM_GROW).flex().child(self.header_cell("h-album", tr!(ColAlbum), TrackSortField::Album, cx)))
+                .when(cols.year, |d| d.child(div().w(px(tr::YEAR_W)).flex_none().flex().justify_end().child(self.header_cell("h-year", tr!(ColYear), TrackSortField::Year, cx))))
+                .when(cols.added, |d| d.child(div().w(px(tr::ADDED_W)).flex_none().flex().justify_end().child(self.header_cell("h-added", tr!(ColAdded), TrackSortField::DateAdded, cx))))
+                .child(div().w(px(tr::FORMAT_W)).flex_none().flex().justify_end().child(self.header_cell("h-format", tr!(ColFormat), TrackSortField::Format, cx)))
+                .child(div().w(px(tr::TIME_W)).flex_none().flex().justify_end().child(self.header_cell("h-time", tr!(ColTime), TrackSortField::Duration, cx)))
                 .child(spacer())
                 .child(spacer())
     }
@@ -596,7 +597,7 @@ impl Render for TracksView {
         let total = self.pager.total;
         let selecting = self.sel.len() > 1;
         let count: SharedString =
-            if selecting { format!("{} SELECTED", fmt::fmt_int(self.sel.len() as u64)) } else { format!("{} TRACKS", fmt::fmt_int(total as u64)) }.into();
+            if selecting { tr!(CountSelected, count = self.sel.len()) } else { tr!(CountTracks, count = total) }.to_uppercase().into();
         let filter_focused = self.filter_input.read(cx).focus_handle.is_focused(window);
 
         let field_w = if th.light { ctl::FIELD_W_LIGHT } else { ctl::FIELD_W_DARK };
@@ -608,7 +609,7 @@ impl Render for TracksView {
             .justify_between()
             .gap(px(tr::HEADER_GAP))
             .flex_none()
-            .child(txt(&th, HEADLINE_MD, "Tracks").color(th.text))
+            .child(txt(&th, HEADLINE_MD, tr!(NavTracks)).color(th.text))
             .child(
                 div()
                     .flex()
@@ -640,15 +641,15 @@ impl Render for TracksView {
                                         .overflow_hidden()
                                         .flex()
                                         .items_center()
-                                        .child(div().flex_none().child(txt(&th, MONO_DATA, "Filter by title, artist, album…").color(th.muted))),
+                                        .child(div().flex_none().child(txt(&th, MONO_DATA, tr!(TracksFilterPlaceholder)).color(th.muted))),
                                 )
                             }))
-                    .child(button("play-all", th, Variant::Secondary, "Play All", Some("play"), total == 0, window).on_click(cx.listener(|this, _, _, cx| this.play_all(false, cx))))
-                    .child(button("shuffle-all", th, Variant::Primary, "Shuffle All", Some("shuffle"), total == 0, window).on_click(cx.listener(|this, _, _, cx| this.play_all(true, cx))))
+                    .child(button("play-all", th, Variant::Secondary, tr!(MenuPlayAll), Some("play"), total == 0, window).on_click(cx.listener(|this, _, _, cx| this.play_all(false, cx))))
+                    .child(button("shuffle-all", th, Variant::Primary, tr!(TracksShuffleAll), Some("shuffle"), total == 0, window).on_click(cx.listener(|this, _, _, cx| this.play_all(true, cx))))
                     // Flow: the Flow menu (coverage hint, Steady/Build/Peak) anchored under the button
                     .child({
                         let cell = self.flow_btn.clone();
-                        button("flow", th, Variant::Secondary, "Flow", Some("sliders"), total == 0, window)
+                        button("flow", th, Variant::Secondary, tr!(FlowMenu), Some("sliders"), total == 0, window)
                             .relative()
                             .child(canvas(move |b, _, _| cell.set(b), |_, _, _, _| ()).absolute().size_full())
                             .on_click(cx.listener(|this, _, window, cx| this.open_flow_menu(window, cx)))
@@ -676,7 +677,7 @@ impl Render for TracksView {
         } else if total == 0 {
             div()
                 .p(px(crate::metrics::space::MD))
-                .child(txt(&th, BODY_SM, if self.filter.trim().is_empty() { "No tracks in your library yet." } else { "No tracks match your filter." }).color(th.muted))
+                .child(txt(&th, BODY_SM, if self.filter.trim().is_empty() { tr!(TracksEmpty) } else { tr!(TracksNoMatch) }).color(th.muted))
                 .into_any_element()
         } else {
             div()

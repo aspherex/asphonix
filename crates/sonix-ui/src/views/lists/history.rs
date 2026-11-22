@@ -12,6 +12,7 @@ use crate::widgets::context_menu::{ContextMenu, MenuItem};
 use gpui::{Context, Entity, EventEmitter, IntoElement, Render, Subscription, Window, div, prelude::*, px};
 use sonix_api::format as fmt;
 use sonix_api::*;
+use sonix_i18n::tr;
 use std::rc::Rc;
 use std::sync::Arc;
 
@@ -36,7 +37,7 @@ impl HistoryView {
             multi: false,
             arrows: Arrows::Select,
             action_count: 1,
-            empty: "Nothing here yet. Tracks you listen to (past the scrobble threshold) appear here.",
+            empty: sonix_i18n::Key::HistoryEmpty,
         };
         let table = cx.new(|cx| Table::new(backend.clone(), player, cfg, cx));
         let subs = vec![cx.subscribe(&table, Self::on_table)];
@@ -137,7 +138,7 @@ impl HistoryView {
 
     fn clear(&mut self, cx: &mut Context<Self>) {
         let this = cx.entity().downgrade();
-        crate::overlays::confirm(cx, "Clear history", "Remove all recorded plays from this device? This cannot be undone.", "Clear", true, move |cx| {
+        crate::overlays::confirm(cx, tr!(HistoryClear), tr!(HistoryClearBody), tr!(HistoryClearConfirm), true, move |cx| {
             let b = app::backend(cx);
             cx.spawn(async move |cx| {
                 cx.background_executor().spawn(async move { let _ = b.history_clear(); }).await;
@@ -167,15 +168,15 @@ impl Render for HistoryView {
             .justify_between()
             .gap(px(lm::HISTORY_GAP))
             .flex_none()
-            .child(txt(&th, HEADLINE_MD, "History").color(th.text))
+            .child(txt(&th, HEADLINE_MD, tr!(NavHistory)).color(th.text))
             .child(
                 div()
                     .flex()
                     .flex_row()
                     .items_center()
                     .gap(px(lm::HISTORY_GAP))
-                    .child(txt(&th, MONO_CODE, "RECORDED LOCALLY · LAST 10,000 PLAYS").color(th.muted))
-                    .child(button("clear-history", th, Variant::Secondary, "Clear history", Some("trash"), total == 0 || self.clearing, window).on_click(cx.listener(|this, _, _, cx| this.clear(cx)))),
+                    .child(txt(&th, MONO_CODE, tr!(HistoryRecordedLocally, count = 10_000).to_uppercase()).color(th.muted))
+                    .child(button("clear-history", th, Variant::Secondary, tr!(HistoryClear), Some("trash"), total == 0 || self.clearing, window).on_click(cx.listener(|this, _, _, cx| this.clear(cx)))),
             );
         div().size_full().flex().flex_col().gap(px(lm::HISTORY_GAP)).p(px(lm::PAGE_PAD)).child(header).child(self.table.clone())
     }

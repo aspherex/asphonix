@@ -43,6 +43,7 @@ Other diagnostics (all off unless the variable is set):
 | `SONIX_PAUSE_MS=<ms>` | toggle play/pause once after `<ms>` (CPU of a real pause without input) |
 | `SONIX_NOSCROLL=1` | skip the scroll phase of the scripted run |
 | `SONIX_NO_ACTIVATE=1` | show the window without activating it (test runs while the PC is in use) |
+| `SONIX_LOCALE=<tag>` | UI language for this run (`en`, `de`, or the pseudo-locale `en-XA`), over the Settings choice and the OS language |
 
 `scripts/mem/` holds lower-level tools: `snap.ps1` (virtual-memory region dumps at three points of the scripted run),
 `vmm.ps1` and `threads.ps1` (per-process region / thread breakdowns), and the `memprof` cargo feature (counting

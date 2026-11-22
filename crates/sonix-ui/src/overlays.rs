@@ -13,6 +13,7 @@ use gpui::{
     prelude::*, px, rgba,
 };
 use sonix_api::{Playlist, Track, UpdateInfo, UpdateProgress, format as fmt};
+use sonix_i18n::tr;
 use std::time::Duration;
 
 /// Callback of a prompt dialog: receives the trimmed text.
@@ -141,9 +142,9 @@ impl Overlays {
         let Some(m) = self.add_menu.take() else { return };
         let ids = m.ids;
         self.open_prompt(
-            "New playlist".into(),
-            "Playlist name".into(),
-            "Create".into(),
+            tr!(DialogNewPlaylist).into(),
+            tr!(DialogPlaylistName).into(),
+            tr!(DialogCreate).into(),
             String::new(),
             Box::new(move |name, cx| {
                 let ids = ids.clone();
@@ -288,7 +289,7 @@ impl Render for Overlays {
         let modal = self.modal.as_ref().map(|m| {
             let (width, inner): (f32, gpui::AnyElement) = match m {
                 Modal::Confirm { title, message, confirm_label, danger, .. } => {
-                    let cancel = button("dlg-cancel", th, Variant::Secondary, "Cancel", None, false, window).on_click(cx.listener(|this, _, _, cx| {
+                    let cancel = button("dlg-cancel", th, Variant::Secondary, tr!(DialogCancel), None, false, window).on_click(cx.listener(|this, _, _, cx| {
                         this.modal = None;
                         cx.notify();
                     }));
@@ -313,7 +314,7 @@ impl Render for Overlays {
                 Modal::Prompt { title, confirm_label, input, .. } => {
                     let focused = input.read(cx).focus_handle.is_focused(window);
                     let empty = input.read(cx).content.trim().is_empty();
-                    let cancel = button("dlg-cancel", th, Variant::Secondary, "Cancel", None, false, window).on_click(cx.listener(|this, _, _, cx| {
+                    let cancel = button("dlg-cancel", th, Variant::Secondary, tr!(DialogCancel), None, false, window).on_click(cx.listener(|this, _, _, cx| {
                         this.modal = None;
                         cx.notify();
                     }));
@@ -344,13 +345,13 @@ impl Render for Overlays {
                     let u = &self.upd;
                     let info = u.info.clone().unwrap_or(UpdateInfo { available: false, current_version: String::new(), version: None, notes: None, date: None });
                     let pct = u.total.filter(|t| *t > 0).map(|t| ((u.downloaded as f64 / t as f64) * 100.0).round().min(100.0) as u32);
-                    let later = button("upd-later", th, Variant::Secondary, "Later", None, u.installing, window).on_click(cx.listener(|this, _, _, cx| {
+                    let later = button("upd-later", th, Variant::Secondary, tr!(UpdateLater), None, u.installing, window).on_click(cx.listener(|this, _, _, cx| {
                         if !this.upd.installing {
                             this.modal = None;
                             cx.notify();
                         }
                     }));
-                    let install = button("upd-install", th, Variant::Primary, "Install & restart", None, u.installing, window).on_click(cx.listener(|this, _, _, cx| this.install_update(cx)));
+                    let install = button("upd-install", th, Variant::Primary, tr!(UpdateInstall), None, u.installing, window).on_click(cx.listener(|this, _, _, cx| this.install_update(cx)));
                     let versions = div()
                         .flex()
                         .flex_row()
@@ -371,15 +372,15 @@ impl Render for Overlays {
                         );
                     }
                     if u.playing {
-                        body = body.child(crate::typo::ts(&th, BODY_SM).text_color(th.clip).child("Playback will stop while SONIX updates and restarts."));
+                        body = body.child(crate::typo::ts(&th, BODY_SM).text_color(th.clip).child(tr!(UpdatePlaybackWillStop)));
                     }
                     if u.installing {
                         let frac = pct.map(|p| p as f32 / 100.0).unwrap_or(0.0);
                         body = body.child(div().h(px(6.)).w_full().bg(th.high).overflow_hidden().child(div().h_full().w(gpui::relative(frac)).bg(th.accent)));
                         let text = match pct {
-                            None => "Downloading…".to_string(),
-                            Some(p) if p >= 100 => "Verifying & installing…".to_string(),
-                            Some(p) => format!("Downloading {p}% · {}", format_bytes(u.downloaded as f64)),
+                            None => tr!(UpdateDownloading).to_string(),
+                            Some(p) if p >= 100 => tr!(UpdateInstalling).to_string(),
+                            Some(p) => tr!(UpdateDownloadingPct, pct = p, size = format_bytes(u.downloaded as f64)),
                         };
                         body = body.child(txt(&th, MONO_CODE, text).color(th.muted));
                     }
@@ -387,43 +388,43 @@ impl Render for Overlays {
                         body = body.child(crate::typo::ts(&th, BODY_SM).text_color(th.clip).child(e.clone()));
                     }
                     body = body.child(div().flex().flex_row().justify_end().gap(px(8.)).child(later).child(install));
-                    (460.0f32.min(vw - 32.0), panel(&th, "Update available", info.date.as_deref(), body).into_any_element())
+                    (460.0f32.min(vw - 32.0), panel(&th, tr!(UpdateAvailableTitle), info.date.as_deref(), body).into_any_element())
                 }
                 Modal::TrackInfo(t) => {
                     let f = &t.format;
-                    let mut rows: Vec<(&str, String, bool)> = vec![("Format", f.suffix.to_uppercase(), false)];
+                    let mut rows: Vec<(&str, String, bool)> = vec![(tr!(InfoFormat), f.suffix.to_uppercase(), false)];
                     if let Some(d) = f.bit_depth.filter(|d| *d > 0) {
-                        rows.push(("Bit depth", format!("{d}-bit"), false));
+                        rows.push((tr!(InfoBitDepth), tr!(InfoBitDepthValue, bits = d), false));
                     }
-                    rows.push(("Sample rate", format!("{} kHz", fmt_khz(f.sampling_rate)), false));
+                    rows.push((tr!(InfoSampleRate), format!("{} kHz", sonix_i18n::fmt::decimal(&fmt_khz(f.sampling_rate))), false));
                     if let Some(b) = f.bit_rate.filter(|b| *b > 0) {
-                        rows.push(("Bitrate", format!("{b} kbps"), false));
+                        rows.push((tr!(InfoBitrate), format!("{b} kbps"), false));
                     }
-                    rows.push(("Channels", match f.channel_count {
-                        1 => "Mono".into(),
-                        2 => "Stereo".into(),
+                    rows.push((tr!(InfoChannels), match f.channel_count {
+                        1 => tr!(InfoMono).into(),
+                        2 => tr!(InfoStereo).into(),
                         n => n.to_string(),
                     }, false));
-                    rows.push(("Duration", fmt::format_duration(Some(t.duration)), false));
+                    rows.push((tr!(InfoDuration), fmt::format_duration(Some(t.duration)), false));
                     if let Some(s) = t.size {
-                        rows.push(("File size", format_bytes(s as f64), false));
+                        rows.push((tr!(InfoFileSize), format_bytes(s as f64), false));
                     }
                     if let Some(rg) = &t.replay_gain {
                         if let Some(g) = rg.track_gain_db {
-                            rows.push(("Track gain", format!("{g:.2} dB"), false));
+                            rows.push((tr!(InfoTrackGain), format!("{} dB", sonix_i18n::fmt::decimal(&format!("{g:.2}"))), false));
                         }
                         if let Some(g) = rg.album_gain_db {
-                            rows.push(("Album gain", format!("{g:.2} dB"), false));
+                            rows.push((tr!(InfoAlbumGain), format!("{} dB", sonix_i18n::fmt::decimal(&format!("{g:.2}"))), false));
                         }
                     }
                     if let Some(a) = &t.album {
-                        rows.push(("Album", a.clone(), false));
+                        rows.push((tr!(InfoAlbum), a.clone(), false));
                     }
                     if let Some(y) = t.year {
-                        rows.push(("Year", y.to_string(), false));
+                        rows.push((tr!(InfoYear), y.to_string(), false));
                     }
                     if let Some(g) = &t.genre {
-                        rows.push(("Genre", g.clone(), true));
+                        rows.push((tr!(InfoGenre), g.clone(), true));
                     }
                     let list = div().flex().flex_col().gap(px(4.)).children(rows.into_iter().map(|(label, value, genre)| {
                         div()
@@ -434,11 +435,11 @@ impl Render for Overlays {
                             .child(txt(&th, LABEL_CAPS, label).color(th.muted))
                             .child(txt(&th, MONO_DATA, value).color(if genre { th.accent_fg } else { th.text }))
                     }));
-                    let close = button("dlg-close", th, Variant::Primary, "Close", None, false, window).on_click(cx.listener(|this, _, _, cx| {
+                    let close = button("dlg-close", th, Variant::Primary, tr!(DialogClose), None, false, window).on_click(cx.listener(|this, _, _, cx| {
                         this.modal = None;
                         cx.notify();
                     }));
-                    (360.0, panel(&th, "Track info", Some(&t.title), div().flex().flex_col().gap(px(12.)).p(px(12.)).child(list).child(div().flex().flex_row().justify_end().child(close))).into_any_element())
+                    (360.0, panel(&th, tr!(MenuTrackInfo), Some(&t.title), div().flex().flex_col().gap(px(12.)).p(px(12.)).child(list).child(div().flex().flex_row().justify_end().child(close))).into_any_element())
                 }
             };
             div()
@@ -488,7 +489,7 @@ impl Render for Overlays {
             let top = f32::from(m.anchor.y) + 4.0;
             let left = (f32::from(m.anchor.x) - 220.0).max(8.0);
             let n = m.ids.len();
-            let header = format!("Add to playlist{}", if n > 1 { format!(" ({n} tracks)") } else { String::new() });
+            let header = if n > 1 { format!("{} ({})", tr!(MenuAddToPlaylist), tr!(CountTracks, count = n)) } else { tr!(MenuAddToPlaylist).to_string() };
             let item = |id: gpui::ElementId| {
                 div().id(id).group("hv").flex().flex_row().items_center().gap(px(8.)).w_full().px(px(12.)).py(px(4.)).text_color(th.text).cursor(CursorStyle::PointingHand).hover(move |s| s.bg(th.high).text_color(th.accent_fg))
             };
@@ -501,7 +502,7 @@ impl Render for Overlays {
                 .flex_col()
                 .py(px(4.))
                 .child(div().px(px(12.)).py(px(4.)).child(txt(&th, LABEL_CAPS, header).color(th.muted)))
-                .child(item("add-new".into()).child(icon("add", 13., th.text)).child(txt(&th, BODY_SM, "New playlist…")).on_click(cx.listener(|this, _: &ClickEvent, _, cx| this.create_and_add(cx))))
+                .child(item("add-new".into()).child(icon("add", 13., th.text)).child(txt(&th, BODY_SM, tr!(DialogNewPlaylistEllipsis))).on_click(cx.listener(|this, _: &ClickEvent, _, cx| this.create_and_add(cx))))
                 .children((!m.list.is_empty()).then(|| div().h(px(1.)).bg(th.border).my(px(4.))))
                 .children(m.list.iter().enumerate().map(|(i, p)| {
                     let id = p.id.clone();
@@ -567,7 +568,7 @@ fn format_bytes(b: f64) -> String {
         v /= 1024.0;
         i += 1;
     }
-    format!("{:.*} {}", if v < 10.0 { 2 } else { 1 }, v, units[i])
+    format!("{} {}", sonix_i18n::fmt::decimal(&format!("{:.*}", if v < 10.0 { 2 } else { 1 }, v)), units[i])
 }
 
 impl Overlays {
@@ -586,7 +587,7 @@ impl Overlays {
             let r = cx.background_executor().spawn(async move { b.updates_install() }).await;
             let _ = this.update(cx, |t, cx| {
                 if let Err(e) = r {
-                    t.upd.error = Some(e.to_string());
+                    t.upd.error = Some(crate::i18n::api_error(&e));
                     t.upd.installing = false;
                     cx.notify();
                 }
