@@ -89,6 +89,7 @@ pub struct Shell {
     _subs: Vec<Subscription>,
     /// CPU work (`crate::live`, `crate::part`): the animated-elements layer and the cached chrome parts
     pub(crate) live: Entity<crate::live::LiveLayer>,
+    pub(crate) live_stage: Entity<crate::live::LiveLayer>,
     pub(crate) parts: Option<super::shell_cache::ShellParts>,
     /// what the live layer's slots were recorded for (stage, rail shown, suspended): a change re-records them all
     live_key: Option<(Route, bool, bool, bool)>,
@@ -159,7 +160,8 @@ impl Shell {
             TracksEvent::Navigate(r) => this.navigate(r.clone(), cx),
         }));
 
-        let live = cx.new(|_| crate::live::LiveLayer::new(&player, np.downgrade()));
+        let live = cx.new(|_| crate::live::LiveLayer::new(true, &player, np.downgrade()));
+        let live_stage = cx.new(|_| crate::live::LiveLayer::new(false, &player, np.downgrade()));
         let mut this = Self {
             th,
             router: Router::new(initial_route(
@@ -208,6 +210,7 @@ impl Shell {
             fs: FrameStats::new(std::env::var("SONIX_FPSLOG").is_ok() || std::env::var("SONIX_SCRIPT").is_ok()),
             _subs: subs,
             live,
+            live_stage,
             parts: None,
             live_key: None,
         };
@@ -240,6 +243,18 @@ impl Shell {
                     flow: None,
                 });
             });
+        }
+        // `SONIX_PAUSE_MS=<ms>`: toggle play/pause once after <ms> (CPU measurements of a real pause, no input needed)
+        if let Some(ms) = std::env::var("SONIX_PAUSE_MS").ok().and_then(|v| v.parse::<u64>().ok()) {
+            cx.spawn(async move |_, cx| {
+                gpui::Timer::after(Duration::from_millis(ms)).await;
+                let _ = cx.update(|cx| {
+                    app::call(cx, |b| {
+                        let _ = b.player_play_pause();
+                    })
+                });
+            })
+            .detach();
         }
         if let Ok(n) = std::env::var("SONIX_MENU") {
             let ix: usize = n.parse().unwrap_or(2);
@@ -666,6 +681,9 @@ impl Shell {
         self.spectrum_on = false;
         crate::widgets::smooth::clear();
         crate::anim::clear(); // no transition may keep requesting frames while minimized
+        crate::live::clear_all(); // nor the live layer (bars, spectrum): no slot, no frame
+        self.live.update(cx, |l, _| l.stop());
+        self.live_stage.update(cx, |l, _| l.stop());
         app::call(cx, |b| {
             let _ = b.player_set_spectrum_active(false);
         });
@@ -800,7 +818,7 @@ impl Render for Shell {
             .min_h_0()
             .relative()
             .children((!is_login).then_some(side))
-            .child(crate::probe::pid(stage_id, div().flex_1().min_w_0().h_full().overflow_hidden().relative().child(stage_probe()).child(stage)))
+            .child(crate::probe::pid(stage_id, div().flex_1().min_w_0().h_full().overflow_hidden().relative().child(stage_probe()).child(stage).child(self.live_stage.clone())))
             .when(docked, |d| d.child(self.rail_view()))
             .when(!docked && !on_np && self.queue_drawer, |d| {
                 d.child(div().absolute().top_0().right_0().bottom_0().child(self.rail_view()))

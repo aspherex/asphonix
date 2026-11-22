@@ -1,6 +1,6 @@
 //! The live layer (CPU work): everything that animates while music plays (the now-playing bars of the current row,
-//! the rail spectrum, the Now Playing FFT bars + stereo meters) is painted by ONE small view, [`LiveLayer`], above
-//! the stage instead of inside the (cached) page that lays it out. A spectrum or bar frame then re-renders only this
+//! the rail spectrum, the Now Playing FFT bars + stereo meters) is painted by a small view, [`LiveLayer`] (one over the
+//! stage, one over the window for the rail), instead of inside the (cached) page that lays it out. A spectrum or bar frame then re-renders only this
 //! view and the shell root; the track table, the rail list, the sidebar and the dock are reused as recorded.
 //!
 //! The page keeps the layout: where an animated element used to be it places a [`slot`] of the same size, which
@@ -61,8 +61,10 @@ pub fn clear_all() {
     SLOTS.with(|s| s.borrow_mut().clear());
 }
 
-fn snapshot() -> Vec<Slot> {
-    SLOTS.with(|s| s.borrow().clone())
+/// The slots one layer paints: the top layer the rail spectrum (the rail is never covered by the stage), the stage
+/// layer everything inside the stage (so the compact rail drawer, laid over the stage, covers them as before).
+fn snapshot(top: bool) -> Vec<Slot> {
+    SLOTS.with(|s| s.borrow().iter().filter(|x| (x.kind == Kind::RailSpectrum) == top).cloned().collect())
 }
 
 /// The placeholder for an animated element: size it like the element it replaces.
@@ -92,6 +94,8 @@ pub struct FftDraw {
 }
 
 pub struct LiveLayer {
+    /// window-wide layer for the rail spectrum (`true`) or the stage layer (bars, Now Playing FFT)
+    top: bool,
     player: Entity<PlayerModel>,
     np: WeakEntity<NowPlayingView>,
     /// the pending redraw and when it is due
@@ -99,8 +103,13 @@ pub struct LiveLayer {
 }
 
 impl LiveLayer {
-    pub fn new(player: &Entity<PlayerModel>, np: WeakEntity<NowPlayingView>) -> Self {
-        Self { player: player.clone(), np, timer: None }
+    pub fn new(top: bool, player: &Entity<PlayerModel>, np: WeakEntity<NowPlayingView>) -> Self {
+        Self { top, player: player.clone(), np, timer: None }
+    }
+
+    /// Drop the pending redraw (minimize).
+    pub fn stop(&mut self) {
+        self.timer = None;
     }
 
     /// New data for a slot (an engine spectrum frame for the rail): draw now, or with the redraw already pending (at
@@ -130,8 +139,9 @@ impl LiveLayer {
 
 impl Render for LiveLayer {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        crate::rcount::hit("live");
-        let slots = snapshot();
+        crate::rcount::hit(if self.top { "live" } else { "live_stage" });
+        let top = self.top;
+        let slots = snapshot(top);
         let th = crate::app::theme(cx);
         let now = crate::clock::now();
         let frozen = crate::clock::frozen();
@@ -165,7 +175,7 @@ impl Render for LiveLayer {
             move |_, _, window, cx| {
                 // the pages lay out (and record their slots) after this view rendered: paint what this frame recorded, and
                 // render once more when a kind of slot appeared that the data above was not prepared for
-                let slots = snapshot();
+                let slots = snapshot(top);
                 if kinds(&slots) != seen {
                     window.request_animation_frame();
                 }
