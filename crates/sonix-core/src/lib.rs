@@ -14,3 +14,4 @@ pub mod media;
 pub mod mcp_bridge;
 pub mod extras;
 pub mod continuity;
+pub mod redact;
