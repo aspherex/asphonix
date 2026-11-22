@@ -29,10 +29,18 @@ use serde::{Deserialize, Serialize};
 use crate::ipc::{IpcError, IpcErrorCode};
 
 /// Feed URL (HTTPS `latest.json`). EMPTY = updates disabled, no request is ever made.
-pub const UPDATE_ENDPOINT: &str = "";
-/// Minisign public key, base64 of the whole minisign `.pub` file.
-/// Empty = updates disabled.
-pub const UPDATE_PUBKEY: &str = "";
+/// Empty in the repository; release builds inject it at compile time through the `ASPHONIX_UPDATE_ENDPOINT`
+/// environment variable (`.github/workflows/release.yml`), so builds from source never phone home.
+pub const UPDATE_ENDPOINT: &str = match option_env!("ASPHONIX_UPDATE_ENDPOINT") {
+    Some(v) => v,
+    None => "",
+};
+/// Minisign public key, base64 of the whole minisign `.pub` file. Empty = updates disabled.
+/// Injected like the endpoint, through `ASPHONIX_UPDATE_PUBKEY`.
+pub const UPDATE_PUBKEY: &str = match option_env!("ASPHONIX_UPDATE_PUBKEY") {
+    Some(v) => v,
+    None => "",
+};
 
 /// First background check after startup, then every `CHECK_INTERVAL`.
 pub const FIRST_CHECK_DELAY: Duration = Duration::from_secs(10);
@@ -437,6 +445,9 @@ mod tests {
         assert!(verify_signed_version(c, "v1.2.3").is_ok());
         assert!(verify_signed_version(c, "9.9.9").is_err());
         assert!(verify_signed_version("timestamp:1\tfile:x", "1.2.3").is_err(), "an unversioned signature is refused");
+        // the exact trusted comment .github/workflows/release.yml signs with (`minisign -t "version:X.Y.Z"`)
+        assert_eq!(signed_version("version:0.2.0"), Some("0.2.0"));
+        assert!(verify_signed_version("version:0.2.0", "0.2.0").is_ok());
     }
 
     // --- mock server + signing -------------------------------------------------------------------
@@ -538,7 +549,10 @@ Connection: close
 
     #[tokio::test]
     async fn disabled_by_default_makes_no_request() {
-        // The shipped constants are empty: updates are off.
+        // The shipped constants are empty: updates are off (a release build with an injected channel skips this).
+        if option_env!("ASPHONIX_UPDATE_ENDPOINT").is_some() {
+            return;
+        }
         assert!(UPDATE_ENDPOINT.is_empty());
         let u = Updater::built_in();
         assert!(!u.is_enabled());

@@ -38,7 +38,7 @@ jobs:
           persist-credentials: false
       - uses: dtolnay/rust-toolchain@686976e191b89faba57d3206551f0f330d8cb249 # stable
         with:
-          toolchain: "1.99.0" # keep in sync with rust-toolchain.toml
+          toolchain: "1.100.0" # keep in sync with rust-toolchain.toml
           components: llvm-tools-preview
       - uses: Swatinem/rust-cache@f13886b937689c021905a6b90929199931d60db1 # v2.8.1
       - name: Install cargo-llvm-cov
@@ -71,7 +71,7 @@ jobs:
           persist-credentials: false
       - uses: dtolnay/rust-toolchain@686976e191b89faba57d3206551f0f330d8cb249 # stable
         with:
-          toolchain: "1.99.0" # keep in sync with rust-toolchain.toml
+          toolchain: "1.100.0" # keep in sync with rust-toolchain.toml
       - uses: Swatinem/rust-cache@f13886b937689c021905a6b90929199931d60db1 # v2.8.1
       - name: GPUI tests, 300 seeds each
         env:

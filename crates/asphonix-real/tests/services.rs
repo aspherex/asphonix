@@ -41,7 +41,8 @@ fn updates_are_disabled_by_default_and_never_install() {
     let info = b.updates_check().unwrap();
     assert!(!info.available);
     assert!(!info.current_version.is_empty(), "current version is reported even without a channel");
-    assert!(rx.try_recv().is_err(), "no UpdateAvailable event");
+    // other startup events (connection state, settings) may be queued: only an update announcement is wrong
+    assert!(!rx.try_iter().any(|e| matches!(e, Event::UpdateAvailable(_))), "no UpdateAvailable event");
     // Install without an update (the built-in channel is empty): refused, nothing downloaded or run.
     assert!(b.updates_install().is_err());
     // Auto-check on a disabled channel starts nothing.

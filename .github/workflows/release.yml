@@ -1,0 +1,344 @@
+# Release pipeline (docs/RELEASING.md).
+#
+# Push a tag `vX.Y.Z` (must equal `version` in the root Cargo.toml) ->
+#   version   check tag == Cargo version, pick release notes (release-notes/vX.Y.Z.md if present)
+#   gate      clippy -D warnings + the full test suite on Windows (the primary platform)
+#   build     release binaries on Windows / macOS / Linux; Windows also gets the NSIS installer
+#             (packaging/windows/asphonix.nsi) with the update channel compiled in (repository variables)
+#   sign      minisign signature of the installer (trusted comment "version:X.Y.Z", the updater's anti-rollback),
+#             verified against the public key, latest.json update feed, SHA256SUMS.txt
+#   release   DRAFT GitHub release with every asset (publish it by hand after checking the notes)
+#   mirror    optional: the same draft in a public releases repository (installer, signature, latest.json)
+#
+# Dry run (everything except signing and creating releases): Actions > Release > Run workflow, or any pull request that changes
+# this file or packaging/.
+#
+# Repository settings (all optional; without them the release is built unsigned and the in-app updater stays off):
+#   vars.ASPHONIX_UPDATE_ENDPOINT   HTTPS URL of latest.json, e.g.
+#                                   https://github.com/<owner>/<releases-repo>/releases/latest/download/latest.json
+#   vars.ASPHONIX_UPDATE_PUBKEY     base64 of the whole minisign .pub file (base64 -w0 asphonix.pub)
+#   secrets.MINISIGN_SECRET_KEY     the minisign secret key file content (created with `minisign -G -W`, i.e. without a
+#                                   password: the secret store is the protection)
+#   vars.ASPHONIX_RELEASES_REPO     owner/name of a public releases repository (mirror job), plus
+#   secrets.RELEASES_REPO_TOKEN     a fine-grained token with "Contents: read and write" on that repository only
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+  # dry run when the pipeline itself changes (release / mirror jobs only run for tags)
+  pull_request:
+    paths: [".github/workflows/release.yml", "packaging/**"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  version:
+    name: version and notes
+    runs-on: ubuntu-24.04
+    outputs:
+      version: ${{ steps.v.outputs.version }}
+      vinum: ${{ steps.v.outputs.vinum }}
+      prerelease: ${{ steps.v.outputs.prerelease }}
+      notes: ${{ steps.v.outputs.notes }}
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+      - id: v
+        run: |
+          set -euo pipefail
+          cargo_ver="$(awk '/^\[workspace.package\]/{p=1; next} /^\[/{p=0} p && /^version *=/{gsub(/[" ]/, "", $0); sub(/version=/, "", $0); print; exit}' Cargo.toml)"
+          [[ -n "$cargo_ver" ]] || { echo "::error::no version in [workspace.package] of Cargo.toml"; exit 1; }
+          if [[ "$GITHUB_REF_TYPE" == tag ]]; then
+            tag="${GITHUB_REF_NAME#v}"
+            if [[ "$tag" != "$cargo_ver" ]]; then
+              echo "::error::tag v$tag does not match Cargo.toml version $cargo_ver (bump [workspace.package] version first)"
+              exit 1
+            fi
+          fi
+          [[ "$cargo_ver" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.]+)?$ ]] || { echo "::error::version $cargo_ver is not semver"; exit 1; }
+          core="${cargo_ver%%-*}"
+          echo "version=$cargo_ver" >> "$GITHUB_OUTPUT"
+          echo "vinum=$core.0" >> "$GITHUB_OUTPUT"
+          if [[ "$cargo_ver" == *-* ]]; then echo "prerelease=true" >> "$GITHUB_OUTPUT"; else echo "prerelease=false" >> "$GITHUB_OUTPUT"; fi
+          notes="release-notes/v$cargo_ver.md"
+          if [[ -f "$notes" ]]; then
+            echo "notes=$notes" >> "$GITHUB_OUTPUT"
+          else
+            echo "::warning::$notes not found: the draft gets generated notes, latest.json a link to the release"
+            echo "notes=" >> "$GITHUB_OUTPUT"
+          fi
+          echo "### Release $cargo_ver" >> "$GITHUB_STEP_SUMMARY"
+
+  gate:
+    name: clippy + tests (Windows)
+    needs: version
+    runs-on: windows-latest
+    timeout-minutes: 60
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@686976e191b89faba57d3206551f0f330d8cb249 # stable
+        with:
+          toolchain: "1.100.0" # keep in sync with rust-toolchain.toml
+          components: clippy
+      - uses: Swatinem/rust-cache@f13886b937689c021905a6b90929199931d60db1 # v2.8.1
+      - run: cargo clippy --workspace --all-targets --locked -- -D warnings
+      - run: cargo test --workspace --locked
+
+  build:
+    needs: [version, gate]
+    strategy:
+      fail-fast: true
+      matrix:
+        include:
+          - name: windows-x64
+            os: windows-latest
+          - name: macos-arm64
+            os: macos-15
+          - name: linux-x64
+            os: ubuntu-24.04
+    name: build ${{ matrix.name }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 60
+    defaults:
+      run:
+        shell: bash
+    env:
+      VERSION: ${{ needs.version.outputs.version }}
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@686976e191b89faba57d3206551f0f330d8cb249 # stable
+        with:
+          toolchain: "1.100.0" # keep in sync with rust-toolchain.toml
+      - uses: Swatinem/rust-cache@f13886b937689c021905a6b90929199931d60db1 # v2.8.1
+        with:
+          key: release
+
+      - name: Linux system libraries (GPUI, ALSA, D-Bus)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            pkg-config libasound2-dev libdbus-1-dev libfontconfig1-dev libfreetype6-dev \
+            libwayland-dev libxkbcommon-dev libxkbcommon-x11-dev libx11-xcb-dev libxcb1-dev \
+            libvulkan-dev libzstd-dev
+
+      - name: Release build
+        env:
+          # The in-app updater exists on Windows only; elsewhere the channel stays empty.
+          ASPHONIX_UPDATE_ENDPOINT: ${{ runner.os == 'Windows' && vars.ASPHONIX_UPDATE_ENDPOINT || '' }}
+          ASPHONIX_UPDATE_PUBKEY: ${{ runner.os == 'Windows' && vars.ASPHONIX_UPDATE_PUBKEY || '' }}
+        run: |
+          set -euo pipefail
+          if [[ "$RUNNER_OS" == Windows ]]; then
+            if [[ -n "$ASPHONIX_UPDATE_ENDPOINT" && -n "$ASPHONIX_UPDATE_PUBKEY" ]]; then
+              [[ "$ASPHONIX_UPDATE_ENDPOINT" == https://* ]] || { echo "::error::ASPHONIX_UPDATE_ENDPOINT must be https"; exit 1; }
+              echo "update channel: $ASPHONIX_UPDATE_ENDPOINT"
+            else
+              echo "::warning::no update channel configured (vars.ASPHONIX_UPDATE_ENDPOINT / ASPHONIX_UPDATE_PUBKEY): in-app updates stay off in this build"
+            fi
+          fi
+          cargo build --workspace --release --locked
+
+      - name: Package
+        run: |
+          set -euo pipefail
+          out="asphonix-${VERSION}-${{ matrix.name }}"
+          mkdir -p dist
+          case "$RUNNER_OS" in
+            Windows)
+              mkdir "$out"
+              cp target/release/asphonix.exe target/release/asphonix-mcp.exe LICENSE README.md "$out/"
+              7z a "dist/$out.zip" "$out" >/dev/null
+              ;;
+            macOS)
+              app="$out/ASPHONIX.app"
+              mkdir -p "$app/Contents/MacOS"
+              cp target/release/asphonix target/release/asphonix-mcp "$app/Contents/MacOS/"
+              cat > "$app/Contents/Info.plist" <<PLIST
+          <?xml version="1.0" encoding="UTF-8"?>
+          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+          <plist version="1.0"><dict>
+            <key>CFBundleName</key><string>ASPHONIX</string>
+            <key>CFBundleDisplayName</key><string>ASPHONIX</string>
+            <key>CFBundleIdentifier</key><string>dev.asphonix.app</string>
+            <key>CFBundleExecutable</key><string>asphonix</string>
+            <key>CFBundlePackageType</key><string>APPL</string>
+            <key>CFBundleShortVersionString</key><string>${VERSION}</string>
+            <key>LSMinimumSystemVersion</key><string>11.0</string>
+            <key>NSHighResolutionCapable</key><true/>
+          </dict></plist>
+          PLIST
+              cp LICENSE README.md "$out/"
+              # Ad-hoc signature only (Apple Silicon refuses unsigned binaries); no Developer ID, no notarization.
+              codesign --force --deep -s - "$app"
+              hdiutil create -volname ASPHONIX -srcfolder "$out" -ov -format UDZO "dist/$out.dmg"
+              ;;
+            Linux)
+              mkdir "$out"
+              cp target/release/asphonix target/release/asphonix-mcp LICENSE README.md "$out/"
+              tar -czf "dist/$out.tar.gz" "$out"
+              ;;
+          esac
+
+      - name: Windows installer (NSIS)
+        if: runner.os == 'Windows'
+        run: |
+          set -euo pipefail
+          makensis="/c/Program Files (x86)/NSIS/makensis.exe"
+          if [[ ! -x "$makensis" ]]; then
+            choco install nsis -y --no-progress
+          fi
+          src="$(cygpath -w "$PWD/asphonix-${VERSION}-${{ matrix.name }}")"
+          outfile="$(cygpath -w "$PWD/dist/ASPHONIX_${VERSION}_x64-setup.exe")"
+          cd packaging/windows
+          "$makensis" -V2 "-DVERSION=${VERSION}" "-DVIVERSION=${{ needs.version.outputs.vinum }}" "-DSRCDIR=$src" "-DOUTFILE=$outfile" asphonix.nsi
+          cd -
+          ls -l dist
+
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: build-${{ matrix.name }}
+          path: dist/*
+          if-no-files-found: error
+
+  sign:
+    name: sign, update feed, checksums
+    needs: [version, build]
+    runs-on: ubuntu-24.04
+    env:
+      VERSION: ${{ needs.version.outputs.version }}
+      NOTES: ${{ needs.version.outputs.notes }}
+      PUBKEY_B64: ${{ vars.ASPHONIX_UPDATE_PUBKEY }}
+      ASSET_REPO: ${{ vars.ASPHONIX_RELEASES_REPO || github.repository }}
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          path: dist
+          pattern: build-*
+          merge-multiple: true
+      - name: Sign the installer and write latest.json
+        env:
+          # The release key signs tag builds only: dry runs (pull requests, manual runs) stay unsigned, so unreviewed
+          # code never gets a signature the installed apps would trust.
+          MINISIGN_SECRET_KEY: ${{ github.event_name == 'push' && github.ref_type == 'tag' && secrets.MINISIGN_SECRET_KEY || '' }}
+        run: |
+          set -euo pipefail
+          setup="ASPHONIX_${VERSION}_x64-setup.exe"
+          [[ -f "dist/$setup" ]] || { echo "::error::dist/$setup missing"; exit 1; }
+          if [[ "$GITHUB_REF_TYPE" != tag ]]; then
+            echo "dry run: not signed (the release key is used for tag builds only)"
+            exit 0
+          fi
+          if [[ -z "$MINISIGN_SECRET_KEY" ]]; then
+            echo "::warning::secrets.MINISIGN_SECRET_KEY not set: release is UNSIGNED, the in-app updater will not offer it"
+            exit 0
+          fi
+          [[ -n "$PUBKEY_B64" ]] || { echo "::error::MINISIGN_SECRET_KEY is set but vars.ASPHONIX_UPDATE_PUBKEY is not"; exit 1; }
+          sudo apt-get update -qq && sudo apt-get install -y -qq minisign >/dev/null
+          umask 077
+          key="$RUNNER_TEMP/asphonix.key"
+          printf '%s\n' "$MINISIGN_SECRET_KEY" > "$key"
+          # `< /dev/null`: a password-protected key fails here instead of waiting for a prompt.
+          minisign -S -s "$key" -m "dist/$setup" -x "dist/$setup.sig" -t "version:$VERSION" < /dev/null
+          rm -f "$key"
+          # Verify exactly like the updater: the public key the builds trust, and the signed version.
+          printf '%s' "$PUBKEY_B64" | base64 -d > "$RUNNER_TEMP/asphonix.pub"
+          minisign -V -p "$RUNNER_TEMP/asphonix.pub" -m "dist/$setup" -x "dist/$setup.sig"
+          grep -qx "trusted comment: version:$VERSION" "dist/$setup.sig" || { echo "::error::signed version mismatch"; exit 1; }
+          # Notes for the feed: the release notes file (capped like the updater, 8 KB) or a link.
+          if [[ -n "$NOTES" ]]; then
+            notes="$(head -c 8000 "$NOTES")"
+          else
+            notes="https://github.com/$ASSET_REPO/releases/tag/v$VERSION"
+          fi
+          url="https://github.com/$ASSET_REPO/releases/download/v$VERSION/$setup"
+          jq -n --arg v "$VERSION" --arg n "$notes" --arg d "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+                --arg s "$(base64 -w0 "dist/$setup.sig")" --arg u "$url" \
+            '{version: $v, notes: $n, pub_date: $d, platforms: {"windows-x86_64": {url: $u, signature: $s}}}' > dist/latest.json
+          jq . dist/latest.json
+      - name: Checksums
+        run: |
+          set -euo pipefail
+          cd dist
+          sha256sum -- * | grep -v ' SHA256SUMS.txt$' > SHA256SUMS.txt
+          cat SHA256SUMS.txt
+          { echo '```'; cat SHA256SUMS.txt; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: release-assets
+          path: dist/*
+          if-no-files-found: error
+
+  release:
+    name: draft release
+    if: github.event_name == 'push' && github.ref_type == 'tag'
+    needs: [version, sign]
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: release-assets
+          path: dist
+      - uses: softprops/action-gh-release@8a0cd651e5b2365bd640854a3fa5dfc70e4875f3 # v3.0.4
+        with:
+          name: ASPHONIX v${{ needs.version.outputs.version }}
+          draft: true
+          prerelease: ${{ needs.version.outputs.prerelease == 'true' }}
+          body_path: ${{ needs.version.outputs.notes }}
+          generate_release_notes: ${{ needs.version.outputs.notes == '' }}
+          files: dist/*
+
+  mirror:
+    name: mirror to the public releases repository
+    if: github.event_name == 'push' && github.ref_type == 'tag' && vars.ASPHONIX_RELEASES_REPO != ''
+    needs: [version, sign]
+    runs-on: ubuntu-24.04
+    env:
+      VERSION: ${{ needs.version.outputs.version }}
+      NOTES: ${{ needs.version.outputs.notes }}
+      REPO: ${{ vars.ASPHONIX_RELEASES_REPO }}
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: release-assets
+          path: dist
+      - name: Draft release with installer, signature and feed
+        env:
+          GH_TOKEN: ${{ secrets.RELEASES_REPO_TOKEN }}
+        run: |
+          set -euo pipefail
+          [[ -n "$GH_TOKEN" ]] || { echo "::error::vars.ASPHONIX_RELEASES_REPO is set but secrets.RELEASES_REPO_TOKEN is not"; exit 1; }
+          setup="ASPHONIX_${VERSION}_x64-setup.exe"
+          files=("dist/$setup" dist/SHA256SUMS.txt)
+          [[ -f "dist/$setup.sig" ]] && files+=("dist/$setup.sig" dist/latest.json)
+          if [[ -n "$NOTES" ]]; then notes=(--notes-file "$NOTES"); else notes=(--notes "ASPHONIX v$VERSION"); fi
+          gh release create "v$VERSION" -R "$REPO" --draft --title "ASPHONIX v$VERSION" "${notes[@]}" "${files[@]}"
