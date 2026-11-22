@@ -505,10 +505,12 @@ impl NowPlayingView {
 
     fn poll_waveform(&mut self, id: String, cx: &mut Context<Self>) {
         self.wave_gen += 1;
-        self.poll_waveform_gen(id, self.wave_gen, cx);
+        self.poll_waveform_gen(id, self.wave_gen, 0, cx);
     }
 
-    fn poll_waveform_gen(&mut self, id: String, gen_: u64, cx: &mut Context<Self>) {
+    /// `Waveform.svelte`'s `poll`: again in 400 ms while not done; a failed request is retried at 1.5 s, at most
+    /// 3 tries per ask (`failures` counts them for this generation and, like the web, is never reset).
+    fn poll_waveform_gen(&mut self, id: String, gen_: u64, failures: u32, cx: &mut Context<Self>) {
         let b = self.backend.clone();
         cx.spawn(async move |this, cx| {
             let want = id.clone();
@@ -517,21 +519,25 @@ impl NowPlayingView {
                 if t.wave_for.as_deref() != Some(id.as_str()) || t.wave_gen != gen_ {
                     return;
                 }
-                if let Ok(w) = w {
-                    let done = w.done;
-                    t.wave_filled = w.filled;
-                    t.wave = Some(w.buckets);
-                    if !done {
-                        cx.spawn(async move |this, cx| {
-                            cx.background_executor().timer(std::time::Duration::from_millis(400)).await;
-                            let _ = this.update(cx, |t, cx| {
-                                if t.wave_for.as_deref() == Some(id.as_str()) && t.wave_gen == gen_ {
-                                    t.poll_waveform_gen(id, gen_, cx);
-                                }
-                            });
-                        })
-                        .detach();
+                let (again, failures) = match w {
+                    Ok(w) => {
+                        let done = w.done;
+                        t.wave_filled = w.filled;
+                        t.wave = Some(w.buckets);
+                        ((!done).then_some(400), failures)
                     }
+                    Err(_) => ((failures + 1 < 3).then_some(1500), failures + 1),
+                };
+                if let Some(ms) = again {
+                    cx.spawn(async move |this, cx| {
+                        cx.background_executor().timer(std::time::Duration::from_millis(ms)).await;
+                        let _ = this.update(cx, |t, cx| {
+                            if t.wave_for.as_deref() == Some(id.as_str()) && t.wave_gen == gen_ {
+                                t.poll_waveform_gen(id, gen_, failures, cx);
+                            }
+                        });
+                    })
+                    .detach();
                 }
                 cx.notify();
             });
