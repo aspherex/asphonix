@@ -127,7 +127,8 @@ fn measure_inner(key: Option<&'static str>, cell: &Rc<Cell<f32>>) -> AnyElement 
             }
             if (cell.get() - w).abs() > 0.4 {
                 cell.set(w);
-                window.refresh();
+                // prepaint: `refresh()` is a no-op while drawing; re-render the measuring view next frame (also when cached)
+                window.request_animation_frame();
             }
         },
         |_, _, _, _| {},
