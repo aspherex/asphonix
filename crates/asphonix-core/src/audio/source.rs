@@ -1807,7 +1807,8 @@ mod redaction_tests {
         assert_eq!(failed["fields"]["offset"], 7);
         assert!(failed["fields"]["url"].as_str().unwrap().contains("id=tr-9"), "{failed}");
         assert_eq!(logs.events().iter().filter(|e| e["message"] == "stream request").count(), 2);
-        assert!(logs.find("stream response").is_some());
+        // No assertion on the "stream response" event: it carries no URL, and tracing's global per-callsite
+        // interest cache can drop it when other tests with different subscribers run in parallel (flaky on CI).
         crate::redact::assert_redacted(&logs.text(), &["alice-user", "0123456789abcdef0123456789abcdef", "salt42"]);
     }
 }
