@@ -39,6 +39,9 @@ pub struct QueueRail {
     scroll: gpui::ScrollHandle,
     /// `(queue length, current track id, shuffle)` the list was last scrolled for (`scrolledForTrack`).
     scroll_key: Option<(usize, String, bool)>,
+    /// list position still to be scrolled to the top: GPUI's `scroll_to_top_of_item` subtracts the handle's bounds from the
+    /// previous frame, which are zero until the list has painted once, so it is applied from `render` (see `take_pending_top`)
+    top_pending: Option<usize>,
     focus: FocusHandle,
     /// edge auto-scroll while dragging a row (px per frame, + = down), `startAutoScroll`
     drag_dy: f32,
@@ -131,7 +134,7 @@ fn drop_frame(th: &Theme) -> gpui::Div {
 impl QueueRail {
     pub fn new(backend: Arc<dyn Backend>, art: ArtHandle, player: &Entity<PlayerModel>, menu: &Entity<ContextMenu>, cx: &mut Context<Self>) -> Self {
         let sub = cx.subscribe(player, |this: &mut Self, _, _: &PlayerEvent, cx| this.refresh(cx));
-        let mut s = Self { backend, art, player: player.clone(), state: None, scroll: gpui::ScrollHandle::new(), scroll_key: None, menu: menu.clone(), focus: cx.focus_handle().tab_stop(true), drag_dy: 0.0, drag: None, base: 0, rows: Default::default(), ph_bounds: Default::default(), deck_b: Default::default(), user_b: Default::default(), list_b: Default::default(), drag_pos: Point::default(), sel: Selection::default(), _sub: sub };
+        let mut s = Self { backend, art, player: player.clone(), state: None, scroll: gpui::ScrollHandle::new(), scroll_key: None, menu: menu.clone(), focus: cx.focus_handle().tab_stop(true), drag_dy: 0.0, drag: None, base: 0, top_pending: None, rows: Default::default(), ph_bounds: Default::default(), deck_b: Default::default(), user_b: Default::default(), list_b: Default::default(), drag_pos: Point::default(), sel: Selection::default(), _sub: sub };
         s.refresh(cx);
         s
     }
@@ -188,7 +191,7 @@ impl QueueRail {
         let key = (q.total, id, shuffle);
         if self.scroll_key.as_ref() != Some(&key) {
             self.scroll_key = Some(key);
-            self.scroll.scroll_to_top_of_item(pos);
+            self.top_pending = Some(pos);
         }
     }
 
@@ -220,6 +223,12 @@ fn header(th: &Theme, id: &'static str, label: String, right: Option<String>) ->
 
 impl Render for QueueRail {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        if self.top_pending.is_some() {
+            match take_pending_top(&mut self.top_pending, f32::from(self.scroll.bounds().size.height)) {
+                Some(pos) => self.scroll.scroll_to_top_of_item(pos),
+                None => cx.notify(), // paint the list once so its bounds exist, then apply
+            }
+        }
         if self.drag_dy != 0.0 {
             if cx.has_active_drag() {
                 let off = self.scroll.offset();
@@ -512,8 +521,8 @@ impl QueueRail {
         let selected = self.sel.contains(i);
         let idx = i;
         // dragging a row of a multi-row selection moves the whole selection (`onWindowPointerMove`)
-        let moving = self.sel.for_context_menu(i);
-        let moving = if moving.len() > 1 && selected { moving } else { vec![i] };
+        // read-only: `for_context_menu` collapses the selection onto `i`, which must never happen while painting
+        let moving = if selected && self.sel.len() > 1 { self.sel.indices() } else { vec![i] };
         let label = if moving.len() > 1 { format!("{} tracks", moving.len()) } else { t.title.clone() };
         let dim = self.drag.as_ref().is_some_and(|d| d.moving.contains(&i));
         let drag = QueueDrag { label };
@@ -839,6 +848,16 @@ fn flow_noun(kind: SourceKind) -> &'static str {
     }
 }
 
+/// Hands out the pending scroll-to-top target once the list has painted (its bounds are non-empty). Applied earlier,
+/// GPUI computes the offset against zero bounds and the list lands scrolled by the list's own window offset.
+fn take_pending_top(pending: &mut Option<usize>, list_height: f32) -> Option<usize> {
+    if list_height > 0.0 {
+        pending.take()
+    } else {
+        None
+    }
+}
+
 impl QueueRail {
     /// Absolute indices of the main list's rows (current track onwards, minus the "Next in queue" section).
     fn main_indices(&self) -> Vec<usize> {
@@ -889,5 +908,20 @@ impl QueueRail {
 impl Focusable for QueueRail {
     fn focus_handle(&self, _: &gpui::App) -> FocusHandle {
         self.focus.clone()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::take_pending_top;
+
+    #[test]
+    fn scroll_to_top_waits_for_the_first_painted_list() {
+        let mut p = Some(7);
+        assert_eq!(take_pending_top(&mut p, 0.0), None);
+        assert_eq!(p, Some(7));
+        assert_eq!(take_pending_top(&mut p, 477.0), Some(7));
+        assert_eq!(p, None);
+        assert_eq!(take_pending_top(&mut p, 477.0), None);
     }
 }
