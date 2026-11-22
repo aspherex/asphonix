@@ -74,10 +74,10 @@ impl Shell {
         if *self.router.current() == crate::router::Route::NowPlaying || self.overlay_open(cx) {
             return;
         }
-        if crate::widgets::smooth::scroll_largest(dy) {
-            window.refresh();
-            cx.stop_propagation();
-        }
+        // applied in the next full frame (`smooth::scroll_largest`)
+        crate::widgets::smooth::scroll_largest(dy);
+        window.refresh();
+        cx.stop_propagation();
     }
 }
 

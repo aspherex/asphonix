@@ -162,8 +162,10 @@ thread_local! {
     static TARGETS: RefCell<HashMap<usize, Target>> = RefCell::new(HashMap::new());
     /// frame-clock time of the last wheel event each container consumed
     static LAST_WHEEL: RefCell<HashMap<usize, f64>> = RefCell::new(HashMap::new());
-    /// (key, area) of the containers registered in the last frame, for keyboard scrolling
-    static LAST_FRAME: RefCell<Vec<(usize, f32)>> = const { RefCell::new(Vec::new()) };
+    /// (key, area) of the containers registered in this frame (cached views that are reused do not register again)
+    static THIS_FRAME: RefCell<Vec<(usize, f32)>> = const { RefCell::new(Vec::new()) };
+    /// a J/K scroll waiting for the next full frame, which lists exactly the containers on screen
+    static PENDING_KEY_SCROLL: std::cell::Cell<Option<f32>> = const { std::cell::Cell::new(None) };
 }
 
 /// When the container `key` last took a wheel event. The host consumes wheel events in the capture phase, so a
@@ -205,6 +207,7 @@ pub fn drive(window: &mut Window, sc: Scrollable) -> AnyElement {
         move |b: Bounds<Pixels>, window, _| {
             let hitbox = window.insert_hitbox(b, HitboxBehavior::Normal);
             TARGETS.with(|t| t.borrow_mut().insert(key, Target { key, hitbox, area: f32::from(b.size.width) * f32::from(b.size.height) }));
+            THIS_FRAME.with(|t| t.borrow_mut().push((key, f32::from(b.size.width) * f32::from(b.size.height))));
             SETTERS.with(|s| s.borrow_mut().insert(key, sc));
         },
         |_, _, _, _| {},
@@ -216,10 +219,15 @@ pub fn drive(window: &mut Window, sc: Scrollable) -> AnyElement {
     .into_any_element()
 }
 
-/// `shortcuts.ts: scrollStage(delta)` (J/K outside Now Playing): scrolls the largest container of the last frame that
-/// can scroll, instantly (`behavior: "auto"`). False when none can.
-pub fn scroll_largest(delta: f32) -> bool {
-    let mut cands = LAST_FRAME.with(|l| l.borrow().clone());
+/// `shortcuts.ts: scrollStage(delta)` (J/K outside Now Playing): scrolls the largest container on screen that can
+/// scroll, instantly (`behavior: "auto"`). The caller refreshes the window: cached pages (`crate::part`) do not
+/// register their containers on a reused frame, so the scroll is applied by [`host`] in the next, full frame, from
+/// exactly the containers it lays out (no stale one from a closed dialog or a hidden panel).
+pub fn scroll_largest(delta: f32) {
+    PENDING_KEY_SCROLL.with(|p| p.set(Some(delta)));
+}
+
+fn apply_scroll_largest(mut cands: Vec<(usize, f32)>, delta: f32) -> bool {
     cands.sort_by(|a, b| b.1.total_cmp(&a.1));
     // the web only considers a viewport taller than half the stage (`clientHeight > target.clientHeight / 2`): never fall
     // through to the narrow sidebar / queue rail when the page itself cannot scroll
@@ -241,10 +249,15 @@ pub fn scroll_largest(delta: f32) -> bool {
 /// The single wheel listener; put it last in the root so every container has registered by its prepaint.
 pub fn host() -> AnyElement {
     canvas(
-        |_, _, _| {
-            let v: Vec<Target> = TARGETS.with(|t| t.borrow().values().cloned().collect());
-            LAST_FRAME.with(|l| *l.borrow_mut() = v.iter().map(|t| (t.key, t.area)).collect());
-            v
+        |_, window, _| {
+            let fresh = THIS_FRAME.with(|t| std::mem::take(&mut *t.borrow_mut()));
+            if let Some(dy) = PENDING_KEY_SCROLL.with(|p| p.take())
+                && apply_scroll_largest(fresh, dy)
+            {
+                // the offset changed after the containers laid out: draw it with one more full frame
+                window.on_next_frame(|window, _| window.refresh());
+            }
+            TARGETS.with(|t| t.borrow().values().cloned().collect::<Vec<Target>>())
         },
         |_, mut targets: Vec<Target>, window, _| {
             targets.sort_by(|a, b| a.area.total_cmp(&b.area)); // innermost first
