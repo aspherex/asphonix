@@ -651,3 +651,33 @@ fn the_deferred_restore_never_replaces_a_queue_the_user_started() {
     assert_eq!(queue_ids(&b), ["t3", "t1"]);
     assert_ne!(b.player_get_state().unwrap().track.map(|t| t.id), Some("t2".to_string()));
 }
+
+/// The user queued something and emptied the queue again before the first sync finished (the session file may still
+/// hold the old queue: writes are debounced): the deferred restore must not bring the saved session back.
+#[test]
+fn the_deferred_restore_never_refills_a_queue_the_user_emptied() {
+    let e = Env::new("restore-retry-emptied");
+    write_saved_session(&e);
+    let b = e.open();
+    std::thread::sleep(Duration::from_millis(600));
+    seed(&b);
+    b.player_enqueue(EnqueueRequest { track_ids: vec!["t3".into()], position: EnqueuePosition::End }).unwrap();
+    wait_until("enqueued", || queue_ids(&b).len() == 1);
+    b.player_remove_from_queue(0).unwrap();
+    wait_until("emptied", || queue_ids(&b).is_empty());
+    b.after_first_sync();
+    std::thread::sleep(Duration::from_millis(300));
+    assert!(queue_ids(&b).is_empty(), "{:?}", queue_ids(&b));
+    assert_eq!(b.player_get_state().unwrap().status, PlaybackStatus::Stopped);
+}
+
+/// Logging out disarms the deferred restore: the next account's first sync must not get the old account's session.
+#[test]
+fn logout_disarms_the_deferred_restore() {
+    let e = Env::new("restore-retry-logout");
+    write_saved_session(&e);
+    let b = e.open();
+    std::thread::sleep(Duration::from_millis(600));
+    let _ = b.auth_logout();
+    assert!(!b.0.restore_retry.load(std::sync::atomic::Ordering::SeqCst));
+}

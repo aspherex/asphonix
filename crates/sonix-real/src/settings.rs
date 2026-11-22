@@ -163,8 +163,9 @@ impl RealBackend {
     /// the app was not opened for a while) skips the whole session ("none of the saved tracks is in the local
     /// library") although the startup sync adds those tracks seconds later. The first successful sync of the run
     /// therefore offers the saved session once more, re-read from disk. The engine's own guard (nothing queued,
-    /// loading or playing) keeps it from replacing anything the user started meanwhile; when the 300 ms restore
-    /// already worked, the retry is a no-op for the same reason.
+    /// loading or playing, and no queue command since start: `queue_touched`) keeps it from replacing or refilling
+    /// anything the user did meanwhile; when the 300 ms restore already worked, the retry is a no-op for the same
+    /// reason. An account switch or logout disarms it (`connect`, `auth_logout`): the session is the old account's.
     pub(crate) fn after_first_sync(&self) {
         if self.0.restore_retry.swap(false, Ordering::SeqCst) {
             self.offer_saved_session();

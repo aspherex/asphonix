@@ -693,6 +693,10 @@ struct Engine {
     /// See `MAX_CONSECUTIVE_FAILURES`; reset when a track starts or the user
     /// picks something to play.
     consecutive_failures: u32,
+    /// Native addition: set by the first command that changes the queue (play, enqueue, remove, reorder, jump,
+    /// skip, stop, a forced restore). A startup (non-forced) restore is refused from then on, even when the queue
+    /// is empty again: the user emptied it on purpose, and a re-offered saved session must not bring it back.
+    queue_touched: bool,
     /// Set by a failure reported *while* `fail_current_track` is already
     /// skipping (a synchronous open failure inside its `advance`), so the
     /// skip continues in its loop instead of recursing (deep queues used to
@@ -796,6 +800,7 @@ impl Engine {
             resume_at: None,
             last_error: None,
             consecutive_failures: 0,
+            queue_touched: false,
             skip_pending: false,
             in_failure_chain: false,
             last_emit: Instant::now(),
@@ -857,8 +862,10 @@ impl Engine {
                             | EngineCommand::LoopCycle
                             | EngineCommand::RestoreSession { force: false, .. }
                     );
-                    if let Some(what) = describe_queue_command(&cmd) {
-                        log::info!("engine: {what}");
+                    if log::log_enabled!(log::Level::Info) {
+                        if let Some(what) = describe_queue_command(&cmd) {
+                            log::info!("engine: {what}");
+                        }
                     }
                     self.handle(cmd);
                     if mutates {
@@ -950,6 +957,21 @@ impl Engine {
     }
 
     fn handle(&mut self, cmd: EngineCommand) {
+        if matches!(
+            cmd,
+            EngineCommand::PlayQueue { .. }
+                | EngineCommand::PlaySource { .. }
+                | EngineCommand::Enqueue { .. }
+                | EngineCommand::RemoveFromQueue(_)
+                | EngineCommand::ReorderQueue { .. }
+                | EngineCommand::JumpTo(_)
+                | EngineCommand::Next
+                | EngineCommand::Previous
+                | EngineCommand::Stop
+                | EngineCommand::RestoreSession { force: true, .. }
+        ) {
+            self.queue_touched = true;
+        }
         match cmd {
             EngineCommand::PlayQueue {
                 track_ids,
@@ -2662,7 +2684,8 @@ impl Engine {
     /// saved session untouched rather than judging every id deleted.
     fn restore_session(&mut self, state: SessionState, pools: Option<SourcePools>, force: bool) {
         if !force
-            && (self.status != PlaybackStatus::Stopped
+            && (self.queue_touched
+                || self.status != PlaybackStatus::Stopped
                 || self.playback.is_some()
                 || self.pending_start.is_some()
                 || !self.queue.is_empty())

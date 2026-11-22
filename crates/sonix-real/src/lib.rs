@@ -331,6 +331,10 @@ impl RealBackend {
             Ok(())
         });
         let same = previous.as_ref().is_some_and(|p| p.url == url && p.username == username);
+        if !same {
+            // The saved session belongs to the previous account: its first sync must not re-offer it to this one.
+            self.0.restore_retry.store(false, std::sync::atomic::Ordering::SeqCst);
+        }
         self.0.epoch.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
         if !same {
             // Reference `connect_account`: a different server/user (also the first login after a logout) starts clean.
@@ -368,6 +372,7 @@ impl AuthApi for RealBackend {
     /// sync, then clear everything local (profile entry, keychain, `connection.json`, library mirror, art cache) even if
     /// one step fails; the first error is reported.
     fn auth_logout(&self) -> ApiResult<()> {
+        self.0.restore_retry.store(false, std::sync::atomic::Ordering::SeqCst);
         self.flush_listen();
         *self.0.client.write().unwrap() = None;
         self.0.epoch.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
