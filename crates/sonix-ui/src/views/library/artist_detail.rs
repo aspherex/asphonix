@@ -14,7 +14,7 @@ use crate::probe::pid;
 use crate::router::Route;
 use crate::text::txt;
 use crate::theme::Theme;
-use crate::tracking::{BODY_MD, HEADLINE_LG, HEADLINE_SM, LABEL_CAPS, MONO_CODE, MONO_DATA};
+use crate::tracking::{BODY_MD, BODY_SM, HEADLINE_LG, HEADLINE_SM, LABEL_CAPS, MONO_CODE, MONO_DATA};
 use crate::views::shell::{EnqueueSelected, OpenMenuKey, PlaySelected, SelDown, SelUp};
 use crate::widgets::{hard_shadow, icon};
 use crate::widgets::tooltip::Tip;
@@ -525,7 +525,7 @@ impl ArtistDetailView {
             }
         } else {
             // native-only: the column stays (the web drops About), so Popular keeps its width
-            sec = sec.child(div().flex().child(txt(&th, BODY_MD, "No biography.").color(th.muted)));
+            sec = sec.child(div().flex().child(txt(&th, BODY_SM, "No biography.").color(th.muted)));
         }
         pid("artist.about", sec).into_any_element()
     }
