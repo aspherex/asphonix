@@ -140,24 +140,7 @@ impl Shell {
                 window.focus(&f);
             }
         }));
-        subs.push(cx.observe_window_activation(window, |this: &mut Shell, window, cx| {
-            this.main_active = window.is_window_active();
-            if !this.main_active && !this.suspended {
-                // Visible but in the background (the user works elsewhere): once it stays that way for a few seconds, trim
-                // the working set like a minimize does (pages come back on demand when the window is used again).
-                cx.spawn(async move |this, cx| {
-                    gpui::Timer::after(Duration::from_secs(5)).await;
-                    let _ = this.update(cx, |sh, _| {
-                        if !sh.main_active && !sh.suspended {
-                            let before = crate::winffi::private_ws();
-                            crate::winffi::empty_working_set();
-                            crate::log(&format!("inactive trim: pws {:.1} -> {:.1} MB", before as f64 / 1048576.0, crate::winffi::private_ws() as f64 / 1048576.0));
-                        }
-                    });
-                })
-                .detach();
-            }
-        }));
+        subs.push(cx.observe_window_activation(window, |this: &mut Shell, window, _cx| this.main_active = window.is_window_active()));
         subs.push(cx.subscribe(&np, |this: &mut Shell, _, ev: &NpEvent, cx| this.on_np_event(ev, cx)));
         // `TopBar.svelte: onSearchFocus`: focusing the search box navigates to the Search route
         let search_focus = search.read(cx).focus_handle.clone();
@@ -316,6 +299,15 @@ impl Shell {
     /// play (queue restored from the session) -> Now Playing -> back; the harness minimizes/restores the window itself.
     fn run_script_real(&mut self, cx: &mut Context<Self>) {
         cx.spawn(async move |this, cx| {
+            for _ in 0..50 {
+                gpui::Timer::after(Duration::from_millis(1000)).await;
+                let n = this.update(cx, |sh, _| sh.fs.intervals_ms.len()).unwrap_or(0);
+                let _ = this.update(cx, |sh, _| sh.fs.reset());
+                crate::log(&format!("root renders/s={n}"));
+            }
+        })
+        .detach();
+        cx.spawn(async move |this, cx| {
             let t = |ms: u64| gpui::Timer::after(Duration::from_millis(ms));
             t(8000).await;
             crate::log("phase idle_start");
@@ -323,7 +315,7 @@ impl Shell {
             crate::log("phase idle_end");
             crate::log("phase scroll_start");
             let mut ix = 0usize;
-            while ix < 2000 {
+            while ix < 2000 && std::env::var_os("SONIX_NOSCROLL").is_none() {
                 ix += 12;
                 if this.update(cx, |sh, cx| sh.tracks.update(cx, |t, cx| t.script_scroll(ix, cx))).is_err() {
                     return;
