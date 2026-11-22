@@ -424,6 +424,11 @@ impl Shell {
                     crate::log(&format!("player status={:?} track={:?} err={:?}", s.status, s.track.as_ref().map(|t| t.id.as_str()), s.error));
                 }
                 self.player.update(cx, |p, cx| p.apply_state(*s, live, cx));
+                // Minimized, apply_state emits no PlayerEvent (nothing re-renders), so the track-change card's
+                // subscriber never ran: the card must still show then, that is when it is most useful (overlay.rs).
+                if changed && !live {
+                    self.card_on_player(cx);
+                }
                 if changed {
                     self.refresh_source(cx);
                 }
