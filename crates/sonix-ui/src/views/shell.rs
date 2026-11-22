@@ -497,7 +497,13 @@ impl Shell {
             self.lib_parked = prev.map(|(v, r)| (r, v));
         } else {
             self.lib_stage = match self.lib_parked.take() {
-                Some((r, v)) if r == route => Some(v),
+                Some((r, v)) if r == route => {
+                    // The web remounts the route (fresh queries); the parked page re-queries in place instead (no
+                    // skeletons, scroll kept), so what changed while Now Playing was open (Home's recently played,
+                    // a LibraryChanged skipped while minimized) shows up.
+                    self.lib_ctx.nav.update(cx, |_, cx| cx.emit(LibEvent::Refresh));
+                    Some(v)
+                }
                 _ => library::stage_for(&route, &self.lib_ctx, cx),
             };
             self.lib_stage_route = self.lib_stage.as_ref().map(|_| route.clone());
