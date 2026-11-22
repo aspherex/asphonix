@@ -54,3 +54,21 @@ impl Shell {
         cx.stop_propagation();
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use gpui::{KeyBindingContextPredicate, KeyContext};
+
+    /// The single-key predicate used in `main.rs` (Space, N, L): active on the shell, inert inside a text field,
+    /// a context menu or a dialog (`shortcuts.ts: isTyping / inOverlay`).
+    #[test]
+    fn single_key_predicate_skips_inputs_menus_and_dialogs() {
+        let p = KeyBindingContextPredicate::parse("Root && !TextInput && !ContextMenu && !Dialog").unwrap();
+        let stack = |names: &[&str]| names.iter().map(|n| KeyContext::parse(n).unwrap()).collect::<Vec<_>>();
+        assert!(p.depth_of(&stack(&["Root"])).is_some());
+        assert!(p.depth_of(&stack(&["Root", "TrackList"])).is_some());
+        assert!(!p.depth_of(&stack(&["Root", "TextInput"])).is_some());
+        assert!(!p.depth_of(&stack(&["Root", "ContextMenu"])).is_some());
+        assert!(!p.depth_of(&stack(&["Root", "Dialog"])).is_some());
+    }
+}
