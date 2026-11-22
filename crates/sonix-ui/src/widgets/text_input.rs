@@ -2,7 +2,7 @@
 //! word, triple-click = all), word navigation (ctrl+left/right, ctrl+backspace/delete),
 //! clipboard (copy/cut/paste) and IME composition through GPUI's `EntityInputHandler`.
 //! Derived from GPUI's own `input` example (Apache-2.0), extended for SONIX.
-//! Gaps (docs/GPUI-GAPS.md): no undo/redo, no context menu, IME composition is wired but
+//! Gaps (docs/GPUI-GAPS.md): no context menu, IME composition is wired but
 //! was not exercised with a real IME, no bidi/RTL caret handling.
 use std::ops::Range;
 
@@ -64,6 +64,9 @@ pub fn bind_keys(cx: &mut App) {
         K::new("ctrl-backspace", DeleteWordLeft, c),
         K::new("ctrl-delete", DeleteWordRight, c),
         K::new("enter", Submit, c),
+        K::new("ctrl-z", Undo, c),
+        K::new("ctrl-y", Redo, c),
+        K::new("ctrl-shift-z", Redo, c),
     ]);
 }
 
@@ -173,6 +176,8 @@ pub struct TextInput {
     /// Chromium selects the whole value when an input is focused by keyboard (Tab, Shift+Tab) or script, not by a click.
     focus_seen: bool,
     mouse_focus: bool,
+    /// Ctrl+Z / Ctrl+Y (Chromium `<input>` undo): snapshots before each edit, typing runs coalesced
+    history: History,
 }
 
 impl TextInput {
@@ -468,11 +473,13 @@ impl TextInput {
             is_selecting: false,
             focus_seen: false,
             mouse_focus: false,
+            history: History::default(),
         }
     }
 
     /// Replace the whole content and select it (`input.select()` after a prompt opens).
     pub fn set_content(&mut self, text: &str, cx: &mut Context<Self>) {
+        self.history = History::default();
         self.content = text.to_string().into();
         self.selected_range = 0..text.len();
         self.selection_reversed = false;
@@ -541,6 +548,7 @@ impl EntityInputHandler for TextInput {
             .or(self.marked_range.clone())
             .unwrap_or(self.selected_range.clone());
 
+        self.history.record(&self.content, &self.selected_range, &range, new_text);
         self.content =
             (self.content[0..range.start].to_owned() + new_text + &self.content[range.end..])
                 .into();
@@ -837,6 +845,8 @@ impl Render for TextInput {
             .on_action(cx.listener(Self::submit))
             .on_action(cx.listener(Self::show_character_palette))
             .on_action(cx.listener(Self::paste))
+            .on_action(cx.listener(Self::undo))
+            .on_action(cx.listener(Self::redo))
             .on_action(cx.listener(Self::cut))
             .on_action(cx.listener(Self::copy))
             .on_mouse_down(MouseButton::Left, cx.listener(Self::on_mouse_down))
@@ -913,4 +923,103 @@ pub fn note_tab_nav() {
 
 fn tab_nav_recent() -> bool {
     TAB_NAV.with(|t| t.get().is_some_and(|i| i.elapsed() < std::time::Duration::from_millis(250)))
+}
+
+actions!(text_input, [Undo, Redo]);
+
+/// Undo/redo stacks of one input. A snapshot (text + selection) is taken before every edit; a run of single
+/// characters typed at the caret is one step, like Chromium's typing coalescing.
+#[derive(Default)]
+struct History {
+    undo: Vec<(SharedString, Range<usize>)>,
+    redo: Vec<(SharedString, Range<usize>)>,
+    /// caret after the last typed character of the current run
+    typing_at: Option<usize>,
+}
+
+impl History {
+    const MAX: usize = 100;
+
+    fn record(&mut self, content: &SharedString, sel: &Range<usize>, range: &Range<usize>, new_text: &str) {
+        let typed = range.is_empty() && new_text.graphemes(true).count() == 1 && !new_text.chars().all(char::is_whitespace);
+        let continues = typed && self.typing_at == Some(range.start);
+        if !continues {
+            self.undo.push((content.clone(), sel.clone()));
+            if self.undo.len() > Self::MAX {
+                self.undo.remove(0);
+            }
+        }
+        self.redo.clear();
+        self.typing_at = typed.then_some(range.start + new_text.len());
+    }
+
+    fn step(from: &mut Vec<(SharedString, Range<usize>)>, to: &mut Vec<(SharedString, Range<usize>)>, content: &SharedString, sel: &Range<usize>) -> Option<(SharedString, Range<usize>)> {
+        let prev = from.pop()?;
+        to.push((content.clone(), sel.clone()));
+        Some(prev)
+    }
+}
+
+impl TextInput {
+    fn undo(&mut self, _: &Undo, _: &mut Window, cx: &mut Context<Self>) {
+        let h = &mut self.history;
+        h.typing_at = None;
+        if let Some((c, s)) = History::step(&mut h.undo, &mut h.redo, &self.content, &self.selected_range) {
+            self.restore_snapshot(c, s, cx);
+        }
+    }
+
+    fn redo(&mut self, _: &Redo, _: &mut Window, cx: &mut Context<Self>) {
+        let h = &mut self.history;
+        h.typing_at = None;
+        if let Some((c, s)) = History::step(&mut h.redo, &mut h.undo, &self.content, &self.selected_range) {
+            self.restore_snapshot(c, s, cx);
+        }
+    }
+
+    fn restore_snapshot(&mut self, content: SharedString, sel: Range<usize>, cx: &mut Context<Self>) {
+        let end = content.len();
+        self.content = content;
+        self.selected_range = sel.start.min(end)..sel.end.min(end);
+        self.marked_range = None;
+        cx.emit(InputEvent::Changed);
+        cx.notify();
+    }
+}
+
+#[cfg(test)]
+mod history_tests {
+    use super::History;
+    use gpui::SharedString;
+
+    fn s(t: &str) -> SharedString {
+        t.to_string().into()
+    }
+
+    #[test]
+    fn typing_run_is_one_undo_step_and_a_paste_is_another() {
+        let mut h = History::default();
+        // type "ab" at the caret, then paste " cd"
+        h.record(&s(""), &(0..0), &(0..0), "a");
+        h.record(&s("a"), &(1..1), &(1..1), "b");
+        h.record(&s("ab"), &(2..2), &(2..2), " cd");
+        assert_eq!(h.undo.len(), 2);
+        assert_eq!(h.undo[0].0, s(""));
+        assert_eq!(h.undo[1].0, s("ab"));
+        // a redo stack is dropped by a new edit
+        h.redo.push((s("x"), 0..0));
+        h.record(&s("ab cd"), &(5..5), &(5..5), "e");
+        assert!(h.redo.is_empty());
+    }
+
+    #[test]
+    fn step_moves_between_stacks() {
+        let mut h = History::default();
+        h.record(&s(""), &(0..0), &(0..0), "a");
+        let (mut u, mut r) = (std::mem::take(&mut h.undo), Vec::new());
+        let prev = History::step(&mut u, &mut r, &s("a"), &(1..1)).unwrap();
+        assert_eq!(prev.0, s(""));
+        assert_eq!(r[0].0, s("a"));
+        assert!(History::step(&mut u, &mut r, &s(""), &(0..0)).is_none());
+    }
 }
