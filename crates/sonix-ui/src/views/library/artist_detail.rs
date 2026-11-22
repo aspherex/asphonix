@@ -17,6 +17,7 @@ use crate::theme::Theme;
 use crate::tracking::{BODY_MD, HEADLINE_LG, HEADLINE_SM, LABEL_CAPS, MONO_CODE, MONO_DATA};
 use crate::views::shell::{EnqueueSelected, OpenMenuKey, PlaySelected, SelDown, SelUp};
 use crate::widgets::{hard_shadow, icon};
+use crate::widgets::tooltip::Tip;
 use gpui::{
     AnyElement, Bounds, ClickEvent, Context, CursorStyle, FocusHandle, Focusable, IntoElement, MouseButton, MouseDownEvent, Pixels, Point, Render, SharedString, Subscription, Window, div,
     point, prelude::*, px,
@@ -265,6 +266,7 @@ impl ArtistDetailView {
             .hover(move |s| s.border_color(th.focus))
             .child(icon("sliders", 15.0, th.text))
             .child(txt(&th, LABEL_CAPS, "FLOW").color(th.text))
+            .tip("Order by tempo, key and genre, keeping bit-perfect playback", th)
             .relative()
             .child(crate::flow::bounds_probe(flow_cell.clone()))
             .on_click(move |_, window, cx| {

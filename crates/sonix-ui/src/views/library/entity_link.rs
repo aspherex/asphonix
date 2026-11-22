@@ -2,6 +2,7 @@
 //! the link would lead to the page already open. Not a tab stop; click/dblclick do not propagate, so the
 //! enclosing row/card neither selects, plays nor opens. Hover: colour -> stark over 0.1 s + underline
 //! (`text-underline-offset: 2px`).
+use crate::widgets::tooltip::Tip;
 use crate::anim;
 use crate::router::Route;
 use crate::text::txt;
@@ -63,6 +64,7 @@ pub fn entity_link(th: &Theme, (kind, id): (Kind, Option<&str>), text: &str, spe
     let hovered = anim::hovered(key);
     div()
         .id(("el", key))
+        .tip(text.to_string(), th)
         .relative()
         .flex()
         .min_w_0()
