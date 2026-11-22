@@ -417,3 +417,22 @@ pub fn card_skeleton(th: &Theme, width: f32) -> AnyElement {
         .child(div().flex().flex_col().child(sk::text_slot(th, BODY_MD.line, 12.0, 0.7)).child(sk::text_slot(th, MONO_DATA.line, 10.0, 0.4)))
         .into_any_element()
 }
+
+/// Native-only skeleton of [`tile`] (`.pl-card`): 56 px art + two text lines, 8 px padding, 1 px frame.
+pub fn tile_skeleton(th: &Theme, width: f32) -> AnyElement {
+    use crate::widgets::skeleton as sk;
+    div()
+        .flex()
+        .flex_row()
+        .items_center()
+        .gap(px(crate::metrics::space::SM))
+        .w(px(width))
+        .flex_none()
+        .p(px(crate::metrics::space::SM))
+        .bg(th.low)
+        .border_1()
+        .border_color(th.border)
+        .child(div().size(px(m::PL_ART)).flex_none().bg(th.high))
+        .child(div().flex_1().min_w_0().flex().flex_col().child(sk::text_slot(th, BODY_MD.line, 12.0, 0.7)).child(sk::text_slot(th, MONO_DATA.line, 10.0, 0.45)))
+        .into_any_element()
+}

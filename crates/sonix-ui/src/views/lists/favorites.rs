@@ -99,8 +99,8 @@ impl Render for FavoritesView {
                     )
                     .child(pid("page.count", txt(&th, MONO_CODE, format!("{total} ALBUMS")).color(th.muted))),
             );
-        let body: AnyElement = if total == 0 {
-            let m = if self.grid.loaded { "No starred albums yet — tap the star on any album or track." } else { "Loading…" };
+        let body: AnyElement = if total == 0 && self.grid.loaded {
+            let m = "No starred albums yet — tap the star on any album or track.";
             div().child(txt(&th, BODY_SM, m).color(th.muted)).into_any_element()
         } else {
             pid("lib.gridwrap", div().flex_1().min_h_0().child(grid_element(self, th, window, cx))).into_any_element()

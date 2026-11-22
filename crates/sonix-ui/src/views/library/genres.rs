@@ -89,7 +89,28 @@ impl Render for GenresView {
                     )),
             ));
         let body: AnyElement = if !self.loaded {
-            div().flex().child(txt(&th, MONO_CODE, "LOADING GENRES…").color(th.muted)).into_any_element()
+            // native-only: placeholder genre cards (same box as the loaded ones) until the list arrives
+            let content_w = (self.w.get() - 2.0 * m::PAGE_PAD).max(1.0);
+            let (cols, cw) = auto_fill(content_w, m::GENRE_MIN_CELL, sp::MD);
+            let mut grid = div().flex().flex_row().flex_wrap().items_start().gap(px(sp::MD));
+            for _ in 0..cols * 3 {
+                grid = grid.child(
+                    div()
+                        .flex()
+                        .flex_col()
+                        .gap(px(sp::XS))
+                        .w(px(cw))
+                        .flex_none()
+                        .p(px(sp::MD))
+                        .bg(th.low)
+                        .border_1()
+                        .border_color(th.border)
+                        .child(crate::widgets::skeleton::text_slot(&th, HEADLINE_SM.line, 14.0, 0.6))
+                        .child(crate::widgets::skeleton::text_slot(&th, MONO_DATA.line, 10.0, 0.8))
+                        .child(div().mt(px(sp::XS)).h(px(m::GENRE_BAR_H)).bg(th.high)),
+                );
+            }
+            grid.into_any_element()
         } else if self.error {
             div().flex().child(txt(&th, MONO_CODE, "GENRES UNAVAILABLE.").color(th.muted)).into_any_element()
         } else if self.items.is_empty() {

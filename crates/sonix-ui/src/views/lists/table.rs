@@ -410,7 +410,7 @@ pub fn refresh_visible(&mut self, cx: &mut Context<Self>) {
                     self.load_page(p, false, cx);
                 }
             }
-            return div().id(("trow", ix)).h(px(tr::ROW_H)).w_full().bg(th.mid).into_any_element();
+            return crate::widgets::skeleton::row(&th, tr::ROW_H).w_full().into_any_element();
         };
         let (t, label) = match item {
             RowItem::Day { day, count } => return self.day_row(th, ix, &day, count, self.backend.now_ms()),
@@ -606,9 +606,15 @@ impl Render for Table {
         .track_scroll(self.list.clone())
         .size_full();
 
-        let body: AnyElement = if total == 0 {
-            let msg = if self.loaded() { self.cfg.empty } else { "Loading…" };
-            div().p(px(lm::EMPTY_PAD)).child(txt(&th, BODY_SM, msg).color(th.muted)).into_any_element()
+        let body: AnyElement = if total == 0 && !self.loaded() {
+            // native-only: skeleton rows at the real row height instead of a "Loading…" line
+            let mut rows_v = div().flex().flex_col().size_full().overflow_hidden();
+            for _ in 0..40 {
+                rows_v = rows_v.child(crate::widgets::skeleton::row(&th, tr::ROW_H));
+            }
+            rows_v.into_any_element()
+        } else if total == 0 {
+            div().p(px(lm::EMPTY_PAD)).child(txt(&th, BODY_SM, self.cfg.empty).color(th.muted)).into_any_element()
         } else {
             div()
                 .id("lists-body")

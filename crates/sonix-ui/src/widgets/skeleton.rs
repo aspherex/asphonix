@@ -15,11 +15,6 @@ pub fn block(th: &Theme, w: f32, h: f32) -> Div {
     div().w(px(w)).h(px(h)).flex_none().bg(th.mid).opacity(0.6)
 }
 
-/// A round placeholder (avatars), `size` px.
-pub fn circle(th: &Theme, size: f32) -> Div {
-    block(th, size, size).rounded_full()
-}
-
 /// `.skeleton-row`: a `h` px list row with a 1 px bottom rule and a bar over its first 40 %.
 pub fn row(th: &Theme, h: f32) -> Div {
     div().relative().h(px(h)).border_b_1().border_color(th.mid).opacity(0.5).child(div().absolute().left_0().top_0().bottom_0().w(gpui::relative(0.4)).bg(th.mid))
