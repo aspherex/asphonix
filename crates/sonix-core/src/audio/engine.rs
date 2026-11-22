@@ -3764,6 +3764,7 @@ mod tests {
         };
         let pools = engine.queue.snapshot_pools();
         engine.queue = Queue::new();
+        engine.queue_touched = false; // a fresh engine (next app start): the startup restore applies
         engine.handle(EngineCommand::RestoreSession { state: Box::new(state), pools, force: false });
         let (arc, cov) = engine.queue.flow_info().expect("restored Flow source");
         assert_eq!(arc, ipc::FlowArc::Build);
