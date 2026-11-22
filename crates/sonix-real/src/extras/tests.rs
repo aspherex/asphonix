@@ -2,65 +2,43 @@
 use super::*;
 use crate::art::cache_path;
 use sonix_core::subsonic::Client;
-use std::io::{Read, Write};
-use std::net::TcpListener;
-use std::sync::{Arc, Mutex};
+use sonix_testkit::{MockSubsonic, Response};
 
 type Resp = (u16, &'static str, Vec<u8>);
 
-/// Records `endpoint?query` of every request and answers via `handler(endpoint, query)`.
+/// The local mock server (`sonix_testkit::MockSubsonic`) answering every request via `handler(endpoint, query)`, plus
+/// the log views these tests use (`endpoint?query` lines).
 struct Mock {
     url: String,
-    log: Arc<Mutex<Vec<String>>>,
+    m: MockSubsonic,
 }
 
 impl Mock {
     fn start(handler: impl Fn(&str, &str) -> Resp + Send + Sync + 'static) -> Mock {
-        let l = TcpListener::bind("127.0.0.1:0").unwrap();
-        let url = format!("http://127.0.0.1:{}", l.local_addr().unwrap().port());
-        let log = Arc::new(Mutex::new(Vec::new()));
-        let lg = log.clone();
-        let handler = Arc::new(handler);
-        std::thread::spawn(move || {
-            for s in l.incoming() {
-                let Ok(mut s) = s else { continue };
-                let (lg, handler) = (lg.clone(), handler.clone());
-                std::thread::spawn(move || {
-                let mut buf = [0u8; 8192];
-                let n = s.read(&mut buf).unwrap_or(0);
-                let head = String::from_utf8_lossy(&buf[..n]).to_string();
-                let target = head.split_whitespace().nth(1).unwrap_or("/").to_string();
-                let (path, query) = target.split_once('?').unwrap_or((&target, ""));
-                let ep = path.rsplit('/').next().unwrap_or("").trim_end_matches(".view").to_string();
-                lg.lock().unwrap().push(format!("{ep}?{query}"));
-                let (code, ct, body) = handler(&ep, query);
-                let _ = write!(s, "HTTP/1.1 {code} X\r\nContent-Type: {ct}\r\nContent-Length: {}\r\nConnection: close\r\n\r\n", body.len());
-                let _ = s.write_all(&body);
-                });
-            }
+        let m = MockSubsonic::with_handler(move |r| {
+            let (code, ct, body) = handler(&r.endpoint, &r.query);
+            Some(Response::raw(code, ct, body))
         });
-        Mock { url, log }
+        Mock { url: m.url().to_string(), m }
     }
     fn count(&self, ep: &str) -> usize {
-        self.log.lock().unwrap().iter().filter(|l| l.starts_with(&format!("{ep}?"))).count()
+        self.m.count(ep)
     }
     fn total(&self) -> usize {
-        self.log.lock().unwrap().len()
+        self.m.total()
     }
     fn find(&self, ep: &str) -> String {
-        self.log.lock().unwrap().iter().find(|l| l.starts_with(&format!("{ep}?"))).cloned().unwrap_or_default()
+        self.m.find(ep).map(|r| r.line()).unwrap_or_default()
     }
     /// Every request must be a read endpoint (these features never write to the server).
     fn assert_read_only(&self) {
         const READ: [&str; 9] =
             ["getOpenSubsonicExtensions", "getLyricsBySongId", "getLyrics", "getTopSongs", "getArtistInfo2", "getSimilarSongs", "getSimilarSongs2", "getCoverArt", "stream"];
-        for l in self.log.lock().unwrap().iter() {
-            let ep = l.split('?').next().unwrap();
-            assert!(READ.contains(&ep), "unexpected endpoint {ep}");
+        for r in self.m.requests() {
+            assert!(READ.contains(&r.endpoint.as_str()), "unexpected endpoint {}", r.endpoint);
         }
     }
 }
-
 
 /// Temp dir under the system temp dir (override: `SONIX_TEST_TMP`), removed on drop even when an assertion fails.
 struct TmpDir(std::path::PathBuf);
