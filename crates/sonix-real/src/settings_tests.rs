@@ -4,9 +4,8 @@ use sonix_core::audio::queue::{EntrySnapshot, QueueCore};
 use sonix_core::audio::session::SessionState;
 use sonix_core::ipc::{QueueItemOrigin, RepeatMode};
 use sonix_core::subsonic::Client;
-use std::io::{Read, Write};
-use std::net::TcpListener;
-use std::sync::{Arc, Mutex, MutexGuard};
+use sonix_testkit::{MockSubsonic, Request, Response};
+use std::sync::{Mutex, MutexGuard};
 use std::time::Instant;
 
 static ENV: Mutex<()> = Mutex::new(());
@@ -63,66 +62,23 @@ impl Drop for Env {
     }
 }
 
-/// 127.0.0.1 mock Subsonic server recording `path?query` of every request.
-struct Mock {
-    url: String,
-    reqs: Arc<Mutex<Vec<String>>>,
+/// A client of the local mock server (`sonix_testkit::MockSubsonic`, 127.0.0.1, records every request).
+trait MockClient {
+    fn client(&self) -> Client;
 }
-impl Mock {
-    fn start(body_for: fn(&str) -> String) -> Mock {
-        let l = TcpListener::bind("127.0.0.1:0").unwrap();
-        let url = format!("http://{}", l.local_addr().unwrap());
-        let reqs: Arc<Mutex<Vec<String>>> = Arc::default();
-        let r2 = reqs.clone();
-        std::thread::spawn(move || {
-            for s in l.incoming() {
-                let Ok(mut s) = s else { continue };
-                let mut buf = Vec::new();
-                let mut chunk = [0u8; 1024];
-                while !buf.windows(4).any(|w| w == b"\r\n\r\n") {
-                    match s.read(&mut chunk) {
-                        Ok(0) | Err(_) => break,
-                        Ok(n) => buf.extend_from_slice(&chunk[..n]),
-                    }
-                }
-                let line = String::from_utf8_lossy(&buf).lines().next().unwrap_or("").to_string();
-                let target = line.split_whitespace().nth(1).unwrap_or("").to_string();
-                let body = body_for(&target);
-                r2.lock().unwrap().push(target);
-                let _ = write!(s, "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}", body.len(), body);
-            }
-        });
-        Mock { url, reqs }
-    }
+impl MockClient for MockSubsonic {
     fn client(&self) -> Client {
-        Client::new(&self.url, "u", "p").unwrap()
-    }
-    fn requests(&self) -> Vec<String> {
-        self.reqs.lock().unwrap().clone()
-    }
-    fn count(&self, endpoint: &str) -> usize {
-        self.requests().iter().filter(|r| r.starts_with(&format!("/rest/{endpoint}?"))).count()
+        Client::new(self.url(), "u", "p").unwrap()
     }
 }
 
-const OK: &str = r#"{"subsonic-response":{"status":"ok","version":"1.16.1"}}"#;
-
-fn play_queue_server(target: &str) -> String {
-    if target.starts_with("/rest/getPlayQueue?") {
-        r#"{"subsonic-response":{"status":"ok","version":"1.16.1","playQueue":{"entry":[{"id":"t2","title":"Two","suffix":"flac"},{"id":"t3","title":"Three","suffix":"flac"}],"current":"t2","position":5000,"changed":"2026-10-11T09:30:00Z","changedBy":"phone"}}}"#.into()
-    } else {
-        OK.into()
-    }
+fn play_queue_server(r: &Request) -> Option<Response> {
+    (r.endpoint == "getPlayQueue").then(|| {
+        Response::json(r#""playQueue":{"entry":[{"id":"t2","title":"Two","suffix":"flac"},{"id":"t3","title":"Three","suffix":"flac"}],"current":"t2","position":5000,"changed":"2026-10-11T09:30:00Z","changedBy":"phone"}"#)
+    })
 }
-fn empty_server(_: &str) -> String {
-    OK.into()
-}
-fn scrobble_server(target: &str) -> String {
-    if target.starts_with("/rest/getOpenSubsonicExtensions") {
-        r#"{"subsonic-response":{"status":"ok","version":"1.16.1","openSubsonic":true,"openSubsonicExtensions":[]}}"#.into()
-    } else {
-        OK.into()
-    }
+fn scrobble_server(r: &Request) -> Option<Response> {
+    (r.endpoint == "getOpenSubsonicExtensions").then(|| Response::json(r#""openSubsonic":true,"openSubsonicExtensions":[]"#))
 }
 
 fn wait_until(what: &str, f: impl Fn() -> bool) {
@@ -242,11 +198,11 @@ fn server_queue_check_is_gated_by_sync_and_read_only() {
     let e = Env::new("srvq");
     let b = e.open();
     seed(&b);
-    let mock = Mock::start(play_queue_server);
+    let mock = MockSubsonic::with_handler(play_queue_server);
     *b.0.client.write().unwrap() = Some(mock.client());
     // sync OFF (default): not even a request
     assert!(b.session_check_server_queue().unwrap().is_none());
-    assert!(mock.requests().is_empty(), "{:?}", mock.requests());
+    assert!(mock.targets().is_empty(), "{:?}", mock.targets());
     // sync ON: getPlayQueue, offer built from the local library
     b.settings_set(SettingChange::SyncPlayQueue(true)).unwrap();
     let offer = b.session_check_server_queue().unwrap().expect("offer");
@@ -254,7 +210,7 @@ fn server_queue_check_is_gated_by_sync_and_read_only() {
     assert_eq!((offer.position_sec, offer.track_count), (5.0, 2));
     assert_eq!(offer.changed_by.as_deref(), Some("phone"));
     assert_eq!(mock.count("getPlayQueue"), 1);
-    assert_eq!(mock.requests().len(), 1, "read-only: {:?}", mock.requests());
+    assert_eq!(mock.targets().len(), 1, "read-only: {:?}", mock.targets());
 }
 
 #[test]
@@ -262,14 +218,14 @@ fn resume_from_server_reads_the_queue_and_errors_without_one() {
     let e = Env::new("resume");
     let b = e.open();
     assert_eq!(b.session_resume_from_server().unwrap_err().code, ErrorCode::NotConnected);
-    let none = Mock::start(empty_server);
+    let none = MockSubsonic::start();
     *b.0.client.write().unwrap() = Some(none.client());
     assert_eq!(b.session_resume_from_server().unwrap_err().code, ErrorCode::NotFound);
     // ids unknown to the (empty) local library are dropped by the engine: nothing plays
-    let mock = Mock::start(play_queue_server);
+    let mock = MockSubsonic::with_handler(play_queue_server);
     *b.0.client.write().unwrap() = Some(mock.client());
     b.session_resume_from_server().unwrap();
-    assert_eq!(mock.requests().len(), 1);
+    assert_eq!(mock.targets().len(), 1);
     assert_eq!(mock.count("getPlayQueue"), 1);
 }
 
@@ -291,7 +247,7 @@ fn exit_path_writes_the_session_and_pushes_the_play_queue_only_with_sync_on() {
     let e = Env::new("push");
     let b = e.open();
     seed(&b);
-    let mock = Mock::start(empty_server);
+    let mock = MockSubsonic::start();
     *b.0.client.write().unwrap() = Some(mock.client());
     restore_via_engine(&b, &["t1", "t2", "t3"], 1, 42_000);
     // default OFF: engine edit -> persist_now writes the local session, nothing goes to the server
@@ -302,13 +258,13 @@ fn exit_path_writes_the_session_and_pushes_the_play_queue_only_with_sync_on() {
     let ids: Vec<_> = saved.queue.entries.iter().map(|e| e.id.as_str()).collect();
     assert_eq!(ids, ["t2", "t3", "t1"]);
     assert_eq!(saved.volume, Some(0.0));
-    assert!(mock.requests().is_empty(), "sync OFF must not write to the server: {:?}", mock.requests());
+    assert!(mock.targets().is_empty(), "sync OFF must not write to the server: {:?}", mock.targets());
     // ON: the same exit path pushes savePlayQueue
     b.settings_set(SettingChange::SyncPlayQueue(true)).unwrap();
     b.player_reorder_queue(0, 2).unwrap();
     assert_eq!(queue_ids(&b), ["t3", "t1", "t2"]);
     b.persist_now();
-    let r = mock.requests();
+    let r = mock.targets();
     assert!(!r.is_empty() && r.iter().all(|q| q.starts_with("/rest/savePlayQueue?")), "{r:?}");
     let last = r.last().unwrap();
     assert!(last.contains("id=t3&id=t1&id=t2") && last.contains("current=t2"), "{last}");
@@ -394,7 +350,7 @@ fn art_cache_status_counts_distinct_covers_not_size_buckets() {
 #[test]
 fn queued_scrobbles_replay_only_to_their_own_account() {
     let e = Env::new("acct");
-    let mock = Mock::start(empty_server);
+    let mock = MockSubsonic::start();
     let client = mock.client();
     let mine = sonix_core::scrobble::service::account_of(&client);
     let q = sonix_core::scrobble::queue::ScrobbleQueue::open(&e.cfg()).unwrap();
@@ -402,7 +358,7 @@ fn queued_scrobbles_replay_only_to_their_own_account() {
     q.enqueue_for("bob@http://other.example", "theirs-1", 2_000).unwrap();
     q.enqueue_for("", "legacy-1", 3_000).unwrap();
     sonix_core::rt::block_on(sonix_core::scrobble::service::drain_for(&client, &q));
-    let r = mock.requests();
+    let r = mock.targets();
     assert_eq!(r.len(), 1, "{r:?}");
     assert!(r[0].starts_with("/rest/scrobble?") && r[0].contains("id=mine-1") && r[0].contains("time=1000"), "{}", r[0]);
     assert!(q.is_empty().unwrap(), "other accounts' rows are dropped, not replayed");
@@ -433,7 +389,7 @@ fn plays_are_recorded_locally_but_scrobbled_only_when_enabled() {
     let e = Env::new("scrobble");
     let b = e.open();
     seed(&b);
-    let mock = Mock::start(scrobble_server);
+    let mock = MockSubsonic::with_handler(scrobble_server);
     *b.0.client.write().unwrap() = Some(mock.client());
     b.settings_set(SettingChange::PlayThreshold(10)).unwrap();
     // a private watch channel drives a second service over the same shared flags (the engine itself never plays here)
@@ -451,7 +407,7 @@ fn plays_are_recorded_locally_but_scrobbled_only_when_enabled() {
     wait_until("history row", || history_rows(&b).0 == 1);
     assert_eq!(history_rows(&b), (1, 0), "recorded, not marked scrobbled");
     std::thread::sleep(Duration::from_millis(300));
-    assert!(mock.requests().is_empty(), "scrobbling OFF must send nothing: {:?}", mock.requests());
+    assert!(mock.targets().is_empty(), "scrobbling OFF must send nothing: {:?}", mock.targets());
     // ON: stop, then a new play sends now-playing + a counted submission
     let mut idle = b.0.engine.last_player_state();
     idle.track = None;
@@ -459,8 +415,8 @@ fn plays_are_recorded_locally_but_scrobbled_only_when_enabled() {
     std::thread::sleep(Duration::from_millis(50));
     b.settings_set(SettingChange::Scrobbling(true)).unwrap();
     play_t1(&b, &tx, 12.0);
-    wait_until("scrobble request", || mock.requests().iter().any(|r| r.starts_with("/rest/scrobble?") && r.contains("submission=true")));
-    let r = mock.requests();
+    wait_until("scrobble request", || mock.targets().iter().any(|r| r.starts_with("/rest/scrobble?") && r.contains("submission=true")));
+    let r = mock.targets();
     let sub = r.iter().find(|r| r.contains("submission=true")).unwrap();
     assert!(sub.contains("id=t1") && sub.contains("time="), "{sub}");
     assert!(r.iter().any(|r| r.contains("submission=false") && r.contains("id=t1")), "now-playing: {r:?}");
@@ -510,30 +466,9 @@ fn silent_wav() -> Vec<u8> {
     v
 }
 
-/// 127.0.0.1 server: `/rest/stream` = the silent WAV, everything else the empty OK envelope.
-fn wav_server() -> String {
-    let l = TcpListener::bind("127.0.0.1:0").unwrap();
-    let url = format!("http://{}", l.local_addr().unwrap());
-    std::thread::spawn(move || {
-        for s in l.incoming() {
-            let Ok(mut s) = s else { continue };
-            std::thread::spawn(move || {
-                let mut buf = Vec::new();
-                let mut chunk = [0u8; 1024];
-                while !buf.windows(4).any(|w| w == b"\r\n\r\n") {
-                    match s.read(&mut chunk) {
-                        Ok(0) | Err(_) => return,
-                        Ok(n) => buf.extend_from_slice(&chunk[..n]),
-                    }
-                }
-                let line = String::from_utf8_lossy(&buf).lines().next().unwrap_or("").to_string();
-                let (ty, body) = if line.contains("/rest/stream") { ("audio/wav", silent_wav()) } else { ("application/json", OK.as_bytes().to_vec()) };
-                let _ = write!(s, "HTTP/1.1 200 OK\r\nContent-Type: {ty}\r\nContent-Length: {}\r\nConnection: close\r\n\r\n", body.len());
-                let _ = s.write_all(&body);
-            });
-        }
-    });
-    url
+/// Local server: `/rest/stream` = the silent WAV, everything else the empty OK envelope.
+fn wav_server() -> MockSubsonic {
+    MockSubsonic::with_handler(|r| (r.endpoint == "stream").then(|| Response::raw(200, "audio/wav", silent_wav())))
 }
 
 /// The queue once `ready` holds for it. Each wait names a property only the NEW queue has (source kind / mode, no source),
@@ -549,8 +484,8 @@ fn rolling_sources_start_at_the_clicked_row_and_static_queues_keep_the_earlier_r
     let e = Env::new("playfrom");
     let b = e.open();
     seed_five(&b);
-    let url = wav_server();
-    *b.0.client.write().unwrap() = Some(Client::new(&url, "u", "p").unwrap());
+    let srv = wav_server();
+    *b.0.client.write().unwrap() = Some(Client::new(srv.url(), "u", "p").unwrap());
     b.player_set_volume(SetVolumeRequest { volume: 0.0 }).unwrap();
     let ids = |q: &QueueState| q.items.iter().map(|i| i.track.id.as_str().to_owned()).collect::<Vec<_>>();
     // the engine may start (silent) playback and advance; the rows it holds, history included, do not change.
@@ -689,7 +624,7 @@ fn logout_disarms_the_deferred_restore() {
 #[test]
 fn failed_login_is_logged_without_credentials() {
     let e = Env::new("login-log");
-    let closed = TcpListener::bind("127.0.0.1:0").unwrap();
+    let closed = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
     let url = format!("http://{}", closed.local_addr().unwrap());
     drop(closed);
     let b = e.open();

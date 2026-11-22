@@ -55,6 +55,7 @@ SONIX is a native GPUI desktop player for Navidrome/Subsonic. See README.md for 
   generated `Key` enum, argument-less messages pre-formatted per locale (a lookup on the render path), `fmt`
   (separators/dates from the OS on Windows). `sonix-ui/src/i18n.rs` holds the `I18n` global; a switch
   (Settings > Language) calls `refresh_windows`, which re-renders cached views too.
+- `sonix-testkit` (dev-dependency only): `FakeBackend`, `MockSubsonic`, fixtures. How to test, replay seeds: docs/TESTING.md.
 
 ## GPUI gotchas
 

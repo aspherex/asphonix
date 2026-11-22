@@ -25,3 +25,6 @@ serde_json.workspace = true
 sonix-mcp-protocol = { path = "../sonix-mcp-protocol" }
 sonix-logging = { path = "../sonix-logging" }
 tracing.workspace = true
+
+[dev-dependencies]
+insta.workspace = true

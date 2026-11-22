@@ -699,6 +699,14 @@ impl Render for AlbumDetailView {
 }
 
 #[cfg(test)]
+impl AlbumDetailView {
+    /// `(routed album id, album id of the loaded detail)`: a stale answer must never fill another album's page.
+    pub(crate) fn test_ids(&self) -> (&str, Option<&str>) {
+        (&self.id, self.detail.as_ref().map(|d| d.album.id.as_str()))
+    }
+}
+
+#[cfg(test)]
 mod tests {
     use super::*;
 

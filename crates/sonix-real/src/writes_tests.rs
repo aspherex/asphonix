@@ -1,123 +1,11 @@
 //! Write paths against a local mock Subsonic server (127.0.0.1, random port). Never contacts a real server.
 use super::*;
-use std::collections::BTreeMap;
-use std::io::{Read, Write};
-use std::sync::{Arc, Mutex};
+use sonix_testkit::{MockSubsonic, Request as Req};
 use std::time::Duration;
-
-#[derive(Debug, Clone)]
-struct Req {
-    endpoint: String,
-    pairs: Vec<(String, String)>,
-}
-
-impl Req {
-    fn all(&self, key: &str) -> Vec<String> {
-        self.pairs.iter().filter(|(k, _)| k == key).map(|(_, v)| v.clone()).collect()
-    }
-}
-
-#[derive(Default)]
-struct State {
-    log: Vec<Req>,
-    /// id -> (name, entry track ids)
-    playlists: BTreeMap<String, (String, Vec<String>)>,
-    next: u32,
-    /// `Some("*")` fails every endpoint with `status:"failed"`, `Some(name)` only that endpoint.
-    fail: Option<&'static str>,
-}
-
-/// Stateful mock server: records every request with exactly parsed query pairs, applies playlist edits.
-struct Mock {
-    url: String,
-    st: Arc<Mutex<State>>,
-}
-
-fn playlist_json(id: &str, name: &str, entries: &[String], with_entries: bool) -> String {
-    let song = |id: &str| format!(r#"{{"id":"{id}","title":"T {id}","suffix":"flac","artist":"A"}}"#);
-    let e = if with_entries { format!(r#","entry":[{}]"#, entries.iter().map(|i| song(i)).collect::<Vec<_>>().join(",")) } else { String::new() };
-    format!(r#""playlist":{{"id":"{id}","name":"{name}","owner":"me","songCount":{},"duration":10.0,"readonly":false{e}}}"#, entries.len())
-}
-
-impl Mock {
-    fn start() -> Mock {
-        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
-        let url = format!("http://{}", listener.local_addr().unwrap());
-        let st = Arc::new(Mutex::new(State::default()));
-        let s2 = st.clone();
-        std::thread::spawn(move || {
-            for sock in listener.incoming() {
-                let Ok(mut sock) = sock else { break };
-                let mut buf = [0u8; 8192];
-                let n = sock.read(&mut buf).unwrap_or(0);
-                let req = String::from_utf8_lossy(&buf[..n]).to_string();
-                let target = req.lines().next().unwrap_or("").split(' ').nth(1).unwrap_or("").to_string();
-                let u = url::Url::parse(&format!("http://x{target}")).unwrap();
-                let r = Req { endpoint: u.path().trim_start_matches("/rest/").to_string(), pairs: u.query_pairs().map(|(k, v)| (k.into_owned(), v.into_owned())).collect() };
-                let mut st = s2.lock().unwrap();
-                st.log.push(r.clone());
-                let body = if st.fail.is_some_and(|f| f == "*" || f == r.endpoint) {
-                    r#"{"subsonic-response":{"status":"failed","version":"1.16.1","error":{"code":0,"message":"boom"}}}"#.to_string()
-                } else {
-                    let first = |k: &str| r.all(k).into_iter().next().unwrap_or_default();
-                    let inner = match r.endpoint.as_str() {
-                        "createPlaylist" => {
-                            st.next += 1;
-                            let id = format!("pl{}", st.next);
-                            let name = first("name");
-                            st.playlists.insert(id.clone(), (name.clone(), vec![]));
-                            format!(",{}", playlist_json(&id, &name, &[], false))
-                        }
-                        "getPlaylist" => match st.playlists.get(&first("id")) {
-                            Some((name, e)) => format!(",{}", playlist_json(&first("id"), name, e, true)),
-                            None => String::new(),
-                        },
-                        "updatePlaylist" => {
-                            if let Some(p) = st.playlists.get_mut(&first("playlistId")) {
-                                if r.pairs.iter().any(|(k, _)| k == "name") {
-                                    p.0 = first("name");
-                                }
-                                let mut rm: Vec<usize> = r.all("songIndexToRemove").iter().map(|s| s.parse().unwrap()).collect();
-                                rm.sort_unstable_by(|a, b| b.cmp(a));
-                                for i in rm {
-                                    p.1.remove(i);
-                                }
-                                p.1.extend(r.all("songIdToAdd"));
-                            }
-                            String::new()
-                        }
-                        "deletePlaylist" => {
-                            st.playlists.remove(&first("id"));
-                            String::new()
-                        }
-                        _ => String::new(),
-                    };
-                    format!(r#"{{"subsonic-response":{{"status":"ok","version":"1.16.1"{inner}}}}}"#)
-                };
-                drop(st);
-                let resp = format!("HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}", body.len(), body);
-                let _ = sock.write_all(resp.as_bytes());
-            }
-        });
-        Mock { url, st }
-    }
-    fn take(&self) -> Vec<Req> {
-        std::mem::take(&mut self.st.lock().unwrap().log)
-    }
-    fn seed(&self, id: &str, name: &str, entries: &[&str]) {
-        self.st.lock().unwrap().playlists.insert(id.into(), (name.into(), entries.iter().map(|s| s.to_string()).collect()));
-    }
-    fn entries(&self, id: &str) -> Vec<String> {
-        self.st.lock().unwrap().playlists[id].1.clone()
-    }
-    fn fail(&self, on: Option<&'static str>) {
-        self.st.lock().unwrap().fail = on;
-    }
-}
 
 /// Exact pair match (`id=t1` never matches `albumId=t1`).
 fn has(reqs: &[Req], endpoint: &str, pairs: &[(&str, &str)]) -> bool {
-    reqs.iter().any(|r| r.endpoint == endpoint && pairs.iter().all(|(k, v)| r.pairs.iter().any(|(rk, rv)| rk == k && rv == v)))
+    reqs.iter().any(|r| r.matches(endpoint, pairs))
 }
 
 fn find<'a>(reqs: &'a [Req], endpoint: &str) -> Vec<&'a Req> {
@@ -168,9 +56,9 @@ fn changed(evs: &[Event]) -> bool {
     evs.iter().any(|e| matches!(e, Event::LibraryChanged))
 }
 
-fn connect(b: &RealBackend, mock: &Mock) {
-    *b.0.client.write().unwrap() = Some(Client::new(&mock.url, "me", "pw").unwrap());
-    b.0.session.lock().unwrap().cfg = Some(sonix_core::secrets::ConnectionConfig { url: mock.url.clone(), username: "me".into(), last_sync_at: None });
+fn connect(b: &RealBackend, mock: &MockSubsonic) {
+    *b.0.client.write().unwrap() = Some(Client::new(mock.url(), "me", "pw").unwrap());
+    b.0.session.lock().unwrap().cfg = Some(sonix_core::secrets::ConnectionConfig { url: mock.url().to_string(), username: "me".into(), last_sync_at: None });
 }
 
 #[test]
@@ -191,7 +79,7 @@ fn writes_hit_the_mock_server_and_mirror_locally() {
     let tmp = TmpDir::new("main");
     let b = RealBackend::open_in(tmp.0.join("config"), tmp.0.join("data"));
     let rx = b.subscribe();
-    let mock = Mock::start();
+    let mock = MockSubsonic::start();
     exec(
         &b,
         "INSERT INTO tracks (id,title,artist,suffix,duration) VALUES ('t1','One','A','flac',10),('t2','Two','A','flac',10),('t3','Three','A','flac',10);
@@ -277,7 +165,7 @@ fn writes_hit_the_mock_server_and_mirror_locally() {
     let mut idx = upd[0].all("songIndexToRemove");
     idx.sort();
     assert_eq!(idx, ["0", "2"]);
-    assert_eq!(mock.entries("pl1"), ["t1"]);
+    assert_eq!(mock.playlist_entries("pl1"), ["t1"]);
     assert_eq!(local_ids(&b, "pl1"), ["t1"]);
 
     // reorder: ONE updatePlaylist removing every current entry and re-adding the new order
@@ -291,7 +179,7 @@ fn writes_hit_the_mock_server_and_mirror_locally() {
     rm.sort();
     assert_eq!(rm, ["0", "1"]);
     assert_eq!(upd[0].all("songIdToAdd"), ["t2", "t1"]);
-    assert_eq!(mock.entries("pl1"), ["t2", "t1"]);
+    assert_eq!(mock.playlist_entries("pl1"), ["t2", "t1"]);
     assert_eq!(local_ids(&b, "pl1"), ["t2", "t1"]);
 
     // duplicate: new id, "<name> (copy)", same tracks in order
@@ -302,7 +190,7 @@ fn writes_hit_the_mock_server_and_mirror_locally() {
     let add = find(&reqs, "updatePlaylist");
     assert_eq!(add[0].all("playlistId"), ["pl2"]);
     assert_eq!(add[0].all("songIdToAdd"), ["t2", "t1"]);
-    assert_eq!(mock.entries("pl2"), ["t2", "t1"]);
+    assert_eq!(mock.playlist_entries("pl2"), ["t2", "t1"]);
     assert_eq!(local_ids(&b, "pl2"), ["t2", "t1"]);
     assert_eq!(b.playlists_get("pl2").unwrap().playlist.name, "New (copy)");
 
@@ -379,7 +267,7 @@ fn hidden_and_stale_entries_never_edit_the_wrong_row() {
     let tmp = TmpDir::new("hidden");
     let b = RealBackend::open_in(tmp.0.join("config"), tmp.0.join("data"));
     let rx = b.subscribe();
-    let mock = Mock::start();
+    let mock = MockSubsonic::start();
     connect(&b, &mock);
     // t1 = A, t2 = B are mirrored; "x" (X) has no local track row, so the UI list is [A, B] while the server has [A, X, B].
     exec(
@@ -389,9 +277,9 @@ fn hidden_and_stale_entries_never_edit_the_wrong_row() {
          INSERT INTO playlist_tracks (playlist_id,position,track_id) VALUES ('h1',0,'t1'),('h1',1,'x'),('h1',2,'t2'),
             ('h2',0,'t1'),('h2',1,'x'),('h2',2,'t2'),('st',0,'t1'),('st',1,'t3');",
     );
-    mock.seed("h1", "H1", &["t1", "x", "t2"]);
-    mock.seed("h2", "H2", &["t1", "x", "t2"]);
-    mock.seed("st", "Stale", &["t1", "t2"]);
+    mock.seed_playlist("h1", "H1", &["t1", "x", "t2"]);
+    mock.seed_playlist("h2", "H2", &["t1", "x", "t2"]);
+    mock.seed_playlist("st", "Stale", &["t1", "t2"]);
     assert_eq!(local_ids(&b, "h1"), ["t1", "t2"]);
     events(&rx);
 
@@ -399,7 +287,7 @@ fn hidden_and_stale_entries_never_edit_the_wrong_row() {
     b.playlists_remove_tracks(RemovePlaylistTracksRequest { id: "h1".into(), indices: vec![1] }).unwrap();
     let reqs = mock.take();
     assert_eq!(find(&reqs, "updatePlaylist")[0].all("songIndexToRemove"), ["2"]);
-    assert_eq!(mock.entries("h1"), ["t1", "x"]);
+    assert_eq!(mock.playlist_entries("h1"), ["t1", "x"]);
     assert_eq!(local_ids(&b, "h1"), ["t1"]);
     assert!(changed(&events(&rx)));
 
@@ -409,7 +297,7 @@ fn hidden_and_stale_entries_never_edit_the_wrong_row() {
     let reqs = mock.take();
     assert!(find(&reqs, "updatePlaylist").is_empty(), "refused reorder must not edit");
     assert!(has(&reqs, "getPlaylist", &[("id", "h2")]), "refusal refreshes the mirror");
-    assert_eq!(mock.entries("h2"), ["t1", "x", "t2"]);
+    assert_eq!(mock.playlist_entries("h2"), ["t1", "x", "t2"]);
     assert!(changed(&events(&rx)));
 
     // stale mirror (local [t1,t3], server [t1,t2]): remove is refused, mirror re-synced
@@ -417,7 +305,7 @@ fn hidden_and_stale_entries_never_edit_the_wrong_row() {
     assert_eq!(e.code, ErrorCode::InvalidRequest);
     let reqs = mock.take();
     assert!(find(&reqs, "updatePlaylist").is_empty());
-    assert_eq!(mock.entries("st"), ["t1", "t2"]);
+    assert_eq!(mock.playlist_entries("st"), ["t1", "t2"]);
     assert_eq!(local_ids(&b, "st"), ["t1", "t2"]);
     assert!(changed(&events(&rx)));
 }
@@ -428,8 +316,8 @@ fn hidden_and_stale_entries_never_edit_the_wrong_row() {
 fn account_switch_stops_the_engine_and_wipes_mirror_and_art_cache() {
     let tmp = TmpDir::new("switch");
     let b = RealBackend::open_in(tmp.0.join("config"), tmp.0.join("data"));
-    let mock = Mock::start();
-    b.connect(&mock.url, "me", "pw", false).unwrap();
+    let mock = MockSubsonic::start();
+    b.connect(mock.url(), "me", "pw", false).unwrap();
     // let the first (empty) sync settle, then fake an old-account library + cached cover
     std::thread::sleep(Duration::from_millis(500));
     exec(&b, "INSERT INTO tracks (id,title,artist,suffix,duration) VALUES ('t1','One','A','flac',10);");
@@ -445,7 +333,7 @@ fn account_switch_stops_the_engine_and_wipes_mirror_and_art_cache() {
     }
     assert_eq!(b.player_get_queue(page).unwrap().total, 1, "old-account queue");
     mock.take();
-    b.connect(&mock.url, "other", "pw", false).unwrap();
+    b.connect(mock.url(), "other", "pw", false).unwrap();
     assert_eq!(b.0.db.track_count().unwrap(), 0, "the other account's mirror is wiped");
     assert!(!art.join("c1_160.img").exists(), "the other account's covers are dropped");
     assert_eq!(b.player_get_queue(page).unwrap().total, 0, "the engine queue is cleared (Stop)");
@@ -461,8 +349,8 @@ fn account_switch_stops_the_engine_and_wipes_mirror_and_art_cache() {
 fn logout_stops_flushes_and_wipes_everything_local() {
     let tmp = TmpDir::new("logout");
     let b = RealBackend::open_in(tmp.0.join("config"), tmp.0.join("data"));
-    let mock = Mock::start();
-    b.connect(&mock.url, "me", "pw", false).unwrap();
+    let mock = MockSubsonic::start();
+    b.connect(mock.url(), "me", "pw", false).unwrap();
     std::thread::sleep(Duration::from_millis(500));
     exec(
         &b,

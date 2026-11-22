@@ -920,3 +920,7 @@ mod tests {
         assert_eq!(take_pending_top(&mut p, 477.0), None);
     }
 }
+
+#[cfg(test)]
+#[path = "queue_rail_tests.rs"]
+pub(crate) mod gpui_tests;

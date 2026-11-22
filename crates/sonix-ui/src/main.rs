@@ -35,6 +35,9 @@ mod views;
 mod widgets;
 mod winffi;
 
+#[cfg(test)]
+mod tests;
+
 use gpui::{
     App, AppContext, Application, AssetSource, Bounds, KeyBinding, Result, SharedString, TitlebarOptions, WindowBackgroundAppearance, WindowBounds, WindowOptions, px,
     size,

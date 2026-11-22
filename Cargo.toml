@@ -1,6 +1,6 @@
 [workspace]
 resolver = "2"
-members = ["crates/sonix-api", "crates/sonix-core", "crates/sonix-real", "crates/sonix-ui", "crates/sonix-mcp", "crates/sonix-mcp-protocol", "crates/sonix-logging", "crates/sonix-i18n"]
+members = ["crates/sonix-api", "crates/sonix-core", "crates/sonix-real", "crates/sonix-ui", "crates/sonix-mcp", "crates/sonix-mcp-protocol", "crates/sonix-logging", "crates/sonix-i18n", "crates/sonix-testkit"]
 
 [workspace.package]
 version = "0.1.0"
@@ -32,6 +32,9 @@ fluent-syntax = "0.12"
 unic-langid = "0.9"
 sys-locale = "0.3"
 intl-memoizer = "0.5"
+# tests only
+proptest = { version = "1.12", default-features = false, features = ["std"] }
+insta = { version = "1.49", default-features = false, features = ["json", "redactions"] }
 
 [profile.release]
 opt-level = 3

@@ -2135,3 +2135,7 @@ mod tests {
         assert!((15..=35).contains(&first) && (15..=35).contains(&last), "first 100: {first}, last 100: {last} (base 25)");
     }
 }
+
+#[cfg(test)]
+#[path = "queue_prop_tests.rs"]
+mod prop_tests;

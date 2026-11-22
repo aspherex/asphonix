@@ -33,3 +33,9 @@ memprof = []
 
 [build-dependencies]
 embed-resource = "3"
+
+[dev-dependencies]
+gpui = { workspace = true, features = ["test-support"] }
+sonix-testkit = { path = "../sonix-testkit" }
+# `#[gpui::test]` hands `rand::rngs::StdRng` (gpui's rand) to tests that take one
+rand = "0.9"

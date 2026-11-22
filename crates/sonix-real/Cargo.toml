@@ -24,4 +24,5 @@ tracing.workspace = true
 [dev-dependencies]
 sonix-logging = { path = "../sonix-logging", features = ["test-support"] }
 sonix-mcp = { path = "../sonix-mcp" }
+sonix-testkit = { path = "../sonix-testkit" }
 url.workspace = true

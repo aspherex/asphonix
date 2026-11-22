@@ -1071,3 +1071,6 @@ impl Shell {
 fn search_placeholder() -> gpui::SharedString {
     sonix_i18n::tr!(SearchPlaceholder).to_uppercase().into()
 }
+#[cfg(test)]
+#[path = "shell_tests.rs"]
+mod gpui_tests;
