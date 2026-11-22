@@ -1,7 +1,8 @@
 //! The live layer (CPU work): everything that animates while music plays (the now-playing bars of the current row,
 //! the rail spectrum, the Now Playing FFT bars + stereo meters) is painted by a small view, [`LiveLayer`] (one over the
-//! stage, one over the window for the rail), instead of inside the (cached) page that lays it out. A spectrum or bar frame then re-renders only this
-//! view and the shell root; the track table, the rail list, the sidebar and the dock are reused as recorded.
+//! stage, one over the window for the rail), instead of inside the (cached) page that lays it out. A spectrum or bar
+//! frame then re-renders only that view and the shell root; the track table, the rail list, the sidebar and the dock
+//! are reused as recorded.
 //!
 //! The page keeps the layout: where an animated element used to be it places a [`slot`] of the same size, which
 //! records its bounds and clip (content mask) every time the page lays out. The layer paints each recorded slot
@@ -105,6 +106,11 @@ pub struct LiveLayer {
 impl LiveLayer {
     pub fn new(top: bool, player: &Entity<PlayerModel>, np: WeakEntity<NowPlayingView>) -> Self {
         Self { top, player: player.clone(), np, timer: None }
+    }
+
+    /// A redraw is scheduled (the other layer's new data rides along: both layers render with every root frame).
+    pub fn pending(&self) -> bool {
+        self.timer.is_some()
     }
 
     /// Drop the pending redraw (minimize).

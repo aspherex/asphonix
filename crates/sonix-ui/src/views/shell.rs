@@ -466,7 +466,10 @@ impl Shell {
                     self.player.update(cx, |p, _| p.apply_spectrum(f));
                     if self.spectrum_on && *self.router.current() != Route::NowPlaying {
                         // the rail spectrum is painted by the live layer (`crate::live`): only it re-renders
-                        self.live.update(cx, |l, cx| l.poke(cx));
+                        // both layers render with every root frame: a pending bars / FFT redraw takes the new frame along
+                        if !self.live_stage.read(cx).pending() {
+                            self.live.update(cx, |l, cx| l.poke(cx));
+                        }
                     }
                 }
             }
