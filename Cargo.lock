@@ -5695,6 +5695,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "sonix-testkit"
+version = "0.1.0"
+dependencies = [
+ "sonix-api",
+ "url",
+]
+
+[[package]]
 name = "sonix-ui"
 version = "0.1.0"
 dependencies = [

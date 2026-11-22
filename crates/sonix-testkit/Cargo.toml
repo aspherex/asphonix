@@ -1,0 +1,18 @@
+[package]
+name = "sonix-testkit"
+description = "Test doubles and fixtures for SONIX tests (dev-dependency only, never shipped)"
+version.workspace = true
+edition.workspace = true
+publish.workspace = true
+license.workspace = true
+repository.workspace = true
+
+# Depends on the contract crate only (never on sonix-core / sonix-real): a dev-dependency cycle would build a second
+# copy of those crates whose types do not match the ones under test.
+
+[lints]
+workspace = true
+
+[dependencies]
+sonix-api = { path = "../sonix-api" }
+url.workspace = true
