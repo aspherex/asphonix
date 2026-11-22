@@ -45,7 +45,7 @@ jobs:
         run: cargo install cargo-llvm-cov --version 0.9.2 --locked
       - name: Coverage
         env:
-          SONIX_TEST_TMP: ${{ runner.temp }}
+          ASPHONIX_TEST_TMP: ${{ runner.temp }}
         run: |
           cargo llvm-cov --workspace --locked --lcov --output-path lcov.info
           cargo llvm-cov report --summary-only | tee coverage-summary.txt
@@ -76,8 +76,8 @@ jobs:
       - name: GPUI tests, 300 seeds each
         env:
           ITERATIONS: "300"
-        run: cargo test -p sonix-ui --locked gpui_tests
+        run: cargo test -p asphonix-ui --locked gpui_tests
       - name: Property tests, 4096 cases each
         env:
           PROPTEST_CASES: "4096"
-        run: cargo test -p sonix-core --locked --test queue_props --test abloop_props && cargo test -p sonix-core --locked --lib prop_tests
+        run: cargo test -p asphonix-core --locked --test queue_props --test abloop_props && cargo test -p asphonix-core --locked --lib prop_tests

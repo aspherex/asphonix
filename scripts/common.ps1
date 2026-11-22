@@ -7,7 +7,7 @@ using System.Collections.Generic;
 using System.Runtime.InteropServices;
 using System.Text;
 
-public static class SonixPerf {
+public static class AsphonixPerf {
   [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
   struct PROCESSENTRY32 {
     public uint dwSize; public uint cntUsage; public uint th32ProcessID; public IntPtr th32DefaultHeapID;
@@ -94,14 +94,14 @@ public static class SonixPerf {
   }
 }
 '@
-[void][SonixPerf]::SetProcessDPIAware()
+[void][AsphonixPerf]::SetProcessDPIAware()
 
 function Sum($procs, $field) { $s = [uint64]0; foreach ($p in $procs) { $s += [uint64]$p.$field }; $s }
 function MB($b) { [math]::Round($b / 1MB, 1) }
 
-function Start-Sonix([string]$Exe, [hashtable]$EnvVars = @{}, [string]$Log = $null) {
+function Start-Asphonix([string]$Exe, [hashtable]$EnvVars = @{}, [string]$Log = $null) {
     foreach ($k in $EnvVars.Keys) { Set-Item -Path "Env:$k" -Value $EnvVars[$k] | Out-Null }
-    if ($Log) { Remove-Item $Log -ErrorAction SilentlyContinue; $env:SONIX_LOG = $Log }
+    if ($Log) { Remove-Item $Log -ErrorAction SilentlyContinue; $env:ASPHONIX_LOG = $Log }
     $sw = [Diagnostics.Stopwatch]::StartNew()
     $p = Start-Process -FilePath $Exe -PassThru
     foreach ($k in $EnvVars.Keys) { Remove-Item -Path "Env:$k" -ErrorAction SilentlyContinue }
@@ -111,7 +111,7 @@ function Start-Sonix([string]$Exe, [hashtable]$EnvVars = @{}, [string]$Log = $nu
 # Wait until our PID owns a visible titled window; returns elapsed ms (or $null)
 function Wait-Visible($h, [int]$MaxMs = 20000) {
     while ($h.Sw.ElapsedMilliseconds -lt $MaxMs) {
-        $t = [SonixPerf]::VisibleWindowTitle([uint32]$h.Proc.Id)
+        $t = [AsphonixPerf]::VisibleWindowTitle([uint32]$h.Proc.Id)
         if ($t) { return $h.Sw.ElapsedMilliseconds }
         if ($h.Proc.HasExited) { return $null }
         Start-Sleep -Milliseconds 2
@@ -119,15 +119,15 @@ function Wait-Visible($h, [int]$MaxMs = 20000) {
     return $null
 }
 
-function Stop-Sonix($h) {
+function Stop-Asphonix($h) {
     # exact PID only
     if ($h -and $h.Proc -and -not $h.Proc.HasExited) { Stop-Process -Id $h.Proc.Id -Force -ErrorAction SilentlyContinue }
 }
 
 function Save-WindowShot([IntPtr]$Hwnd, [string]$Path) {
     Add-Type -AssemblyName System.Drawing
-    [SonixPerf]::MakeTopmost($Hwnd); Start-Sleep -Milliseconds 300
-    $r = [SonixPerf]::FrameRect($Hwnd)
+    [AsphonixPerf]::MakeTopmost($Hwnd); Start-Sleep -Milliseconds 300
+    $r = [AsphonixPerf]::FrameRect($Hwnd)
     $w = $r.Right - $r.Left; $h = $r.Bottom - $r.Top
     $bmp = New-Object System.Drawing.Bitmap $w, $h
     $g = [System.Drawing.Graphics]::FromImage($bmp)

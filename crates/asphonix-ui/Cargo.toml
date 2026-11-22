@@ -1,0 +1,42 @@
+[package]
+name = "asphonix-ui"
+version.workspace = true
+edition.workspace = true
+publish.workspace = true
+license.workspace = true
+repository.workspace = true
+description.workspace = true
+
+[[bin]]
+name = "asphonix"
+path = "src/main.rs"
+
+[lints]
+workspace = true
+
+[dependencies]
+asphonix-api = { path = "../asphonix-api" }
+asphonix-real = { path = "../asphonix-real" }
+asphonix-i18n = { path = "../asphonix-i18n" }
+gpui.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+futures = "0.3"
+unicode-segmentation = "1"
+raw-window-handle = "0.6"
+asphonix-logging = { path = "../asphonix-logging" }
+tracing.workspace = true
+image = { workspace = true, features = ["png"] }
+
+[features]
+# Heap accounting for memory work (counting allocator + big-allocation backtraces). Never in a release build.
+memprof = []
+
+[build-dependencies]
+embed-resource = "3"
+
+[dev-dependencies]
+gpui = { workspace = true, features = ["test-support"] }
+asphonix-testkit = { path = "../asphonix-testkit" }
+# `#[gpui::test]` hands `rand::rngs::StdRng` (gpui's rand) to tests that take one
+rand = "0.9"

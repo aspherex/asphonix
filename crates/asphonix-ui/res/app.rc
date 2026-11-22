@@ -1,0 +1,2 @@
+// Window/taskbar/exe icon. GPUI loads the app icon from resource id 1 (`platform/windows/platform.rs: load_icon`).
+1 ICON "asphonix.ico"

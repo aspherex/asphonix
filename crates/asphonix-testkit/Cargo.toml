@@ -1,0 +1,18 @@
+[package]
+name = "asphonix-testkit"
+description = "Test doubles and fixtures for ASPHONIX tests (dev-dependency only, never shipped)"
+version.workspace = true
+edition.workspace = true
+publish.workspace = true
+license.workspace = true
+repository.workspace = true
+
+# Depends on the contract crate only (never on asphonix-core / asphonix-real): a dev-dependency cycle would build a second
+# copy of those crates whose types do not match the ones under test.
+
+[lints]
+workspace = true
+
+[dependencies]
+asphonix-api = { path = "../asphonix-api" }
+url.workspace = true

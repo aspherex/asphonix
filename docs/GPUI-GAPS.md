@@ -1,4 +1,4 @@
-# GPUI 0.2.2 gaps and how SONIX works around them (no fork)
+# GPUI 0.2.2 gaps and how ASPHONIX works around them (no fork)
 
 | Gap | Workaround here | Residual |
 |---|---|---|

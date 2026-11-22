@@ -1,0 +1,22 @@
+---
+source: crates/asphonix-mcp/tests/snapshots.rs
+expression: r
+---
+{
+  "id": 1,
+  "jsonrpc": "2.0",
+  "result": {
+    "capabilities": {
+      "tools": {
+        "listChanged": false
+      }
+    },
+    "instructions": "Tools to read the user's ASPHONIX music library and listening history and (when the user allowed it in ASPHONIX settings) control playback. Results are compact JSON. Track ids come from search, get_tracks, get_album, get_playlist and get_smart_playlist_tracks. Call library_stats for the current local date.",
+    "protocolVersion": "2025-03-26",
+    "serverInfo": {
+      "name": "asphonix-mcp",
+      "title": "ASPHONIX",
+      "version": "[version]"
+    }
+  }
+}

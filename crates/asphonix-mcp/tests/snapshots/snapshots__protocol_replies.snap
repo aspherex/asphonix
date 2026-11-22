@@ -1,0 +1,72 @@
+---
+source: crates/asphonix-mcp/tests/snapshots.rs
+expression: cases
+---
+{
+  "call_app_not_running": {
+    "id": 9,
+    "jsonrpc": "2.0",
+    "result": {
+      "content": [
+        {
+          "text": "ASPHONIX is not running, or Claude (MCP) is not enabled in it. Start ASPHONIX; if this persists, open ASPHONIX > Settings > Claude (MCP) and turn it on.",
+          "type": "text"
+        }
+      ],
+      "isError": true
+    }
+  },
+  "call_bad_arguments": {
+    "error": {
+      "code": -32602,
+      "message": "arguments must be an object"
+    },
+    "id": 8,
+    "jsonrpc": "2.0"
+  },
+  "call_unknown_tool": {
+    "error": {
+      "code": -32602,
+      "message": "Unknown tool: rm_rf"
+    },
+    "id": 7,
+    "jsonrpc": "2.0"
+  },
+  "call_without_name": {
+    "error": {
+      "code": -32602,
+      "message": "tools/call needs a tool name"
+    },
+    "id": 6,
+    "jsonrpc": "2.0"
+  },
+  "client_response": {
+    "error": {
+      "code": -32600,
+      "message": "Invalid Request"
+    },
+    "id": 5,
+    "jsonrpc": "2.0"
+  },
+  "not_an_object": {
+    "error": {
+      "code": -32600,
+      "message": "Invalid Request"
+    },
+    "id": null,
+    "jsonrpc": "2.0"
+  },
+  "ping": {
+    "id": 3,
+    "jsonrpc": "2.0",
+    "result": {}
+  },
+  "unknown_method": {
+    "error": {
+      "code": -32601,
+      "message": "Method not found"
+    },
+    "id": 4,
+    "jsonrpc": "2.0"
+  }
+}

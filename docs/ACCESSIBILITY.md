@@ -1,6 +1,6 @@
 # Accessibility and font scaling: assessment against WCAG 2.2 AA
 
-Status: investigation (2026-11-22), code-level review of `crates/sonix-ui` on branch `claude/v0.2-hardening`.
+Status: investigation (2026-11-22), code-level review of `crates/asphonix-ui` on branch `claude/v0.2-hardening`.
 Nothing here was tested with a screen reader or on real hardware yet; items marked *verify* need a manual check.
 
 WCAG 2.2 is written for web content; for desktop software it is applied through W3C's
@@ -61,7 +61,7 @@ honoring the platform text-size preference.
 
 Proposed implementation:
 - Whole-UI zoom (not text-only) avoids clipping in fixed-height rows (`ROW_H` 30/36 px).
-- **Not** a crate-local scaled `px()`: tried on paper and rejected. sonix-ui converts `Pixels` back to `f32` in
+- **Not** a crate-local scaled `px()`: tried on paper and rejected. asphonix-ui converts `Pixels` back to `f32` in
   ~105 places (`f32::from(..)`, `natural_width`, viewport math) and often feeds the result into `px()` again,
   which would apply the zoom twice - silently, with no compiler help.
 - Instead GPUI's intended mechanism (what Zed uses for its UI font size): sizes in `rems`, zoom via

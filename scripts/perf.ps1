@@ -1,12 +1,12 @@
-# One full measured run of SONIX (release build): time to visible, private WS idle /
+# One full measured run of ASPHONIX (release build): time to visible, private WS idle /
 # after a full scroll of the Tracks list / Now Playing 40 s / minimized 35 s, CPU in each phase, restore latency,
-# frame pacing. The app drives its own timeline (SONIX_SCRIPT=1) and logs `phase ...` and
-# `frames ...` lines to SONIX_LOG; this script samples the process tree around them.
+# frame pacing. The app drives its own timeline (ASPHONIX_SCRIPT=1) and logs `phase ...` and
+# `frames ...` lines to ASPHONIX_LOG; this script samples the process tree around them.
 # Processes are only ever stopped by the exact PID this script started.
 # Needs a signed-in profile with a library (the script plays tracks from it).
 # Usage: powershell -File scriptsperf.ps1 [-Runs 3] [-OutDir perf-out]
 param(
-  [string]$Exe = "$PSScriptRoot\..\target\release\sonix.exe",
+  [string]$Exe = "$PSScriptRoot\..\target\release\asphonix.exe",
   [int]$Runs = 3,
   [string]$OutDir = "$PSScriptRoot\..\perf-out"
 )
@@ -15,11 +15,11 @@ $Exe = (Resolve-Path $Exe).Path
 New-Item -ItemType Directory -Force $OutDir | Out-Null
 
 function One([int]$n) {
-  $log = "$env:TEMP\sonix-perf.log"
-  $h = Start-Sonix $Exe @{ SONIX_SCRIPT = "1" } $log
+  $log = "$env:TEMP\asphonix-perf.log"
+  $h = Start-Asphonix $Exe @{ ASPHONIX_SCRIPT = "1" } $log
   $pid_ = [uint32]$h.Proc.Id
   $res = [ordered]@{ run = $n }
-  function Snap { $t = [SonixPerf]::Tree($pid_); @{ pws = (Sum $t 'PrivateWs'); commit = (Sum $t 'PrivateCommit'); n = $t.Count } }
+  function Snap { $t = [AsphonixPerf]::Tree($pid_); @{ pws = (Sum $t 'PrivateWs'); commit = (Sum $t 'PrivateCommit'); n = $t.Count } }
   function CpuSec { (Get-Process -Id $pid_ -ErrorAction SilentlyContinue).TotalProcessorTime.TotalSeconds }
   function Has([string]$pat) { (Test-Path $log) -and (Select-String -Path $log -Pattern $pat -Quiet) }
   function WaitPhase([string]$name, [int]$MaxMs = 150000) {
@@ -29,7 +29,7 @@ function One([int]$n) {
   }
   try {
     $res.visibleMs = Wait-Visible $h
-    $hwnd = [SonixPerf]::LastHwnd
+    $hwnd = [AsphonixPerf]::LastHwnd
     [void](WaitPhase "idle_start")
     Start-Sleep -Milliseconds 800
     $c0 = CpuSec; $t0 = [Diagnostics.Stopwatch]::StartNew(); $s = @()
@@ -56,7 +56,7 @@ function One([int]$n) {
     $x = Snap; $res.np_end_pws_mb = MB $x.pws; $res.np_peak_pws_mb = MB $npmax
     [void](WaitPhase "done")
     # minimize 35 s
-    [void][SonixPerf]::ShowWindow($hwnd, 6)
+    [void][AsphonixPerf]::ShowWindow($hwnd, 6)
     Start-Sleep -Milliseconds 5000
     $x = Snap; $res.min_5s_pws_mb = MB $x.pws
     $c0 = CpuSec; Start-Sleep -Milliseconds 4000; $res.min_cpu_pct_of_one_core = [math]::Round(((CpuSec) - $c0) / 4 * 100, 2)
@@ -64,13 +64,13 @@ function One([int]$n) {
     $x = Snap; $res.min_35s_pws_mb = MB $x.pws
     # restore latency: restore command -> first render after resume (log epochs)
     $cmd = [DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds()
-    [void][SonixPerf]::ShowWindow($hwnd, 9)
+    [void][AsphonixPerf]::ShowWindow($hwnd, 9)
     Start-Sleep -Milliseconds 1500
     $line = Select-String -Path $log -Pattern "restore_first_render" | Select-Object -Last 1
     if ($line -and $line.Line -match '@(\d+)') { $res.restore_to_first_render_ms = [int64]$Matches[1] - $cmd }
     $x = Snap; $res.after_restore_pws_mb = MB $x.pws
     $res.frames = @(Select-String -Path $log -Pattern "^\S+ frames " | ForEach-Object { $_.Line })
-  } finally { Stop-Sonix $h }
+  } finally { Stop-Asphonix $h }
   [pscustomobject]$res
 }
 

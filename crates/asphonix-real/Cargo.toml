@@ -1,0 +1,28 @@
+[package]
+name = "asphonix-real"
+version.workspace = true
+edition.workspace = true
+publish.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+asphonix-api = { path = "../asphonix-api" }
+asphonix-core = { path = "../asphonix-core" }
+asphonix-logging = { path = "../asphonix-logging" }
+tokio = { workspace = true, features = ["rt-multi-thread", "time", "sync"] }
+serde.workspace = true
+serde_json.workspace = true
+image = { workspace = true, features = ["jpeg", "png", "webp", "gif"] }
+chrono.workspace = true
+rand.workspace = true
+tracing.workspace = true
+
+[dev-dependencies]
+asphonix-logging = { path = "../asphonix-logging", features = ["test-support"] }
+asphonix-mcp = { path = "../asphonix-mcp" }
+asphonix-testkit = { path = "../asphonix-testkit" }
+url.workspace = true

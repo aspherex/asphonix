@@ -1,0 +1,30 @@
+[package]
+name = "asphonix-mcp"
+version.workspace = true
+description = "MCP (Model Context Protocol) stdio bridge to a running ASPHONIX app"
+edition.workspace = true
+publish.workspace = true
+license.workspace = true
+repository.workspace = true
+
+# The app side of the bridge is `asphonix-core/src/mcp_bridge`.
+
+[lib]
+name = "asphonix_mcp"
+path = "src/lib.rs"
+
+[[bin]]
+name = "asphonix-mcp"
+path = "src/main.rs"
+
+[lints]
+workspace = true
+
+[dependencies]
+serde_json.workspace = true
+asphonix-mcp-protocol = { path = "../asphonix-mcp-protocol" }
+asphonix-logging = { path = "../asphonix-logging" }
+tracing.workspace = true
+
+[dev-dependencies]
+insta.workspace = true

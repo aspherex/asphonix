@@ -1,13 +1,13 @@
 [workspace]
 resolver = "2"
-members = ["crates/sonix-api", "crates/sonix-core", "crates/sonix-real", "crates/sonix-ui", "crates/sonix-mcp", "crates/sonix-mcp-protocol", "crates/sonix-logging", "crates/sonix-i18n", "crates/sonix-testkit"]
+members = ["crates/asphonix-api", "crates/asphonix-core", "crates/asphonix-real", "crates/asphonix-ui", "crates/asphonix-mcp", "crates/asphonix-mcp-protocol", "crates/asphonix-logging", "crates/asphonix-i18n", "crates/asphonix-testkit"]
 
 [workspace.package]
 version = "0.1.0"
 edition = "2024"
 publish = false
 license = "MIT"
-repository = "https://github.com/aspherex/sonix"
+repository = "https://github.com/aspherex/asphonix"
 description = "Bit-perfect desktop music player for Navidrome/Subsonic servers"
 
 [workspace.dependencies]
@@ -17,7 +17,7 @@ serde_json = "1"
 tokio = "1"
 log = "0.4"
 tracing = "0.1.44"
-# no `fmt`/`ansi`: sonix-logging writes its own JSON lines
+# no `fmt`/`ansi`: asphonix-logging writes its own JSON lines
 tracing-subscriber = { version = "0.3.23", default-features = false, features = ["std", "registry", "env-filter", "smallvec"] }
 tracing-appender = "0.2.5"
 tracing-log = { version = "0.2.0", default-features = false, features = ["std", "log-tracer"] }
@@ -26,7 +26,7 @@ rand = "0.8"
 chrono = "0.4"
 url = "2"
 image = { version = "0.25.1", default-features = false }
-# i18n (sonix-i18n): Project Fluent, OS locale detection
+# i18n (asphonix-i18n): Project Fluent, OS locale detection
 fluent-bundle = "0.16"
 fluent-syntax = "0.12"
 unic-langid = "0.9"
