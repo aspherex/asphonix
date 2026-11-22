@@ -47,6 +47,18 @@ pub fn pref(cx: &App) -> Option<Lang> {
     cx.try_global::<I18n>().and_then(|i| i.pref)
 }
 
+/// A playback source's display name: the backend names the fixed sources in English ("All Tracks", "Liked Songs",
+/// "Radio"), so those are translated by kind; playlists, albums, artists and genres keep their own names.
+pub fn source_label(kind: sonix_api::SourceKind, label: &str) -> String {
+    use sonix_api::SourceKind as S;
+    match kind {
+        S::AllTracks => sonix_i18n::tr(Key::SourceAllTracks).to_string(),
+        S::Liked => sonix_i18n::tr(Key::LikedSongs).to_string(),
+        S::Radio if label == "Radio" => sonix_i18n::tr(Key::SourceRadio).to_string(),
+        _ => label.to_string(),
+    }
+}
+
 /// The user-facing text of a backend error, from its stable code. The English `message` is for the log only.
 pub fn api_error(e: &sonix_api::ApiError) -> String {
     use sonix_api::ErrorCode as C;

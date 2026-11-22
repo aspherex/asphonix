@@ -537,3 +537,59 @@ preset-recent-name = Zuletzt hinzugefügt
 preset-recent-desc = In den letzten 30 Tagen zur Bibliothek hinzugefügt, neueste zuerst.
 preset-never-played-name = Nie gespielt
 preset-never-played-desc = Keine aufgezeichneten Wiedergaben. 500 zufällige Titel.
+
+## Player: dock, Now Playing, lyrics, queue rail, Tracks, boot
+
+loading = Wird geladen…
+source-all-tracks = Alle Titel
+source-radio = Radio
+queue-title = Warteschlange
+dock-output = Ausgabe
+dock-no-track = Kein Titel geladen
+dock-pick-something = Album oder Titel zum Abspielen wählen
+dock-now-playing-tip = Aktuelle Wiedergabe (N)
+dock-toggle-queue = Warteschlange ein-/ausblenden
+np-lyrics = Songtext
+np-lyrics-tip = Songtext (T)
+np-stars = { $count ->
+    [one] { $count } Stern
+   *[other] { $count } Sterne
+}
+np-remaining = { $time } verbleibend
+np-pause = Pause
+np-loop = A↔B-Schleife
+np-loop-active = A↔B aktiv
+np-loop-set-b = B setzen
+np-loop-tip = A-B-Schleife: einmal drücken setzt A, erneut B, ein drittes Mal löscht sie (A)
+np-mute-tip = Stummschalten (M)
+np-nothing-queued = Nichts in der Warteschlange
+np-up-next = Als Nächstes
+np-show-next = Nächste Titel anzeigen
+np-nothing-after = Nach diesem Titel ist nichts eingereiht.
+np-play-this = Diesen Titel abspielen
+np-bit-perfect = Bitgenau
+np-shared-mode = Geteilter Modus
+np-go-to-source = Zur Quelle
+np-close-tip = Schließen (Esc)
+np-minimize = Minimieren
+np-back-10 = −10 s
+np-forward-10 = +10 s
+np-prev = Zurück
+np-next = Weiter
+lyrics-synced = Synchronisiert
+lyrics-plain = Text
+lyrics-none = Kein Songtext verfügbar
+lyrics-seek = Zu dieser Zeile springen
+queue-no-output = Keine Ausgabe
+queue-nothing-playing = Keine Wiedergabe.
+queue-deck = Live-Transport-Deck
+queue-queued = { $count } eingereiht
+queue-next-from = Als Nächstes aus { $source }
+queue-next-in-buffer = Als Nächstes im Puffer
+queue-next-in-queue = Als Nächstes in der Warteschlange
+queue-empty = Die Warteschlange ist leer.
+queue-more-from = + { $count } weitere aus { $source }
+tracks-filter-placeholder = Nach Titel, Künstler, Album filtern…
+tracks-empty = Noch keine Titel in der Bibliothek.
+tracks-no-match = Keine Titel entsprechen dem Filter.
+boot-tagline = Bitgenaues Audio-Terminal

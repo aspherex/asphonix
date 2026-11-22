@@ -15,6 +15,7 @@ use crate::widgets::{hard_shadow, icon};
 use crate::widgets::tooltip::Tip;
 use crate::selection::Selection;
 use crate::rail_dnd::{self, Gap, Hit, RowBox};
+use sonix_i18n::tr;
 use std::cell::{Cell, RefCell};
 use std::collections::HashMap;
 use std::rc::Rc;
@@ -265,7 +266,7 @@ impl Render for QueueRail {
         let cur = q.as_ref().map(|q| q.current_index).unwrap_or(-1);
         let total = q.as_ref().map(|q| q.total).unwrap_or(0);
         let readout = if ps.track.is_some() {
-            format!("{}{}", fmt::output_readout(&ps, "NO OUTPUT"), if ps.bit_perfect { " · BIT-PERFECT" } else { "" })
+            format!("{}{}", fmt::output_readout(&ps, &tr!(QueueNoOutput).to_uppercase()), if ps.bit_perfect { format!(" · {}", tr!(NpBitPerfect).to_uppercase()) } else { String::new() })
         } else {
             String::new()
         };
@@ -312,7 +313,7 @@ impl Render for QueueRail {
                     )
                     .into_any_element()
             }
-            None => div().p(px(space::MD)).child(txt(&th, BODY_SM, "Nothing playing.").color(th.muted)).into_any_element(),
+            None => div().p(px(space::MD)).child(txt(&th, BODY_SM, tr!(QueueNothingPlaying)).color(th.muted)).into_any_element(),
         };
         let ext_zone = self.drag.as_ref().and_then(|d| d.ext);
         let deck = div()
@@ -322,20 +323,20 @@ impl Render for QueueRail {
             .border_color(th.border)
             .when(ext_zone == Some(EnqueuePosition::Next), |d| d.child(drop_frame(&th)))
             .child(bounds_probe(self.deck_b.clone()))
-            .child(header(&th, "Live Transport Deck".into(), Some(format!("{total} QUEUED"))))
+            .child(header(&th, tr!(QueueDeck).into(), Some(tr!(QueueQueued, count = total).to_uppercase())))
             .child(deck_body);
 
         // ---- queue sections: "Next in queue" (user-queued, always ahead) and "Next from <source>" (the rolling window)
         let (ustart, ucount) = self.user_range();
         let is_user = |i: usize| i >= ustart && i < ustart + ucount;
         let label = match q.as_ref().and_then(|q| q.source.as_ref()) {
-            Some(s) => format!("Next from {}{}", s.label, match s.mode {
-                SourceMode::Shuffle => " · Shuffle".to_string(),
+            Some(s) => format!("{}{}", tr!(QueueNextFrom, source = crate::i18n::source_label(s.kind, &s.label)), match s.mode {
+                SourceMode::Shuffle => format!(" · {}", tr!(MenuShuffle)),
                 SourceMode::Flow => flow_mode_label(s.arc),
                 SourceMode::InOrder => String::new(),
             }),
-            None if ucount > 0 => "Queue".to_string(),
-            None => "Next in buffer".to_string(),
+            None if ucount > 0 => tr!(QueueTitle).to_string(),
+            None => tr!(QueueNextInBuffer).to_string(),
         };
         let src_info = q.as_ref().and_then(|q| q.source.clone());
         let flow_rows = src_info.as_ref().map(|s| s.mode == SourceMode::Flow).unwrap_or(false);
@@ -349,8 +350,8 @@ impl Render for QueueRail {
                 .min_h_0()
                 .flex()
                 .flex_col()
-                .child(header(&th, "Next in buffer".into(), None))
-                .child(div().p(px(space::MD)).child(txt(&th, BODY_SM, "Queue is empty.").color(th.muted)))
+                .child(header(&th, tr!(QueueNextInBuffer).into(), None))
+                .child(div().p(px(space::MD)).child(txt(&th, BODY_SM, tr!(QueueEmpty)).color(th.muted)))
         } else {
             let (bar, overflow) = crate::widgets::scrollbar::passive(th, &self.scroll);
             let mut list = div().id("queue-list").track_scroll(&self.scroll).size_full().overflow_y_scroll().flex().flex_col().when(overflow, |d| d.pr(px(tr::SCROLLBAR_W)));
@@ -409,7 +410,7 @@ impl Render for QueueRail {
                     .px(px(space::MD))
                     .border_t_1()
                     .border_color(th.border)
-                    .child(txt(&th, BODY_SM, format!("+ {} more from {}", fmt::fmt_int(s.remaining as u64), s.label)).color(th.muted))
+                    .child(txt(&th, BODY_SM, tr!(QueueMoreFrom, count = s.remaining, source = crate::i18n::source_label(s.kind, &s.label))).color(th.muted))
             });
             let user_section = (!user_rows.is_empty()).then(|| {
                 div()
@@ -421,7 +422,7 @@ impl Render for QueueRail {
                     .border_color(th.border)
                     .when(ext_zone == Some(EnqueuePosition::Next), |d| d.child(drop_frame(&th)))
                     .child(bounds_probe(self.user_b.clone()))
-                    .child(header(&th, "Next in queue".into(), None))
+                    .child(header(&th, tr!(QueueNextInQueue).into(), None))
                     .children(user_rows)
             });
             div()
@@ -515,7 +516,7 @@ impl QueueRail {
         // dragging a row of a multi-row selection moves the whole selection
         // read-only: `for_context_menu` collapses the selection onto `i`, which must never happen while painting
         let moving = if selected && self.sel.len() > 1 { self.sel.indices() } else { vec![i] };
-        let label = if moving.len() > 1 { format!("{} tracks", moving.len()) } else { t.title.clone() };
+        let label = if moving.len() > 1 { tr!(CountTracks, count = moving.len()) } else { t.title.clone() };
         let dim = self.drag.as_ref().is_some_and(|d| d.moving.contains(&i));
         let drag = QueueDrag { label };
         let this_w = cx.entity().downgrade();

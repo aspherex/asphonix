@@ -549,3 +549,59 @@ preset-recent-name = Recently added
 preset-recent-desc = Added to the library in the last 30 days, newest first.
 preset-never-played-name = Never played
 preset-never-played-desc = No recorded plays. 500 random picks.
+
+## Player: dock, Now Playing, lyrics, queue rail, Tracks, boot
+
+loading = Loading…
+source-all-tracks = All Tracks
+source-radio = Radio
+queue-title = Queue
+dock-output = Output
+dock-no-track = No track loaded
+dock-pick-something = Pick an album or track to play
+dock-now-playing-tip = Now Playing (N)
+dock-toggle-queue = Toggle queue rail
+np-lyrics = Lyrics
+np-lyrics-tip = Lyrics (T)
+np-stars = { $count ->
+    [one] { $count } star
+   *[other] { $count } stars
+}
+np-remaining = { $time } remaining
+np-pause = Pause
+np-loop = A↔B loop
+np-loop-active = A↔B active
+np-loop-set-b = Set B
+np-loop-tip = A to B loop: press to set A, again to set B, again to clear (A)
+np-mute-tip = Mute (M)
+np-nothing-queued = Nothing queued
+np-up-next = Up next
+np-show-next = Show the next tracks
+np-nothing-after = Nothing queued after this track.
+np-play-this = Play this track
+np-bit-perfect = Bit-perfect
+np-shared-mode = Shared mode
+np-go-to-source = Go to source
+np-close-tip = Close (Esc)
+np-minimize = Minimize
+np-back-10 = -10 s
+np-forward-10 = +10 s
+np-prev = Previous
+np-next = Next
+lyrics-synced = Synced
+lyrics-plain = Plain
+lyrics-none = No lyrics available
+lyrics-seek = Seek to this line
+queue-no-output = No output
+queue-nothing-playing = Nothing playing.
+queue-deck = Live Transport Deck
+queue-queued = { $count } queued
+queue-next-from = Next from { $source }
+queue-next-in-buffer = Next in buffer
+queue-next-in-queue = Next in queue
+queue-empty = Queue is empty.
+queue-more-from = + { $count } more from { $source }
+tracks-filter-placeholder = Filter by title, artist, album…
+tracks-empty = No tracks in your library yet.
+tracks-no-match = No tracks match your filter.
+boot-tagline = Bit-perfect audio terminal
