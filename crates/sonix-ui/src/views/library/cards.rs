@@ -402,3 +402,18 @@ pub fn tile<V: 'static>(ctx: &Ctx, th: &Theme, t: Tile<'_>, width: f32, window: 
     }
     root
 }
+
+/// Native-only skeleton of [`card`]: the same box (art square of `width`, `CARD_GAP`, title line + sub line at their
+/// real line heights), so a grid that is still loading has the geometry of the loaded one.
+pub fn card_skeleton(th: &Theme, width: f32) -> AnyElement {
+    use crate::widgets::skeleton as sk;
+    div()
+        .flex()
+        .flex_col()
+        .gap(px(m::CARD_GAP))
+        .w(px(width))
+        .flex_none()
+        .child(div().size(px(width)).flex_none().bg(th.high).border_1().border_color(th.border))
+        .child(div().flex().flex_col().child(sk::text_slot(th, BODY_MD.line, 12.0, 0.7)).child(sk::text_slot(th, MONO_DATA.line, 10.0, 0.4)))
+        .into_any_element()
+}

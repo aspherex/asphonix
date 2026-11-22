@@ -410,6 +410,94 @@ impl AlbumDetailView {
         pid("album.header", div().flex().flex_row().gap(px(m::PAGE_PAD)).flex_none().child(art).child(pid("album.info", info))).into_any_element()
     }
 
+    /// Native-only loading page: the loaded page's geometry (header, fixed-height track panel, meta column) with
+    /// placeholders, so the arrival only fills content in.
+    fn skeleton_page(&mut self, th: &Theme, window: &mut Window) -> AnyElement {
+        use crate::widgets::skeleton as sk;
+        let th = *th;
+        let ghost = |s: crate::tracking::TypeSpec, t: &str| txt(&th, s, t.to_string()).color(gpui::transparent_black());
+        let btn = |pad: f32, ic: f32, spec: crate::tracking::TypeSpec, label: &str| {
+            div().flex().flex_row().items_center().gap(px(crate::metrics::space::SM)).h(px(m::BTN_H)).px(px(pad)).flex_none().bg(th.mid).opacity(0.6).child(div().size(px(ic)).flex_none()).child(ghost(spec, label))
+        };
+        let actions = div()
+            .flex()
+            .flex_row()
+            .items_center()
+            .gap(px(crate::metrics::space::SM))
+            .mt(px(crate::metrics::space::SM))
+            .child(pid("album.btn.play", btn(crate::metrics::space::LG, 16.0, HEADLINE_SM, "PLAY ALBUM")))
+            .child(pid("album.btn.shuffle", btn(crate::metrics::space::MD, 15.0, BODY_MD, "SHUFFLE")))
+            .child(pid("album.btn.star", sk::block(&th, m::BTN_H, m::BTN_H)))
+            .child(pid("album.btn.more", sk::block(&th, m::BTN_H, m::BTN_H)));
+        let info = div()
+            .flex()
+            .flex_col()
+            .gap(px(crate::metrics::space::XS))
+            .justify_end()
+            .min_w_0()
+            .child(pid("album.name", sk::text_slot(&th, HEADLINE_LG.line, 24.0, 1.0).w(px(320.))))
+            .child(sk::text_slot(&th, HEADLINE_SM.line, 16.0, 1.0).w(px(180.)))
+            .child(pid("album.stats", sk::text_slot(&th, MONO_DATA.line, 12.0, 1.0).w(px(260.))))
+            .child(pid("album.actions", actions));
+        let art = pid("album.art", div().size(px(m::ALBUM_ART)).flex_none().bg(th.high).border_1().border_color(th.border));
+        let header = pid("album.header", div().flex().flex_row().gap(px(m::PAGE_PAD)).flex_none().child(art).child(pid("album.info", info)));
+
+        let o = RowOpts { show_artist: true, cols: visible_columns(self.panel_w.get()), actions: 3 };
+        let head = div()
+            .flex()
+            .flex_row()
+            .items_center()
+            .justify_between()
+            .flex_none()
+            .px(px(crate::metrics::space::MD))
+            .py(px(crate::metrics::space::SM))
+            .bg(th.mid)
+            .border_b_1()
+            .border_color(th.border)
+            .child(txt(&th, LABEL_CAPS, "Track Vectors").color(th.muted))
+            .child(txt(&th, MONO_CODE, "").color(th.muted));
+        let mut body = div().flex().flex_col().size_full().overflow_hidden();
+        for _ in 0..(m::TRACKS_PANEL_H / tr::ROW_H) as usize {
+            body = body.child(sk::row(&th, tr::ROW_H));
+        }
+        let panel = pid(
+            "album.panel",
+            div()
+                .relative()
+                .flex_1()
+                .min_w_0()
+                .h(px(m::TRACKS_PANEL_H))
+                .flex()
+                .flex_col()
+                .border_1()
+                .border_color(th.border)
+                .bg(th.low)
+                .child(measure(&self.panel_w))
+                .child(pid("album.panel.header", head))
+                .child(rows::head(&th, o, "album.panel"))
+                .child(div().flex_1().min_h_0().child(body)),
+        );
+        let vw = f32::from(window.viewport_size().width);
+        let w = if vw < crate::metrics::bp::COMPACT_BELOW { m::META_PANEL_W_COMPACT } else { m::META_PANEL_W };
+        let mut b = div().flex().flex_col().gap(px(crate::metrics::space::SM)).p(px(crate::metrics::space::MD)).bg(th.low).border_1().border_color(th.border);
+        b = b.child(div().flex().child(txt(&th, LABEL_CAPS, "Album Telemetry").color(th.muted)));
+        let mut dl = div().flex().flex_col().gap(px(crate::metrics::space::XS));
+        for _ in 0..5 {
+            dl = dl.child(sk::text_slot(&th, MONO_DATA.line, 11.0, 1.0));
+        }
+        let meta = pid("album.meta", div().w(px(w)).flex_none().flex().flex_col().gap(px(crate::metrics::space::MD)).child(pid("album.meta.block.0", b.child(dl))));
+        div()
+            .w_full()
+            .flex_none()
+            .flex()
+            .flex_col()
+            .p(px(m::PAGE_PAD))
+            .gap(px(m::PAGE_PAD))
+            .child(header)
+            .child(div().flex().flex_row().gap(px(m::PAGE_PAD)).child(panel).child(meta))
+            .into_any_element()
+    }
+
     fn tracks_panel(&mut self, th: &Theme, o: RowOpts, window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
         let th = *th;
         let total = self.tracks().len();
@@ -608,7 +696,7 @@ impl Render for AlbumDetailView {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let th = app::theme(cx);
         let content: AnyElement = if self.loading {
-            div().p(px(crate::metrics::space::XL)).child(txt(&th, MONO_CODE, "LOADING ALBUM…").color(th.muted)).into_any_element()
+            self.skeleton_page(&th, window)
         } else if let Some(d) = self.detail.clone() {
             let o = RowOpts { show_artist: true, cols: visible_columns(self.panel_w.get()), actions: 3 };
             let header = self.header(&th, &d, window, cx);
