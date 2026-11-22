@@ -63,7 +63,11 @@ fn run_on_art_thread<T: Send + 'static>(job: impl FnOnce() -> T + Send + 'static
                 loop {
                     let job = rx.lock().unwrap_or_else(|p| p.into_inner()).recv();
                     match job {
-                        Ok(job) => job(),
+                        // a panicking decode must not take the thread with it (unwinding builds only; release aborts):
+                        // its oneshot is dropped, the awaiting loader sees `Canceled` -> no image, the thread stays
+                        Ok(job) => {
+                            let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(job));
+                        }
                         Err(_) => break,
                     }
                 }
@@ -410,6 +414,17 @@ mod tests {
         }
         let order: Vec<_> = std::iter::from_fn(|| c.pop()).map(|k| k.0.to_string()).collect();
         assert_eq!(order, ["a", "b", "c"]);
+    }
+
+    #[test]
+    fn art_threads_survive_panicking_jobs() {
+        let panics: Vec<_> = (0..MAX_WORKERS + 1).map(|_| run_on_art_thread(|| -> u32 { panic!("bad image") })).collect();
+        for rx in panics {
+            assert!(futures::executor::block_on(rx).is_err(), "a panicked job resolves as Canceled, not a hang");
+        }
+        let ok: Vec<_> = (0..MAX_WORKERS * 2).map(|i| run_on_art_thread(move || i)).collect();
+        let got: Vec<_> = ok.into_iter().map(|rx| futures::executor::block_on(rx).unwrap()).collect();
+        assert_eq!(got, (0..MAX_WORKERS * 2).collect::<Vec<_>>(), "the pool still runs jobs after more panics than threads");
     }
 
     #[test]
