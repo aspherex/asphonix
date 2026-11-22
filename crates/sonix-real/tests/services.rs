@@ -74,7 +74,12 @@ fn mcp_is_off_by_default_and_enable_disable_manage_the_discovery_file() {
     assert!(st.enabled && st.listening && !st.allow_control);
     let text = std::fs::read_to_string(&discovery).expect("mcp.json written on enable");
     let d: serde_json::Value = serde_json::from_str(&text).unwrap();
-    assert!(d["endpoint"].as_str().unwrap().starts_with(r"\\.\pipe\sonix-mcp-"), "pipe name carries the app prefix");
+    let endpoint = d["endpoint"].as_str().unwrap();
+    if cfg!(windows) {
+        assert!(endpoint.starts_with(r"\\.\pipe\sonix-mcp-"), "pipe name carries the app prefix: {endpoint}");
+    } else {
+        assert!(endpoint.ends_with(".sock") && endpoint.contains("bridge-"), "socket in the config dir: {endpoint}");
+    }
     assert_eq!(d["token"].as_str().unwrap().len(), 64);
     assert!(b.mcp_status().unwrap().enabled);
 

@@ -5,8 +5,8 @@ Subsonic/OpenSubsonic servers, built in Rust with [GPUI](https://www.gpui.rs/).
 
 - **Bit-perfect playback**: original files are streamed untouched, decoded in Rust (symphonia) and sent to the
   device in WASAPI exclusive mode at their native sample rate, gapless. A shared-mode fallback is shown as such.
-- **Lean**: ~30-40 MB private working set in normal use, a few MB when minimized, ~300 ms to a visible window,
-  scrolling and animation at the display's refresh rate (budgets in [docs/PERF.md](docs/PERF.md)).
+- **Lean by design**: a native UI with hard budgets (<= 40 MB private working set in normal use, a few MB when
+  minimized, ~300 ms to a visible window, refresh-rate scrolling and animation; see [docs/PERF.md](docs/PERF.md)).
 - **Library**: local SQLite (FTS5) mirror of the server library for instant browsing and search across Home,
   Albums, Artists, Tracks, Genres, History, playlists, Liked Songs and local smart playlists.
 - **Now Playing**: waveform seek, spectrum and peak meters, synced lyrics, A-B loop, ratings.
@@ -38,7 +38,7 @@ GPUI currently has no accessibility support, so screen readers see an unlabeled 
 
 Requirements: a recent stable Rust toolchain (edition 2024), plus
 - Windows: the MSVC build tools;
-- macOS: Xcode command line tools;
+- macOS: Xcode (the full install: GPUI compiles its Metal shaders at build time);
 - Linux (Debian/Ubuntu package names): `pkg-config libasound2-dev libdbus-1-dev libfontconfig1-dev
   libfreetype6-dev libwayland-dev libxkbcommon-dev libxkbcommon-x11-dev libx11-xcb-dev libxcb1-dev libvulkan-dev
   libzstd-dev`.
