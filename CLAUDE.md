@@ -38,6 +38,7 @@ SONIX is a native GPUI desktop player for Navidrome/Subsonic. See README.md for 
   separate entities so the 4 Hz position tick re-renders only the dock/Now Playing; animated elements render in
   one live layer (`live.rs`) so the rest of the frame stays cached (`part.rs`).
 - `sonix-mcp`: stdio MCP server that connects to the running app's bridge.
+- `sonix-testkit` (dev-dependency only): `FakeBackend`, `MockSubsonic`, fixtures. How to test, replay seeds: docs/TESTING.md.
 
 ## GPUI gotchas
 
