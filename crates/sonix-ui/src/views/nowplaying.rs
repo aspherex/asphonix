@@ -154,7 +154,7 @@ impl NowPlayingView {
         let became_live = live && !self.wave_live;
         self.wave_live = live;
         if id == self.wave_for {
-            if let Some(id) = id.filter(|_| became_live && self.wave_filled == 0) {
+            if let Some(id) = id.filter(|_| became_live) {
                 self.poll_waveform(id, cx);
             }
             cx.notify();
