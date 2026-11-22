@@ -5550,6 +5550,7 @@ dependencies = [
  "futures",
  "gpui",
  "image",
+ "log",
  "raw-window-handle",
  "serde",
  "serde_json",

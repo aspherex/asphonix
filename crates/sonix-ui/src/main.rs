@@ -107,9 +107,32 @@ macro_rules! fonts {
     ($($f:literal),*) => { vec![$(Cow::Borrowed(&include_bytes!(concat!("../../../assets/fonts/", $f, ".ttf"))[..])),*] };
 }
 
+/// Forwards the backend crates' `log` records (info and up, `sonix_*` targets only) to $SONIX_LOG. Without a
+/// logger every `log::info!` in sonix-core/sonix-real (session restore skipped, engine commands, sync) went nowhere.
+struct BackendLog;
+impl ::log::Log for BackendLog {
+    fn enabled(&self, m: &::log::Metadata) -> bool {
+        m.level() <= ::log::Level::Info && m.target().starts_with("sonix")
+    }
+    fn log(&self, r: &::log::Record) {
+        if self.enabled(r.metadata()) {
+            log(&format!("[{}] {}", r.target(), r.args()));
+        }
+    }
+    fn flush(&self) {}
+}
+
+fn install_backend_log() {
+    static L: BackendLog = BackendLog;
+    if std::env::var_os("SONIX_LOG").is_some() && ::log::set_logger(&L).is_ok() {
+        ::log::set_max_level(::log::LevelFilter::Info);
+    }
+}
+
 fn main() {
     T0.set(Instant::now()).ok();
     install_crash_log();
+    install_backend_log();
     log("main_start");
     #[cfg(feature = "memprof")]
     memprof::start();

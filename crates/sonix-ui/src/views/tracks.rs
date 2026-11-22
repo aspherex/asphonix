@@ -262,7 +262,10 @@ impl TracksView {
     }
 
     // ------------------------------------------------------------ actions
+    #[track_caller]
     fn play_from(&mut self, id: String, cx: &mut Context<Self>) {
+        let at = std::panic::Location::caller();
+        crate::log(&format!("tracks play_from {id} ({}:{})", at.file(), at.line()));
         let (field, dir) = (self.sort, self.dir);
         let filter = if self.filter.trim().is_empty() { None } else { Some(self.filter.clone()) };
         app::call(cx, move |b| {

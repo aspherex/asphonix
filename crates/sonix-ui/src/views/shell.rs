@@ -522,17 +522,23 @@ impl Shell {
     }
 
     // -------------------------------------------------------------- routing
+    /// `SONIX_LOG` names every route change with its call site (startup diagnostics: who navigated).
+    #[track_caller]
     pub fn navigate(&mut self, r: Route, cx: &mut Context<Self>) {
+        let at = std::panic::Location::caller();
+        crate::log(&format!("navigate {} -> {} ({}:{})", self.router.current().path(), r.path(), at.file(), at.line()));
         if self.router.navigate(r) {
             self.route_changed(cx);
         }
     }
     pub fn go_back(&mut self, cx: &mut Context<Self>) {
+        crate::log("navigate back");
         if self.router.back() {
             self.route_changed(cx);
         }
     }
     pub fn go_forward(&mut self, cx: &mut Context<Self>) {
+        crate::log("navigate forward");
         if self.router.forward() {
             self.route_changed(cx);
         }
@@ -731,7 +737,11 @@ impl Render for Shell {
         if !self.shown {
             self.shown = true;
             crate::log("first_render");
-            window.activate_window();
+            // `SONIX_NO_ACTIVATE=1`: do not pull the window to the foreground (test runs while someone works at the
+            // PC: a stolen focus routes their keystrokes and clicks into the player).
+            if std::env::var_os("SONIX_NO_ACTIVATE").is_none() {
+                window.activate_window();
+            }
             #[cfg(not(feature = "parity"))]
             self.start_boot(window, cx);
         }

@@ -274,6 +274,32 @@ fn idle_player_state() -> PlayerState {
     }
 }
 
+/// One-line trace of the commands that replace or move the queue (native addition: with `SONIX_LOG` set the UI's
+/// logger writes it, so a startup log names who started what). `None` for queries and high-frequency commands.
+fn describe_queue_command(cmd: &EngineCommand) -> Option<String> {
+    Some(match cmd {
+        EngineCommand::PlaySource { kind, mode, track_ids, start_track_id, .. } => {
+            format!("PlaySource kind={kind:?} mode={mode:?} n={} start={start_track_id:?}", track_ids.len())
+        }
+        EngineCommand::PlayQueue { track_ids, start_index } => format!("PlayQueue n={} start_index={start_index}", track_ids.len()),
+        EngineCommand::RestoreSession { state, force, .. } => format!(
+            "RestoreSession force={force} entries={} current={:?} position_ms={} volume={:?}",
+            state.queue.entries.len(),
+            state.queue.current,
+            state.position_ms,
+            state.volume
+        ),
+        EngineCommand::JumpTo(i) => format!("JumpTo {i}"),
+        EngineCommand::Next => "Next".into(),
+        EngineCommand::Previous => "Previous".into(),
+        EngineCommand::Play => "Play".into(),
+        EngineCommand::PlayPause => "PlayPause".into(),
+        EngineCommand::Stop => "Stop".into(),
+        EngineCommand::SetVolume(v) => format!("SetVolume {v}"),
+        _ => return None,
+    })
+}
+
 /// The handle `ipc.rs` commands talk to via `tauri::State`. The actual
 /// engine lives on its own thread once started.
 pub struct EngineHandle {
@@ -831,6 +857,9 @@ impl Engine {
                             | EngineCommand::LoopCycle
                             | EngineCommand::RestoreSession { force: false, .. }
                     );
+                    if let Some(what) = describe_queue_command(&cmd) {
+                        log::info!("engine: {what}");
+                    }
                     self.handle(cmd);
                     if mutates {
                         self.tracking.queue_dirty = true;
