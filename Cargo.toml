@@ -22,6 +22,7 @@ url = "2"
 image = { version = "0.25.1", default-features = false }
 # tests only
 proptest = { version = "1.12", default-features = false, features = ["std"] }
+insta = { version = "1.49", default-features = false, features = ["json", "redactions"] }
 
 [profile.release]
 opt-level = 3
