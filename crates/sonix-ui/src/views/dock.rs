@@ -274,7 +274,8 @@ impl Render for DockView {
         };
         let vol_id = ps.volume;
         let output: gpui::AnyElement = if let Some(e) = &ps.error {
-            div().id("dock-out-err").tip(e.clone(), th).max_w(px(dk::WARN_MAX_W)).flex().min_w_0().child(txt(&th, MONO_CODE, e.clone()).color(th.clip).ellipsis()).into_any_element()
+            // the engine detail (English) stays in the tooltip
+            div().id("dock-out-err").tip(e.clone(), th).max_w(px(dk::WARN_MAX_W)).flex().min_w_0().child(txt(&th, MONO_CODE, tr!(PlayerError).to_uppercase()).color(th.clip).ellipsis()).into_any_element()
         } else if loading {
             txt(&th, MONO_CODE, tr!(Loading).to_uppercase()).color(th.muted).into_any_element()
         } else {

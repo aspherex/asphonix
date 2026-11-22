@@ -84,6 +84,7 @@ settings-mode = Mode
 settings-mode-exclusive = Exclusive
 settings-mode-shared = Shared
 settings-exclusive-unavailable = Exclusive unavailable
+settings-exclusive-fallback = Playing in shared mode instead (details in the tooltip)
 settings-current-stream = Current stream
 settings-panel-scrobbling = Scrobbling
 settings-scrobble-submit = Submit plays to Navidrome
@@ -553,6 +554,7 @@ preset-never-played-desc = No recorded plays. 500 random picks.
 ## Player: dock, Now Playing, lyrics, queue rail, Tracks, boot
 
 loading = Loading…
+player-error = Playback error
 source-all-tracks = All Tracks
 source-radio = Radio
 queue-title = Queue

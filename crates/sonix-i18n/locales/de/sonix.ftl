@@ -80,6 +80,7 @@ settings-mode = Modus
 settings-mode-exclusive = Exklusiv
 settings-mode-shared = Geteilt
 settings-exclusive-unavailable = Exklusivmodus nicht verfügbar
+settings-exclusive-fallback = Wiedergabe stattdessen im geteilten Modus (Details im Tooltip)
 settings-current-stream = Aktueller Stream
 settings-panel-scrobbling = Scrobbling
 settings-scrobble-submit = Wiedergaben an Navidrome übermitteln
@@ -541,6 +542,7 @@ preset-never-played-desc = Keine aufgezeichneten Wiedergaben. 500 zufällige Tit
 ## Player: dock, Now Playing, lyrics, queue rail, Tracks, boot
 
 loading = Wird geladen…
+player-error = Wiedergabefehler
 source-all-tracks = Alle Titel
 source-radio = Radio
 queue-title = Warteschlange

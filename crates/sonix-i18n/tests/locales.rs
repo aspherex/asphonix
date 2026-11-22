@@ -175,3 +175,21 @@ fn short_counts_per_locale() {
     assert_eq!(short_count_in(51_900, Lang::De), format!("51{}9K", decimal_sep(Lang::De)));
     assert_eq!(short_count_in(2_500_000, Lang::De), format!("2{}5M", decimal_sep(Lang::De)));
 }
+
+/// A CRLF checkout (git autocrlf on Windows CI) parses to the same text: no carriage return reaches a message.
+#[test]
+fn crlf_sources_yield_no_carriage_returns() {
+    let crlf = EN_FTL.replace("\r\n", "\n").replace('\n', "\r\n");
+    let norm = sonix_i18n::normalize(&crlf);
+    let res = fluent_syntax::parser::parse(norm.as_str()).unwrap_or_else(|(_, e)| panic!("{e:?}"));
+    for e in &res.body {
+        if let Entry::Message(m) = e {
+            for el in &m.value.as_ref().unwrap().elements {
+                if let PatternElement::TextElement { value } = el {
+                    assert!(!value.contains('\r'), "{}: {value:?}", m.id.name);
+                }
+            }
+        }
+    }
+    assert_eq!(norm, EN_FTL.replace("\r\n", "\n"));
+}

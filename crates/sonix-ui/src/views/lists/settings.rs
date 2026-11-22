@@ -369,7 +369,8 @@ impl Render for SettingsView {
             let mut out_rows: Vec<AnyElement> = vec![Self::row(&th, tr!(SettingsDevice), device_sel).into_any_element(), Self::row(&th, tr!(SettingsMode), mode_tog).into_any_element()];
             if let Some(o) = &self.out {
                 if let Some(e) = &o.exclusive_error {
-                    out_rows.push(Self::row(&th, tr!(SettingsExclusiveUnavailable), div().id("excl-err").tip(e.clone(), th).flex().child(txt(&th, MONO_DATA, e.clone()).color(th.clip))).into_any_element());
+                    // the engine reason (device/driver detail, English) stays in the tooltip; the row says what happens
+                    out_rows.push(Self::row(&th, tr!(SettingsExclusiveUnavailable), div().id("excl-err").tip(e.clone(), th).flex().child(txt(&th, MONO_DATA, tr!(SettingsExclusiveFallback)).color(th.clip))).into_any_element());
                 }
                 if let Some(sr) = o.sample_rate {
                     let khz = (sr as f64 / 1000.0 * 10.0).round() / 10.0;

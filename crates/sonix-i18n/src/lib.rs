@@ -165,8 +165,14 @@ mod intl_memoizer_type {
     pub type Memo = intl_memoizer::concurrent::IntlLangMemoizer;
 }
 
+/// The source with `\r\n` line ends turned into `\n`.
+pub fn normalize(src: &str) -> String {
+    src.replace("\r\n", "\n")
+}
+
 fn bundle(lang: Lang) -> Bundle {
-    let res = match FluentResource::try_new(lang.source().to_string()) {
+    // a CRLF checkout (git autocrlf) must not leave a carriage return at the end of message text
+    let res = match FluentResource::try_new(normalize(lang.source())) {
         Ok(r) => r,
         // a broken entry is skipped, the rest still loads (the `locales` test keeps shipped files clean)
         Err((r, _)) => r,

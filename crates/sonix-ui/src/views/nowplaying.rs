@@ -1352,7 +1352,7 @@ impl NowPlayingView {
             .children(t.map(|_| {
                 let ft = line.clone();
                 let inner: AnyElement = if let Some(e) = &ps.error {
-                    txt(&th, MONO_DATA, e.clone()).color(th.clip).ellipsis().into_any_element()
+                    div().id("np-err").tip(e.clone(), th).flex().min_w_0().child(txt(&th, MONO_DATA, tr!(PlayerError).to_uppercase()).color(th.clip).ellipsis()).into_any_element()
                 } else if loading {
                     txt(&th, MONO_DATA, tr!(Loading).to_uppercase()).color(th.muted).ellipsis().into_any_element()
                 } else {
