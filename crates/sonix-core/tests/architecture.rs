@@ -135,10 +135,11 @@ fn layering_rules() {
     only("ipc", &["config"]);
     only("prefs", &["config"]);
     only("sequence", &["ipc"]);
+    only("redact", &[]);
     // Persistence of settings/credentials stays independent of the features that use them.
     only("secrets", &["config", "ipc"]);
     // The Subsonic client knows nothing about the library, audio or app features.
-    only("subsonic", &["config", "ipc"]);
+    only("subsonic", &["config", "ipc", "redact"]);
     // The audio engine never reaches up into app-level features.
     let audio = deps(&graph, "audio");
     for forbidden in ["scrobble", "mcp_bridge", "media", "secrets", "overlay", "updates", "smartlists", "continuity", "extras"] {
