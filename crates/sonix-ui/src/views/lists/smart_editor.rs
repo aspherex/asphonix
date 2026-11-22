@@ -63,7 +63,11 @@ fn no_value(op: SmartRuleOp) -> bool {
 impl SmartEditor {
     pub fn new(backend: Arc<dyn Backend>, menu: &Entity<ContextMenu>, cx: &mut Context<Self>) -> Self {
         let th = app::theme(cx);
-        let mk = |cx: &mut Context<Self>| cx.new(|cx| TextInput::new(cx, "", &th, MONO, MONO_DATA.size, MONO_DATA.line, MONO_DATA.weight));
+        let mk = |cx: &mut Context<Self>| cx.new(|cx| {
+            let mut i = TextInput::new(cx, "", &th, MONO, MONO_DATA.size, MONO_DATA.line, MONO_DATA.weight);
+            i.context_menu = false; // modal: the shell menu paints below the editor
+            i
+        });
         let (name, limit) = (mk(cx), mk(cx));
         let subs = vec![
             cx.subscribe(&name, |t: &mut Self, _, ev: &InputEvent, cx| match ev {
@@ -135,7 +139,11 @@ impl SmartEditor {
 
     fn make_row(&mut self, th: &Theme, field: SmartRuleField, op: SmartRuleOp, value: String, cx: &mut Context<Self>) -> Row {
         let th = *th;
-        let input = cx.new(|cx| TextInput::new(cx, "", &th, MONO, MONO_DATA.size, MONO_DATA.line, MONO_DATA.weight));
+        let input = cx.new(|cx| {
+            let mut i = TextInput::new(cx, "", &th, MONO, MONO_DATA.size, MONO_DATA.line, MONO_DATA.weight);
+            i.context_menu = false;
+            i
+        });
         input.update(cx, |i, cx| i.set_content(&value, cx));
         self._subs.push(cx.subscribe(&input, |t: &mut Self, _, ev: &InputEvent, cx| match ev {
             InputEvent::Changed => t.changed(cx),

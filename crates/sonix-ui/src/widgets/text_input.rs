@@ -2,7 +2,7 @@
 //! word, triple-click = all), word navigation (ctrl+left/right, ctrl+backspace/delete),
 //! clipboard (copy/cut/paste) and IME composition through GPUI's `EntityInputHandler`.
 //! Derived from GPUI's own `input` example (Apache-2.0), extended for SONIX.
-//! Gaps (docs/GPUI-GAPS.md): no context menu, IME composition is wired but
+//! Gaps (docs/GPUI-GAPS.md): IME composition is wired but
 //! was not exercised with a real IME, no bidi/RTL caret handling.
 use std::ops::Range;
 
@@ -178,6 +178,9 @@ pub struct TextInput {
     mouse_focus: bool,
     /// Ctrl+Z / Ctrl+Y (Chromium `<input>` undo): snapshots before each edit, typing runs coalesced
     history: History,
+    /// Right-click menu (Undo/Redo/Cut/Copy/Paste/Select all, the WebView2 input menu). Off for inputs inside modals:
+    /// the shell menu paints below dialogs and the smart editor.
+    pub context_menu: bool,
 }
 
 impl TextInput {
@@ -474,6 +477,7 @@ impl TextInput {
             focus_seen: false,
             mouse_focus: false,
             history: History::default(),
+            context_menu: true,
         }
     }
 
@@ -850,6 +854,7 @@ impl Render for TextInput {
             .on_action(cx.listener(Self::cut))
             .on_action(cx.listener(Self::copy))
             .on_mouse_down(MouseButton::Left, cx.listener(Self::on_mouse_down))
+            .on_mouse_down(MouseButton::Right, cx.listener(Self::on_right_down))
             .on_mouse_up(MouseButton::Left, cx.listener(Self::on_mouse_up))
             .on_mouse_up_out(MouseButton::Left, cx.listener(Self::on_mouse_up))
             .on_mouse_move(cx.listener(Self::on_mouse_move))
@@ -1021,5 +1026,53 @@ mod history_tests {
         assert_eq!(prev.0, s(""));
         assert_eq!(r[0].0, s("a"));
         assert!(History::step(&mut u, &mut r, &s(""), &(0..0)).is_none());
+    }
+}
+
+/// The shell's context menu, used by inputs for their right-click menu (set by `Shell::new`).
+pub struct InputMenu(pub gpui::WeakEntity<super::context_menu::ContextMenu>);
+impl gpui::Global for InputMenu {}
+
+type InputOp = fn(&mut TextInput, &mut Window, &mut Context<TextInput>);
+
+impl TextInput {
+    /// Right-click: focus the field, keep a selection the click is inside (else move the caret there, as Chromium
+    /// does), then open the edit menu with the WebView2 items and their shortcuts.
+    fn on_right_down(&mut self, ev: &MouseDownEvent, window: &mut Window, cx: &mut Context<Self>) {
+        self.mouse_focus = true;
+        window.focus(&self.focus_handle);
+        cx.stop_propagation();
+        if !self.context_menu {
+            return;
+        }
+        let at = self.index_for_mouse_position(ev.position);
+        if !(self.selected_range.start <= at && at <= self.selected_range.end) {
+            self.move_to(at, cx);
+        }
+        let Some(menu) = cx.try_global::<InputMenu>().and_then(|m| m.0.upgrade()) else { return };
+        let me = cx.entity().downgrade();
+        let item = |label: &'static str, hint: &'static str, enabled: bool, op: InputOp| {
+            let me = me.clone();
+            super::context_menu::MenuItem::action(label, move |window, cx| {
+                if let Some(e) = me.upgrade() {
+                    e.update(cx, |i, cx| op(i, window, cx));
+                }
+            })
+            .hint(hint)
+            .disabled(!enabled)
+        };
+        let sel = !self.selected_range.is_empty() && !self.mask;
+        let items = vec![
+            item("Undo", "Ctrl+Z", !self.history.undo.is_empty(), |i, w, cx| i.undo(&Undo, w, cx)),
+            item("Redo", "Ctrl+Y", !self.history.redo.is_empty(), |i, w, cx| i.redo(&Redo, w, cx)),
+            super::context_menu::MenuItem::separator(),
+            item("Cut", "Ctrl+X", sel, |i, w, cx| i.cut(&Cut, w, cx)),
+            item("Copy", "Ctrl+C", sel, |i, w, cx| i.copy(&Copy, w, cx)),
+            item("Paste", "Ctrl+V", true, |i, w, cx| i.paste(&Paste, w, cx)),
+            super::context_menu::MenuItem::separator(),
+            item("Select all", "Ctrl+A", !self.content.is_empty(), |i, w, cx| i.select_all(&SelectAll, w, cx)),
+        ];
+        let pos = ev.position;
+        menu.update(cx, |m, cx| m.show(items, pos, window, cx));
     }
 }

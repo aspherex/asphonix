@@ -103,6 +103,7 @@ impl Shell {
         window.focus(&focus);
         let nav = cx.new(|_| NavBus);
         cx.set_global(NavHandle(nav.clone()));
+        cx.set_global(crate::widgets::text_input::InputMenu(menu.downgrade()));
         let lib_ctx = library::Ctx { backend: backend.clone(), art: art_cache.clone(), player: player.clone(), menu: menu.clone(), nav: nav.clone() };
 
         let mut subs = Vec::new();

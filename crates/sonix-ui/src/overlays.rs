@@ -161,7 +161,10 @@ impl Overlays {
     fn open_prompt(&mut self, title: SharedString, placeholder: SharedString, confirm_label: SharedString, value: String, on_ok: PromptDone, cx: &mut Context<Self>) {
         let th = app::theme(cx);
         let input = cx.new(|cx| TextInput::new(cx, &placeholder, &th, MONO, 12.0, 16.0, 500.0));
-        input.update(cx, |i, _| i.content = value.into());
+        input.update(cx, |i, _| {
+            i.content = value.into();
+            i.context_menu = false; // the shell menu paints below the dialog
+        });
         let sub = cx.subscribe(&input, |this: &mut Self, input, ev: &InputEvent, cx| {
             if *ev == InputEvent::Submit {
                 let v = input.read(cx).content.to_string();
