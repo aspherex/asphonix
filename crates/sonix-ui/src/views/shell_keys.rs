@@ -1,4 +1,4 @@
-//! Global single-key shortcuts of `shortcuts.ts` that the shell did not bind yet: L (like the current track),
+//! Global single-key shortcuts of `shortcuts.ts` that the shell did not bind yet: L (like the current track), J/K (scroll the page),
 //! `/` (focus search), mouse side buttons (history back/forward). Kept in their own module so `shell.rs` only
 //! gains a few additive `on_action` / listener lines.
 use super::shell::Shell;
@@ -41,17 +41,30 @@ impl Shell {
     /// layout, so match the produced character (`KeyboardEvent.key === "/"` in the web) instead of a binding.
     pub(crate) fn feel_key_down(&mut self, ev: &gpui::KeyDownEvent, window: &mut Window, cx: &mut Context<Self>) {
         let m = ev.keystroke.modifiers;
-        if m.control || m.alt || m.platform || ev.is_held {
+        if m.control || m.alt || m.platform {
             return;
         }
-        if ev.keystroke.key_char.as_deref() != Some("/") {
+        if window.context_stack().iter().any(|c| c.contains("TextInput") || c.contains("ContextMenu") || c.contains("Dialog")) {
             return;
         }
-        if window.context_stack().iter().any(|c| c.contains("TextInput")) {
+        if ev.keystroke.key_char.as_deref() == Some("/") && !ev.is_held {
+            self.slash_search(window, cx);
+            cx.stop_propagation();
             return;
         }
-        self.slash_search(window, cx);
-        cx.stop_propagation();
+        // `scrollStage(±120)`: J/K scroll the page everywhere but Now Playing (there they skip -10/+10 s); held keys repeat
+        let dy = match ev.keystroke.key.as_str() {
+            "j" => 120.0,
+            "k" => -120.0,
+            _ => return,
+        };
+        if *self.router.current() == crate::router::Route::NowPlaying || self.overlay_open(cx) {
+            return;
+        }
+        if crate::widgets::smooth::scroll_largest(dy) {
+            window.refresh();
+            cx.stop_propagation();
+        }
     }
 }
 

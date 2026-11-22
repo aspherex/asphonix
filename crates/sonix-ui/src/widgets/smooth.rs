@@ -158,6 +158,8 @@ thread_local! {
     static TARGETS: RefCell<Vec<Target>> = const { RefCell::new(Vec::new()) };
     /// frame-clock time of the last wheel event each container consumed
     static LAST_WHEEL: RefCell<HashMap<usize, f64>> = RefCell::new(HashMap::new());
+    /// (key, area) of the containers registered in the last frame, for keyboard scrolling
+    static LAST_FRAME: RefCell<Vec<(usize, f32)>> = const { RefCell::new(Vec::new()) };
 }
 
 /// When the container `key` last took a wheel event. The host consumes wheel events in the capture phase, so a
@@ -205,10 +207,32 @@ pub fn drive(window: &mut Window, sc: Scrollable) -> AnyElement {
     .into_any_element()
 }
 
+/// `shortcuts.ts: scrollStage(delta)` (J/K outside Now Playing): scrolls the largest container of the last frame that
+/// can scroll, instantly (`behavior: "auto"`). False when none can.
+pub fn scroll_largest(delta: f32) -> bool {
+    let mut cands = LAST_FRAME.with(|l| l.borrow().clone());
+    cands.sort_by(|a, b| b.1.total_cmp(&a.1));
+    for (key, _) in cands {
+        let Some(sc) = SETTERS.with(|s| s.borrow().get(&key).cloned()) else { continue };
+        let max = (sc.max)();
+        if max <= 0.5 {
+            continue;
+        }
+        ANIMS.with(|a| a.borrow_mut().remove(&key));
+        (sc.set)(((sc.get)() + delta).clamp(0.0, max));
+        return true;
+    }
+    false
+}
+
 /// The single wheel listener; put it last in the root so every container has registered by its prepaint.
 pub fn host() -> AnyElement {
     canvas(
-        |_, _, _| TARGETS.with(|t| std::mem::take(&mut *t.borrow_mut())),
+        |_, _, _| {
+            let v = TARGETS.with(|t| std::mem::take(&mut *t.borrow_mut()));
+            LAST_FRAME.with(|l| *l.borrow_mut() = v.iter().map(|t| (t.key, t.area)).collect());
+            v
+        },
         |_, mut targets: Vec<Target>, window, _| {
             targets.sort_by(|a, b| a.area.total_cmp(&b.area)); // innermost first
             window.on_mouse_event(move |ev: &ScrollWheelEvent, phase, window, cx| {
