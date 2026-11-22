@@ -228,7 +228,6 @@ pub fn row(th: &Theme, t: &Track, st: &RowState, o: RowOpts, height: f32, ids: O
     }
     r = r
         .when(st.active, |d| d.child(div().absolute().left_0().top_0().bottom_0().w(px(tr::ACTIVE_BAR_W)).bg(th.accent_fg)))
-        .when(st.selected, |d| d.child(div().absolute().top_0().left_0().size_full().border_1().border_color(th.accent_fg)))
-        ;
+        .when(st.selected, |d| d.child(div().absolute().top_0().left_0().size_full().border_1().border_color(th.accent_fg)));
     r
 }
