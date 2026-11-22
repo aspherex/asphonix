@@ -52,6 +52,8 @@ pub struct TracksView {
     filter_gen: u64,
     filter_input: Entity<TextInput>,
     pager: Pager<Track>,
+    /// Rows dropped on minimize (`release`): no page is requested until `restore`, even if something renders meanwhile.
+    released: bool,
     list: UniformListScrollHandle,
     sb: ScrollbarHandle,
     sel: Selection,
@@ -95,6 +97,7 @@ impl TracksView {
             filter_gen: 0,
             filter_input,
             pager: Pager::default(),
+            released: false,
             list: UniformListScrollHandle::new(),
             sb: scrollbar::new_handle(),
             sel: Selection::default(),
@@ -162,6 +165,9 @@ impl TracksView {
     }
 
     fn request_page(&mut self, page: usize, cx: &mut Context<Self>) {
+        if self.released {
+            return;
+        }
         if !self.pager.want(page) {
             return;
         }
@@ -187,6 +193,9 @@ impl TracksView {
 
     /// Stars/ratings changed: re-fetch the visible pages in place (no blank flash, scroll kept).
     pub fn refresh_rows(&mut self, cx: &mut Context<Self>) {
+        if self.released {
+            return; // restore re-requests the visible pages anyway
+        }
         let (a, z) = (self.vis.start / PAGE, self.vis.end.saturating_sub(1) / PAGE);
         for p in a..=z {
             self.fetch_page(p, cx);
@@ -201,10 +210,12 @@ impl TracksView {
 
     /// Minimize: drop the paged rows (keep total, scroll offset and selection indices).
     pub fn release(&mut self) {
+        self.released = true;
         self.pager.release();
     }
 
     pub fn restore(&mut self, cx: &mut Context<Self>) {
+        self.released = false;
         cx.notify(); // visible pages are re-requested by the next render
     }
 

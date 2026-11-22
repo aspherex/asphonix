@@ -63,11 +63,9 @@ fn a_multi_row_removal_runs_in_order_then_refreshes(cx: &mut TestAppContext, mut
 
 /// Two refreshes race while the queue changes between them (a track change and a QueueChanged in a row).
 ///
-/// Known bug, found by this test: `QueueRail::refresh` has no ordering guard (the shell's `refresh_source` has one),
-/// so the answer read before the change can land last and the rail shows the old queue until the next refresh.
-/// Replay: `SEED=17 cargo test -p sonix-ui racing_refreshes -- --ignored`.
+/// Found the missing ordering guard in `QueueRail::refresh` (the answer read before the change could land last and
+/// the rail showed the old queue); fixed with `refresh_seq`. Replay a failure with `SEED=<n> cargo test -p sonix-ui racing_refreshes`.
 #[gpui::test(iterations = 100)]
-#[ignore = "known bug: QueueRail::refresh has no ordering guard (SEED=17)"]
 fn racing_refreshes_end_on_the_latest_queue(cx: &mut TestAppContext) {
     let fake = FakeBackend::new().with_queue(fixtures::tracks(4), 0).arc();
     let (rail, _player) = rail(cx, &fake);

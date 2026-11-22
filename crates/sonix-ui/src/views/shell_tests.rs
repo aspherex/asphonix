@@ -254,10 +254,10 @@ fn suspend_and_resume_with_requests_in_flight(cx: &mut TestAppContext, mut rng: 
 /// Minimize lands while a queue refresh and a page fetch are in flight: the rows released by `suspend` stay released
 /// (an answer arriving after minimize must not bring them back while minimized).
 ///
-/// Known gap, found by this test: `QueueRail::refresh` and `TracksView::fetch_page` apply their answer whether or not the
-/// view was released meanwhile, so up to a queue window and a page of rows come back while minimized (every seed).
+/// Found that answers in flight at minimize (and renders while released) refilled the rail and up to a page of rows;
+/// fixed by `QueueRail::release` invalidating `refresh_seq`, `Pager::release` bumping the epoch and `TracksView`
+/// requesting no pages until `restore`.
 #[gpui::test(iterations = 50)]
-#[ignore = "known gap: answers in flight at minimize refill the released rail / track rows"]
 fn answers_in_flight_at_minimize_do_not_refill_released_rows(cx: &mut TestAppContext) {
     let fake = FakeBackend::new().with_queue(fixtures::tracks(3), 0).with_tracks(fixtures::tracks(500)).arc();
     let (shell, cx) = mount(cx, &fake);

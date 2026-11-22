@@ -68,8 +68,10 @@ impl<T> Pager<T> {
         true
     }
 
-    /// Drop all rows but keep `total` (minimize: "drop caches and paged rows").
+    /// Drop all rows but keep `total` (minimize: "drop caches and paged rows"). Bumps the epoch, so pages still in
+    /// flight cannot refill the released rows; `restore` re-requests what is visible.
     pub fn release(&mut self) {
+        self.epoch += 1;
         self.pages.clear();
         self.pending.clear();
     }
@@ -101,6 +103,18 @@ mod tests {
         assert_eq!(p.get(5), Some(&5));
         assert_eq!(p.get(150), None);
     }
+    #[test]
+    fn an_answer_in_flight_at_release_does_not_refill_rows() {
+        let mut p: Pager<u32> = Pager { total: 1000, ..Pager::default() };
+        let e = p.epoch;
+        assert!(p.want(3));
+        p.release();
+        assert!(!p.insert(e, 3, rows(100), 300), "requested before the release");
+        assert_eq!(p.resident_pages(), 0);
+        assert_eq!(p.total, 1000, "release keeps the total");
+        assert!(p.want(3), "restore can request the page again");
+    }
+
 
     #[test]
     fn stale_epoch_is_dropped() {

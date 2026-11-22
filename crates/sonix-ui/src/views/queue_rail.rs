@@ -50,6 +50,9 @@ pub struct QueueRail {
     drag: Option<RailDrag>,
     /// play-order index of `state.items[0]` (the page is a window around the current row for long queues)
     base: usize,
+    /// Bumped by every `refresh` and by `release`: an answer for an older request is dropped, so a slow reply can
+    /// neither overwrite a newer queue nor refill rows released on minimize.
+    refresh_seq: u64,
     /// painted extents of the rows (abs index -> bounds, user-queued), the open gap, the deck / "Next in queue" section /
     /// list: drag and drop hit-tests against what the last frame painted
     rows: RowBounds,
@@ -137,7 +140,7 @@ fn drop_frame(th: &Theme) -> gpui::Div {
 impl QueueRail {
     pub fn new(backend: Arc<dyn Backend>, art: ArtHandle, player: &Entity<PlayerModel>, menu: &Entity<ContextMenu>, cx: &mut Context<Self>) -> Self {
         let sub = cx.subscribe(player, |this: &mut Self, _, _: &PlayerEvent, cx| this.refresh(cx));
-        let mut s = Self { backend, art, player: player.clone(), state: None, scroll: gpui::ScrollHandle::new(), scroll_key: None, menu: menu.clone(), focus: cx.focus_handle().tab_stop(true), drag_dy: 0.0, drag: None, base: 0, top_pending: None, rows: Default::default(), ph_bounds: Default::default(), deck_b: Default::default(), user_b: Default::default(), list_b: Default::default(), drag_pos: Point::default(), sel: Selection::default(), _sub: sub, pos_gate: Default::default(), _pos_sub: cx.observe(player, |this: &mut Self, p, cx| {
+        let mut s = Self { backend, art, player: player.clone(), state: None, scroll: gpui::ScrollHandle::new(), scroll_key: None, menu: menu.clone(), focus: cx.focus_handle().tab_stop(true), drag_dy: 0.0, drag: None, base: 0, refresh_seq: 0, top_pending: None, rows: Default::default(), ph_bounds: Default::default(), deck_b: Default::default(), user_b: Default::default(), list_b: Default::default(), drag_pos: Point::default(), sel: Selection::default(), _sub: sub, pos_gate: Default::default(), _pos_sub: cx.observe(player, |this: &mut Self, p, cx| {
             if this.pos_gate.changed(&p.read(cx).state, 0.0) {
                 cx.notify();
             }
@@ -147,6 +150,8 @@ impl QueueRail {
     }
 
     pub fn refresh(&mut self, cx: &mut Context<Self>) {
+        self.refresh_seq += 1;
+        let seq = self.refresh_seq;
         let b = self.backend.clone();
         cx.spawn(async move |this, cx| {
             let q = cx
@@ -163,6 +168,9 @@ impl QueueRail {
                 })
                 .await;
             let _ = this.update(cx, |t, cx| {
+                if t.refresh_seq != seq {
+                    return; // superseded by a newer refresh, or released while in flight
+                }
                 match q {
                     Ok((base, q)) => {
                         t.base = base;
@@ -203,6 +211,7 @@ impl QueueRail {
     }
 
     pub fn release(&mut self) {
+        self.refresh_seq += 1;
         self.state = None;
         self.scroll_key = None;
     }
