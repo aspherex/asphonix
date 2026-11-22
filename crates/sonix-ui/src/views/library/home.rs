@@ -396,7 +396,7 @@ impl Render for HomeView {
         let loading_sections = self.sections.is_none() && !self.sections_unavailable;
         if loading_sections {
             let (cols_t, _) = auto_fill(content_w, m::TILE_GRID_MIN, sp::MD);
-            let t: Vec<AnyElement> = (0..cols_t).map(|_| super::cards::tile_skeleton(&th, tile_w)).collect();
+            let t: Vec<AnyElement> = (0..cols_t.min(6)).map(|_| super::cards::tile_skeleton(&th, tile_w)).collect();
             children.push(div().flex().flex_col().child(Self::block_title(&th, "Jump Back In // Sessions")).child(Self::grid(t, sp::MD)).into_any_element());
         }
         if let Some(s) = self.sections.clone().filter(|s| !s.recently_played.is_empty()) {
@@ -490,7 +490,7 @@ impl Render for HomeView {
         }
         if loading_sections {
             let (cols_c, _) = auto_fill(content_w, m::CARD_GRID_MIN, sp::MD);
-            let c: Vec<AnyElement> = (0..cols_c).map(|_| super::cards::card_skeleton(&th, card_w)).collect();
+            let c: Vec<AnyElement> = (0..cols_c.min(5)).map(|_| super::cards::card_skeleton(&th, card_w)).collect();
             children.push(div().flex().flex_col().child(Self::block_title(&th, "Heavy Rotation")).child(Self::grid(c, sp::MD)).into_any_element());
         }
         if self.sections.is_none() && self.sections_unavailable {

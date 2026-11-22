@@ -731,7 +731,11 @@ impl Render for Shell {
         if !self.shown {
             self.shown = true;
             crate::log("first_render");
-            window.activate_window();
+            if std::env::var_os("SONIX_NO_ACTIVATE").is_none() {
+                window.activate_window();
+            } else if let Some(h) = crate::winffi::hwnd_of(window) {
+                crate::winffi::show_parked_no_activate(h);
+            }
             #[cfg(not(feature = "parity"))]
             self.start_boot(window, cx);
         }

@@ -382,6 +382,25 @@ struct Rect {
     b: i32,
 }
 
+/// `SONIX_NO_ACTIVATE=1` (test runs while someone uses the PC): show the window without activating it and park it
+/// far off-screen (it still paints, `PrintWindow` still works).
+#[cfg(windows)]
+pub fn show_parked_no_activate(hwnd: isize) {
+    use std::ffi::c_void;
+    #[link(name = "user32")]
+    unsafe extern "system" {
+        fn SetWindowPos(h: *mut c_void, after: *mut c_void, x: i32, y: i32, cx: i32, cy: i32, flags: u32) -> i32;
+        fn ShowWindow(h: *mut c_void, cmd: i32) -> i32;
+    }
+    unsafe {
+        // SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE
+        SetWindowPos(hwnd as *mut c_void, std::ptr::null_mut(), -30000, -30000, 0, 0, 0x0001 | 0x0004 | 0x0010);
+        ShowWindow(hwnd as *mut c_void, 4); // SW_SHOWNOACTIVATE
+    }
+}
+#[cfg(not(windows))]
+pub fn show_parked_no_activate(_: isize) {}
+
 #[cfg(test)]
 mod tests {
     use super::*;

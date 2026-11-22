@@ -387,8 +387,8 @@ impl ArtistDetailView {
         use crate::widgets::skeleton as sk;
         let th = *th;
         let ghost = |s: crate::tracking::TypeSpec, t: &str| txt(&th, s, t.to_string()).color(gpui::transparent_black());
-        let btn = |pad: f32, ic: f32, spec: crate::tracking::TypeSpec, label: &str| {
-            div().flex().flex_row().items_center().gap(px(crate::metrics::space::SM)).h(px(m::BTN_H)).px(px(pad)).flex_none().bg(th.mid).opacity(0.6).child(div().size(px(ic)).flex_none()).child(ghost(spec, label))
+        let btn = |pad: f32, ic: f32, border: bool, spec: crate::tracking::TypeSpec, label: &str| {
+            div().flex().flex_row().items_center().gap(px(crate::metrics::space::SM)).h(px(m::BTN_H)).px(px(pad)).flex_none().bg(th.mid).opacity(0.6).when(border, |d| d.border_1()).child(div().size(px(ic)).flex_none()).child(ghost(spec, label))
         };
         let actions = div()
             .flex()
@@ -396,8 +396,8 @@ impl ArtistDetailView {
             .items_center()
             .gap(px(crate::metrics::space::SM))
             .mt(px(crate::metrics::space::SM))
-            .child(pid("artist.btn.play", btn(crate::metrics::space::LG, 16.0, HEADLINE_SM, "PLAY DISCOGRAPHY")))
-            .child(pid("artist.btn.flow", btn(crate::metrics::space::MD, 15.0, LABEL_CAPS, "FLOW")))
+            .child(pid("artist.btn.play", btn(crate::metrics::space::LG, 16.0, false, HEADLINE_SM, "PLAY DISCOGRAPHY")))
+            .child(pid("artist.btn.flow", btn(crate::metrics::space::MD, 15.0, true, LABEL_CAPS, "FLOW")))
             .child(pid("artist.btn.star", sk::block(&th, m::BTN_H, m::BTN_H)))
             .child(pid("artist.btn.more", sk::block(&th, m::BTN_H, m::BTN_H)));
         let info = div()
