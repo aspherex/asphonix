@@ -143,7 +143,7 @@ pub fn start() {
                             rows.push((size, s));
                         }
                     }
-                    rows.sort_by(|a, b| b.0.cmp(&a.0));
+                    rows.sort_by_key(|a| std::cmp::Reverse(a.0));
                     for (size, bt) in rows {
                         let frames: Vec<&str> = bt.lines().map(|l| l.trim()).filter(|l| l.contains(": ") && !l.starts_with("at ") && !l.contains("memprof") && !l.contains("alloc::") && !l.contains("core::") && !l.contains("std::") && !l.contains("__rust")).take(7).collect();
                         out += &format!("{:.2}MB {}\n", size as f64 / 1048576.0, frames.join(" | "));
