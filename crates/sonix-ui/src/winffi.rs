@@ -131,6 +131,10 @@ pub fn hwnd_of(window: &gpui::Window) -> Option<isize> {
         _ => None,
     }
 }
+#[cfg(not(windows))]
+pub fn hwnd_of(_: &gpui::Window) -> Option<isize> {
+    None
+}
 
 
 

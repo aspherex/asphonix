@@ -211,13 +211,16 @@ impl UpdateConfig {
     }
 
     fn url_allowed(&self, u: &url::Url) -> bool {
-        if u.scheme() == "https" {
-            return true;
-        }
-        #[cfg(test)]
-        if self.loopback_http && u.scheme() == "http" && u.host_str() == Some("127.0.0.1") {
-            return true;
-        }
+        u.scheme() == "https" || self.test_loopback(u)
+    }
+
+    /// Tests may use plain HTTP to their own `127.0.0.1` server.
+    #[cfg(test)]
+    fn test_loopback(&self, u: &url::Url) -> bool {
+        self.loopback_http && u.scheme() == "http" && u.host_str() == Some("127.0.0.1")
+    }
+    #[cfg(not(test))]
+    fn test_loopback(&self, _: &url::Url) -> bool {
         false
     }
 }

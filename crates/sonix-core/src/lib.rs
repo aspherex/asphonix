@@ -10,6 +10,8 @@ pub mod rt;
 pub mod scrobble;
 pub mod smartlists;
 pub mod updates;
+// The update classification only feeds the Windows SMTC backend.
+#[cfg_attr(not(windows), allow(dead_code))]
 pub mod media;
 pub mod mcp_bridge;
 pub mod extras;

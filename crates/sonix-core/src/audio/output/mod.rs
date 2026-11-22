@@ -209,6 +209,7 @@ pub fn volume_to_db(p: f32) -> Option<f32> {
 /// Mirrors exactly what `decode::Packer` used to do at decode time (same
 /// per-container math/rounding), just operating on bytes instead of
 /// symphonia sample buffers, and only ever invoked when gain is non-unity.
+#[cfg_attr(not(windows), allow(dead_code))] // only the WASAPI path applies gain to device bytes
 pub(crate) fn apply_gain_in_place(buf: &mut [u8], container: Container, volume: f32) {
     match container {
         Container::I16 => {
