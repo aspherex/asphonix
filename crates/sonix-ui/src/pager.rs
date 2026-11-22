@@ -60,7 +60,9 @@ impl<T> Pager<T> {
         self.pages.insert(p, rows);
         while self.pages.len() > MAX_PAGES {
             let centre = (centre_row / PAGE) as i64;
-            let far = self.pages.keys().copied().max_by_key(|k| (*k as i64 - centre).abs()).unwrap();
+            // never the page just inserted: Tracks renders row 0 every frame (uniform_list measures item 0), so with the viewport far
+            // from the top that page would be evicted at once and re-queried on every frame.
+            let far = self.pages.keys().copied().filter(|k| *k != p).max_by_key(|k| (*k as i64 - centre).abs()).unwrap();
             self.pages.remove(&far);
         }
         true
@@ -109,6 +111,23 @@ mod tests {
         assert!(!p.insert(e, 1, rows(100), 0));
         assert_eq!(p.resident_pages(), 0);
         assert!(p.want(1), "pending was cleared by the reset");
+    }
+
+    #[test]
+    fn a_page_far_from_the_viewport_is_kept_once_inserted() {
+        // Tracks renders row 0 every frame (the list measures item 0): with the viewport at page 19 and the cache full, that
+        // insert used to evict page 0 itself, so the next frame fetched it again, forever.
+        let mut p: Pager<u32> = Pager { total: 2_071, ..Pager::default() };
+        for page in 4..=19 {
+            let e = p.epoch;
+            p.insert(e, page, rows(100), 19 * PAGE);
+        }
+        assert!(p.want(0));
+        let e = p.epoch;
+        p.insert(e, 0, rows(100), 19 * PAGE);
+        assert!(p.has_page(0) && !p.want(0), "row 0 stays resident, no re-request");
+        assert_eq!(p.resident_pages(), MAX_PAGES);
+        assert!(p.has_page(19) && !p.has_page(4), "the farthest other page went");
     }
 
     #[test]
