@@ -375,3 +375,165 @@ home-view-history = Verlauf anzeigen
 home-recently-played = Zuletzt gespielte Titel
 home-heavy-rotation = Heavy Rotation
 home-playlists-vectors = Wiedergabelisten // Vektoren
+
+## Lists: login
+
+login-username-placeholder = benutzername
+login-server-url = Server-URL
+login-username = Benutzername
+login-password = Passwort
+login-status-error = Status: Fehler
+login-status-ok = Status: OK
+login-latency = Latenz
+login-host = Host
+login-extensions = Erweiterungen
+login-connecting = Verbinde…
+login-connect = Initialisieren & Terminal öffnen
+login-cancel = Abbrechen · zurück zum aktuellen Profil
+login-engine = Engine
+login-tagline = Hochleistungs-Audio-Workstation
+login-idle = Bereit
+login-status = Status
+
+## Lists: profiles
+
+profile-switched = Gewechselt zu { $name }
+profile-switch-failed = Profilwechsel fehlgeschlagen: { $reason }
+profile-removed = Profil entfernt
+profile-add = Profil hinzufügen…
+profile-sign-out = Abmelden
+
+## Lists: playlists, liked, favorites, history
+
+playlist-badge-smart = Intelligent
+playlist-badge-readonly = Schreibgeschützt
+playlists-new-smart = Neue intelligente Wiedergabeliste
+playlists-smart-section = Intelligente Wiedergabelisten · lokal, auf diesem Gerät ausgewertet
+playlists-server-section = Server-Wiedergabelisten
+playlists-empty = Noch keine Wiedergabelisten.
+playlist-empty = Noch keine Titel. Mit „Zu Wiedergabeliste hinzufügen“ bei einem beliebigen Titel füllen.
+playlist-empty-readonly = Gerade keine Titel. Diese Wiedergabeliste ist schreibgeschützt und füllt sich selbst.
+playlist-reorder-failed = Wiedergabeliste konnte nicht umsortiert werden
+playlist-unavailable = Wiedergabeliste nicht verfügbar.
+playlist-server-smart-note = Regelbasiert auf dem Server; der Inhalt aktualisiert sich automatisch.
+playlist-owned-by = Gehört { $owner }.
+playlist-owned-by-other = Gehört einem anderen Benutzer.
+liked-empty = Noch nichts mit „Gefällt mir“ markiert. Während der Wiedergabe L drücken oder bei einem Titel auf das Herz tippen.
+liked-pinned = Wiedergabeliste // angeheftet
+liked-newest-first = Neueste zuerst
+liked-starred-albums = Favorisierte Alben →
+favorites-title = Favoriten-Kisten
+favorites-to-liked = Favorisierte Titel → Lieblingssongs
+favorites-empty = Noch keine favorisierten Alben — bei einem Album oder Titel auf den Stern tippen.
+history-empty = Noch nichts hier. Titel, die über die Scrobble-Schwelle hinaus gehört werden, erscheinen hier.
+history-clear = Verlauf löschen
+history-clear-body = Alle aufgezeichneten Wiedergaben von diesem Gerät entfernen? Das kann nicht rückgängig gemacht werden.
+history-clear-confirm = Löschen
+history-recorded-locally = Lokal aufgezeichnet · letzte { $count } Wiedergaben
+count-plays = { $count ->
+    [one] { $count } Wiedergabe
+   *[other] { $count } Wiedergaben
+}
+dialog-save = Speichern
+
+## Lists: search
+
+search-title = Indexsuche
+search-tab-all = Alle
+search-start = Tippen, um Titel, Alben, Künstler und Wiedergabelisten zu suchen.
+search-searching = Suche läuft…
+search-no-matches = Keine Treffer für „{ $query }“.
+search-best-match = Bester Treffer
+search-kind-track = Titel
+search-kind-album = Album
+search-kind-artist = Künstler
+search-kind-playlist = Wiedergabeliste
+
+## Smart playlists
+
+smart-empty = Keine Titel entsprechen diesen Regeln.
+smart-not-found = Intelligente Wiedergabeliste nicht gefunden.
+smart-badge = Intelligente Wiedergabeliste
+smart-badge-local = Lokal · nicht auf dem Server
+smart-reroll = Zufallsauswahl neu würfeln
+smart-edit-rules = Regeln bearbeiten
+smart-edit-title = Intelligente Wiedergabeliste bearbeiten
+smart-local-note = Nur lokal — auf diesem Gerät aus der synchronisierten Bibliothek ausgewertet; wird nie an den Server gesendet.
+smart-preset-title = Mit einer Vorlage beginnen
+smart-match = Treffer
+smart-match-all = Alle Regeln
+smart-match-any = Eine Regel
+smart-add-rule = Regel hinzufügen
+smart-no-rules = Keine Regeln: jeder Titel der Bibliothek passt.
+smart-no-limit = kein Limit
+smart-sort = Sortierung
+smart-limit = Limit (optional)
+smart-evaluating = Wird ausgewertet…
+smart-matching = { $count ->
+    [one] passender Titel
+   *[other] passende Titel
+}
+smart-err-name = Bitte einen Namen eingeben.
+smart-err-value = { $field }: Wert eingeben
+smart-err-number = { $field }: Zahl eingeben
+smart-err-limit = Das Limit muss eine ganze Zahl von 1 bis { $max } sein.
+smart-err-save = Speichern fehlgeschlagen: { $reason }
+smart-field-rating = Bewertung
+smart-field-starred = Gefällt mir (markiert)
+smart-field-play-count = Wiedergaben
+smart-field-last-played = Zuletzt gespielt
+smart-field-date-added = Zur Bibliothek hinzugefügt
+smart-unit-plays = Wiedergaben
+smart-unit-days = Tage
+smart-unit-seconds = Sekunden
+smart-placeholder-genre = z. B. Jazz
+smart-placeholder-artist = z. B. Aphex Twin
+smart-op-eq = ist genau
+smart-op-after = nach
+smart-op-gte = mindestens (≥)
+smart-op-lte = höchstens (≤)
+smart-op-unrated = ist unbewertet
+smart-op-yes = ja
+smart-op-no = nein
+smart-op-never = nie
+smart-op-older-than-days = vor mehr als … Tagen
+smart-op-within-days = in den letzten … Tagen
+smart-op-is = ist
+smart-op-is-not = ist nicht
+smart-op-contains = enthält
+smart-sort-recently-added = Zuletzt hinzugefügt
+smart-sort-recently-played = Zuletzt gespielt
+smart-undefined = undefiniert
+smart-desc-unrated = Unbewertet
+smart-desc-liked = Gefällt mir
+smart-desc-yes = Ja
+smart-desc-not-liked = Gefällt mir nicht
+smart-desc-never-played = Nie gespielt
+smart-desc-older-than = { $field }: vor mehr als { $value } Tagen
+smart-desc-within = { $field }: in den letzten { $value } Tagen
+smart-desc-is = { $field } ist { $value }
+smart-desc-is-not = { $field } ist nicht { $value }
+smart-desc-contains = { $field } enthält „{ $value }“
+smart-desc-all-tracks = Alle Titel
+smart-desc-and = UND
+smart-desc-or = ODER
+smart-desc-max = max. { $count }
+smart-desc-random = zufällig
+smart-desc-by-recently-added = nach zuletzt hinzugefügt
+smart-desc-by-most-played = nach meistgespielt
+smart-desc-by-recently-played = nach zuletzt gespielt
+smart-desc-by-title = nach Titel
+smart-desc-by-artist = nach Künstler
+smart-desc-by-rating = nach Bewertung
+preset-hi-res-name = Nur Hi-Res
+preset-hi-res-desc = Abtastrate von 88,2 kHz oder höher.
+preset-24-bit-name = Nur 24 Bit
+preset-24-bit-desc = Titel mit 24 Bit oder mehr Bittiefe.
+preset-top-rated-name = Bestbewertet (4★+)
+preset-top-rated-desc = Mit vier oder fünf Sternen bewertet, beste zuerst.
+preset-stale-name = Seit 6 Monaten nicht gespielt
+preset-stale-desc = Schon einmal gespielt, aber nicht in den letzten 180 Tagen. 200 zufällige Titel.
+preset-recent-name = Zuletzt hinzugefügt
+preset-recent-desc = In den letzten 30 Tagen zur Bibliothek hinzugefügt, neueste zuerst.
+preset-never-played-name = Nie gespielt
+preset-never-played-desc = Keine aufgezeichneten Wiedergaben. 500 zufällige Titel.

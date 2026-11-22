@@ -25,6 +25,7 @@ use gpui::{
 };
 use sonix_api::format as fmt;
 use sonix_api::*;
+use sonix_i18n::tr;
 use std::cell::Cell;
 use std::ops::Range;
 use std::rc::Rc;
@@ -62,7 +63,7 @@ pub struct TableCfg {
     pub arrows: Arrows,
     /// trailing action buttons the head reserves
     pub action_count: usize,
-    pub empty: &'static str,
+    pub empty: sonix_i18n::Key,
 }
 
 pub enum TableEvent {
@@ -352,20 +353,20 @@ pub fn refresh_visible(&mut self, cx: &mut Context<Self>) {
             row = row.child(div().w(px(14.)).flex_none());
         }
         row = row
-            .child(flex_cell(tr::TITLE_GROW).flex().child(plain("Title")))
-            .child(flex_cell(tr::ARTIST_GROW).flex().child(plain("Artist")));
+            .child(flex_cell(tr::TITLE_GROW).flex().child(plain(tr!(ColTitle))))
+            .child(flex_cell(tr::ARTIST_GROW).flex().child(plain(tr!(ColArtist))));
         if self.cfg.album_column {
-            row = row.child(flex_cell(tr::ALBUM_GROW).flex().child(plain("Album")));
+            row = row.child(flex_cell(tr::ALBUM_GROW).flex().child(plain(tr!(ColAlbum))));
         }
         if cols.year {
-            row = row.child(div().w(px(tr::YEAR_W)).flex_none().flex().justify_end().child(plain("Year")));
+            row = row.child(div().w(px(tr::YEAR_W)).flex_none().flex().justify_end().child(plain(tr!(ColYear))));
         }
         if cols.added {
-            row = row.child(div().w(px(tr::ADDED_W)).flex_none().flex().justify_end().child(plain("Added")));
+            row = row.child(div().w(px(tr::ADDED_W)).flex_none().flex().justify_end().child(plain(tr!(ColAdded))));
         }
         row = row
-            .child(div().w(px(tr::FORMAT_W)).flex_none().flex().justify_end().child(plain("Format")))
-            .child(div().w(px(tr::TIME_W)).flex_none().flex().justify_end().child(plain("Time")));
+            .child(div().w(px(tr::FORMAT_W)).flex_none().flex().justify_end().child(plain(tr!(ColFormat))))
+            .child(div().w(px(tr::TIME_W)).flex_none().flex().justify_end().child(plain(tr!(ColTime))));
         for _ in 0..self.cfg.action_count {
             row = row.child(spacer());
         }
@@ -374,7 +375,7 @@ pub fn refresh_visible(&mut self, cx: &mut Context<Self>) {
 
     fn day_row(&self, th: Theme, ix: usize, day: &str, count: u32, now: i64) -> AnyElement {
         let label = crate::views::library::fmtx::day_header(day, now);
-        let plays = format!("{count} {}", if count == 1 { "PLAY" } else { "PLAYS" });
+        let plays = tr!(CountPlays, count = count).to_uppercase();
         div()
             .id(("day", ix))
             .flex()
@@ -606,7 +607,7 @@ impl Render for Table {
             }
             rows_v.into_any_element()
         } else if total == 0 {
-            div().p(px(lm::EMPTY_PAD)).child(txt(&th, BODY_SM, self.cfg.empty).color(th.muted)).into_any_element()
+            div().p(px(lm::EMPTY_PAD)).child(txt(&th, BODY_SM, sonix_i18n::tr(self.cfg.empty)).color(th.muted)).into_any_element()
         } else {
             div()
                 .id("lists-body")

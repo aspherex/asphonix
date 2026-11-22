@@ -11,6 +11,7 @@ use crate::widgets::text_input::{InputEvent, TextInput};
 use crate::widgets::{hard_shadow, icon, icon_g};
 use gpui::{AnyElement, Context, CursorStyle, Entity, EventEmitter, IntoElement, Render, ScrollHandle, Subscription, Timer, Window, div, prelude::*, px};
 use sonix_api::*;
+use sonix_i18n::tr;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -92,7 +93,7 @@ impl LoginView {
                         }
                         Err(e) => {
                             t.phase = Phase::Error;
-                            t.error = Some(if e.message.is_empty() { "Connection failed.".into() } else { e.message });
+                            t.error = Some(crate::i18n::api_error(&e));
                         }
                     }
                     cx.notify();
@@ -121,7 +122,7 @@ impl Render for LoginView {
             let avail = f32::from(window.viewport_size().width) - 2.0 * space::LG - if overflow { 10.0 } else { 0.0 };
             let card_w = avail.min(700.0);
             let url_f = field(&th, &self.url, None, "https://music.example.com:4533", window, cx).into_any_element();
-            let user_f = field(&th, &self.user, None, "username", window, cx).into_any_element();
+            let user_f = field(&th, &self.user, None, tr!(LoginUsernamePlaceholder), window, cx).into_any_element();
             let pw_field = div().flex_1().min_w_0().flex().flex_col().child(field(&th, &self.pass, None, "••••••••••", window, cx).h(px(crate::metrics::controls::FIELD_H)));
             let eye = div()
                 .id("login-eye")
@@ -156,9 +157,9 @@ impl Render for LoginView {
                 .flex_col()
                 .gap(px(space::LG))
                 .p(px(space::LG))
-                .child(Self::group(&th, "// Server URL", url_f))
-                .child(Self::group(&th, "// Username", user_f))
-                .child(Self::group(&th, "// Password", pw_row));
+                .child(Self::group(&th, &format!("// {}", tr!(LoginServerUrl)), url_f))
+                .child(Self::group(&th, &format!("// {}", tr!(LoginUsername)), user_f))
+                .child(Self::group(&th, &format!("// {}", tr!(LoginPassword)), pw_row));
             if self.phase == Phase::Error {
                 let msg = self.error.clone().unwrap_or_default();
                 let lines = wrap_text(&th, window, &msg, BODY_SM, card_w - 2.0 * space::LG - 2.0 - 2.0 * space::MD);
@@ -171,7 +172,7 @@ impl Render for LoginView {
                         .bg(th.base)
                         .border_1()
                         .border_color(th.clip)
-                        .child(div().flex().child(txt(&th, LABEL_CAPS, "Status: error").color(th.clip)))
+                        .child(div().flex().child(txt(&th, LABEL_CAPS, tr!(LoginStatusError)).color(th.clip)))
                         .child(div().flex().flex_col().children(lines.into_iter().map(|l| txt(&th, BODY_SM, l).color(th.muted)))),
                 );
             }
@@ -183,21 +184,21 @@ impl Render for LoginView {
                         .items_center()
                         .gap(px(space::XS))
                         .child(div().size(px(6.)).flex_none().bg(th.accent))
-                        .child(txt(&th, LABEL_CAPS, "Status: OK").color(th.text))
+                        .child(txt(&th, LABEL_CAPS, tr!(LoginStatusOk)).color(th.text))
                         .child(div().flex_1())
-                        .child(txt(&th, MONO_CODE, format!("LATENCY: {}MS", c.ping_ms)).color(th.muted)),
+                        .child(txt(&th, MONO_CODE, format!("{}: {}MS", tr!(LoginLatency).to_uppercase(), c.ping_ms)).color(th.muted)),
                 );
-                probe = probe.child(div().flex().child(txt(&th, MONO_DATA, format!("HOST: {} {} (Subsonic API {})", c.server_name, c.server_version, c.api_version)).color(th.muted)));
+                probe = probe.child(div().flex().child(txt(&th, MONO_DATA, format!("{}: {} {} (Subsonic API {})", tr!(LoginHost).to_uppercase(), c.server_name, c.server_version, c.api_version)).color(th.muted)));
                 if !c.open_subsonic_extensions.is_empty() {
-                    probe = probe.child(div().flex().child(txt(&th, MONO_DATA, format!("CAPS: {}", c.open_subsonic_extensions.join(", "))).color(th.muted)));
+                    probe = probe.child(div().flex().child(txt(&th, MONO_DATA, format!("{}: {}", tr!(LoginExtensions).to_uppercase(), c.open_subsonic_extensions.join(", "))).color(th.muted)));
                 }
                 form = form.child(probe);
             }
             let disabled = self.phase == Phase::Connecting || self.url.read(cx).content.is_empty();
             let label = match self.phase {
-                Phase::Connecting => "CONNECTING…",
-                Phase::Connected => "CONNECTED",
-                _ => "INITIALIZE & ENTER TERMINAL",
+                Phase::Connecting => tr!(LoginConnecting),
+                Phase::Connected => tr!(StatusConnected),
+                _ => tr!(LoginConnect),
             };
             let btn = div()
                 .id("login-connect")
@@ -211,7 +212,7 @@ impl Render for LoginView {
                 .text_color(th.accent_text)
                 .shadow(hard_shadow(&th, 2.0))
                 .child(icon("sync", 16., th.accent_text))
-                .child(txt(&th, HEADLINE_SM, label).color(th.accent_text))
+                .child(txt(&th, HEADLINE_SM, label.to_uppercase()).color(th.accent_text))
                 .map(|d| if disabled { d.opacity(0.5).cursor(CursorStyle::OperationNotAllowed) } else { d.tab_index(0).focus(move |s| if crate::widgets::key_nav() { s.bg(th.accent_hover) } else { s }).cursor(CursorStyle::PointingHand).hover(move |s| s.bg(th.accent_hover)).on_click(cx.listener(|t, _, _, cx| t.connect(cx))) });
             form = form.child(btn);
             if self.signed_in && self.phase != Phase::Connected {
@@ -226,7 +227,7 @@ impl Render for LoginView {
                             .text_color(th.muted)
                             .cursor(CursorStyle::PointingHand)
                             .hover(move |s| s.text_color(th.accent_fg))
-                            .child(txt(&th, LABEL_CAPS, "Cancel · back to current profile"))
+                            .child(txt(&th, LABEL_CAPS, tr!(LoginCancel)))
                             .on_click(cx.listener(|_, _, _, cx| cx.emit(ListsEvent::Back))),
                     ),
                 );
@@ -261,16 +262,16 @@ impl Render for LoginView {
                                 .items_center()
                                 .gap(px(space::SM))
                                 .child(div().flex().child(txt(&th, HEADLINE_SM, "SONIX").color(th.text)))
-                                .child(div().px(px(space::XS)).py(px(1.)).bg(th.high).child(txt(&th, LABEL_CAPS, "Engine").color(th.muted))),
+                                .child(div().px(px(space::XS)).py(px(1.)).bg(th.high).child(txt(&th, LABEL_CAPS, tr!(LoginEngine)).color(th.muted))),
                         )
-                        .child(div().h(px(18.)).child(div().mt(px(2.)).h(px(15.)).flex().items_center().child(txt(&th, BODY_SM, "High-performance audio workstation").color(th.muted)))),
+                        .child(div().h(px(18.)).child(div().mt(px(2.)).h(px(15.)).flex().items_center().child(txt(&th, BODY_SM, tr!(LoginTagline)).color(th.muted)))),
                 );
             let card = div().w(px(card_w)).flex().flex_col().bg(th.low).border_1().border_color(th.border).shadow(hard_shadow(&th, 4.0)).child(card_header).child(form);
             let status = match self.phase {
-                Phase::Idle => "IDLE",
-                Phase::Connecting => "CONNECTING",
-                Phase::Error => "ERROR",
-                Phase::Connected => "CONNECTED",
+                Phase::Idle => tr!(LoginIdle),
+                Phase::Connecting => tr!(StatusConnecting),
+                Phase::Error => tr!(StatusError),
+                Phase::Connected => tr!(StatusConnected),
             };
             let host = self.caps.as_ref().map(|c| format!("{} {}", c.server_name.to_uppercase(), c.server_version)).unwrap_or_else(|| "—".into());
             let footer = div()
@@ -279,7 +280,7 @@ impl Render for LoginView {
                 .flex_row()
                 .justify_between()
                 .mt(px(space::SM))
-                .child(txt(&th, MONO_CODE, format!("STATUS: {status}")).color(th.muted))
+                .child(txt(&th, MONO_CODE, format!("{}: {}", tr!(LoginStatus), status).to_uppercase()).color(th.muted))
                 .child(txt(&th, MONO_CODE, host).color(th.muted));
             let _ = TypeSpec { ..MONO_CODE };
             div()

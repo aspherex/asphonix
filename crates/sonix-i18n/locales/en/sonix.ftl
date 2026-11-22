@@ -387,3 +387,165 @@ home-view-history = View history
 home-recently-played = Recently Played Tracks
 home-heavy-rotation = Heavy Rotation
 home-playlists-vectors = Playlists // Vectors
+
+## Lists: login
+
+login-username-placeholder = username
+login-server-url = Server URL
+login-username = Username
+login-password = Password
+login-status-error = Status: error
+login-status-ok = Status: OK
+login-latency = Latency
+login-host = Host
+login-extensions = Extensions
+login-connecting = Connecting…
+login-connect = Initialize & enter terminal
+login-cancel = Cancel · back to current profile
+login-engine = Engine
+login-tagline = High-performance audio workstation
+login-idle = Idle
+login-status = Status
+
+## Lists: profiles
+
+profile-switched = Switched to { $name }
+profile-switch-failed = Could not switch profile: { $reason }
+profile-removed = Profile removed
+profile-add = Add profile…
+profile-sign-out = Sign out
+
+## Lists: playlists, liked, favorites, history
+
+playlist-badge-smart = Smart
+playlist-badge-readonly = Read-only
+playlists-new-smart = New smart playlist
+playlists-smart-section = Smart playlists · local, evaluated on this machine
+playlists-server-section = Server playlists
+playlists-empty = No playlists yet.
+playlist-empty = No tracks yet. Use "Add to playlist" from any track to fill this up.
+playlist-empty-readonly = No tracks right now. This playlist is read-only and fills itself.
+playlist-reorder-failed = Could not reorder playlist
+playlist-unavailable = Playlist unavailable.
+playlist-server-smart-note = Rule-based on the server; contents update automatically.
+playlist-owned-by = Owned by { $owner }.
+playlist-owned-by-other = Owned by another user.
+liked-empty = Nothing liked yet. Press L while a track plays, or tap the heart on any track.
+liked-pinned = Playlist // pinned
+liked-newest-first = Newest first
+liked-starred-albums = Starred albums →
+favorites-title = Starred Crates
+favorites-to-liked = Starred tracks → Liked Songs
+favorites-empty = No starred albums yet — tap the star on any album or track.
+history-empty = Nothing here yet. Tracks you listen to (past the scrobble threshold) appear here.
+history-clear = Clear history
+history-clear-body = Remove all recorded plays from this device? This cannot be undone.
+history-clear-confirm = Clear
+history-recorded-locally = Recorded locally · last { $count } plays
+count-plays = { $count ->
+    [one] { $count } play
+   *[other] { $count } plays
+}
+dialog-save = Save
+
+## Lists: search
+
+search-title = Index Search
+search-tab-all = All
+search-start = Start typing to search tracks, albums, artists and playlists.
+search-searching = Searching…
+search-no-matches = No matches for "{ $query }".
+search-best-match = Best match
+search-kind-track = track
+search-kind-album = album
+search-kind-artist = artist
+search-kind-playlist = playlist
+
+## Smart playlists
+
+smart-empty = No tracks match these rules.
+smart-not-found = Smart playlist not found.
+smart-badge = Smart playlist
+smart-badge-local = Local · not on server
+smart-reroll = Re-roll the random pick
+smart-edit-rules = Edit rules
+smart-edit-title = Edit smart playlist
+smart-local-note = Local only — evaluated on this machine from your synced library; never sent to the server.
+smart-preset-title = Start from a preset
+smart-match = Match
+smart-match-all = All rules
+smart-match-any = Any rule
+smart-add-rule = Add rule
+smart-no-rules = No rules: every track in your library matches.
+smart-no-limit = no limit
+smart-sort = Sort
+smart-limit = Limit (optional)
+smart-evaluating = Evaluating…
+smart-matching = { $count ->
+    [one] matching track
+   *[other] matching tracks
+}
+smart-err-name = Give it a name.
+smart-err-value = { $field }: enter a value
+smart-err-number = { $field }: enter a number
+smart-err-limit = Limit must be a whole number from 1 to { $max }.
+smart-err-save = Could not save: { $reason }
+smart-field-rating = Rating
+smart-field-starred = Liked (starred)
+smart-field-play-count = Play count
+smart-field-last-played = Last played
+smart-field-date-added = Added to library
+smart-unit-plays = plays
+smart-unit-days = days
+smart-unit-seconds = seconds
+smart-placeholder-genre = e.g. Jazz
+smart-placeholder-artist = e.g. Aphex Twin
+smart-op-eq = is exactly
+smart-op-after = after
+smart-op-gte = at least (≥)
+smart-op-lte = at most (≤)
+smart-op-unrated = is unrated
+smart-op-yes = yes
+smart-op-no = no
+smart-op-never = never
+smart-op-older-than-days = more than … days ago
+smart-op-within-days = within the last … days
+smart-op-is = is
+smart-op-is-not = is not
+smart-op-contains = contains
+smart-sort-recently-added = Recently added
+smart-sort-recently-played = Recently played
+smart-undefined = undefined
+smart-desc-unrated = Unrated
+smart-desc-liked = Liked
+smart-desc-yes = Yes
+smart-desc-not-liked = Not liked
+smart-desc-never-played = Never played
+smart-desc-older-than = { $field }: more than { $value } days ago
+smart-desc-within = { $field }: within { $value } days
+smart-desc-is = { $field } is { $value }
+smart-desc-is-not = { $field } is not { $value }
+smart-desc-contains = { $field } contains "{ $value }"
+smart-desc-all-tracks = All tracks
+smart-desc-and = AND
+smart-desc-or = OR
+smart-desc-max = max { $count }
+smart-desc-random = random
+smart-desc-by-recently-added = by recently added
+smart-desc-by-most-played = by most played
+smart-desc-by-recently-played = by recently played
+smart-desc-by-title = by title
+smart-desc-by-artist = by artist
+smart-desc-by-rating = by rating
+preset-hi-res-name = Hi-Res only
+preset-hi-res-desc = Sampling rate of 88.2 kHz or higher.
+preset-24-bit-name = 24-bit only
+preset-24-bit-desc = Tracks with a 24-bit or deeper sample format.
+preset-top-rated-name = Top rated (4★+)
+preset-top-rated-desc = Rated four or five stars, best first.
+preset-stale-name = Not played in 6 months
+preset-stale-desc = Played before, but not within the last 180 days. 200 random picks.
+preset-recent-name = Recently added
+preset-recent-desc = Added to the library in the last 30 days, newest first.
+preset-never-played-name = Never played
+preset-never-played-desc = No recorded plays. 500 random picks.

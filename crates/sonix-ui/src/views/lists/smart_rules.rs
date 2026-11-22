@@ -1,6 +1,7 @@
 //! Field/operator metadata of the smart-playlist rule builder and the human-readable
-//! rule descriptions ("Rating ≥ 4★ AND Liked · by rating · max 200").
+//! rule descriptions ("Rating ≥ 4★ AND Liked · by rating · max 200"), in the active UI language.
 use sonix_api::*;
+use sonix_i18n::tr;
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub enum Kind {
@@ -21,21 +22,23 @@ pub struct FieldMeta {
 
 use SmartRuleOp as O;
 
+/// Labels and units come from the active catalog (`&'static str`, a table lookup), so the editor re-labels on a
+/// language switch.
 pub fn meta(f: SmartRuleField) -> FieldMeta {
     let m = |label, kind, ops: &'static [SmartRuleOp], unit, placeholder, def| FieldMeta { label, kind, ops, unit, placeholder, def };
     match f {
-        SmartRuleField::Rating => m("Rating", Kind::Num, &[O::Gte, O::Lte, O::Eq, O::Unrated], "★ (1-5)", "", Some(4.0)),
-        SmartRuleField::Starred => m("Liked (starred)", Kind::None, &[O::Yes, O::No], "", "", None),
-        SmartRuleField::PlayCount => m("Play count", Kind::Num, &[O::Eq, O::Gte, O::Lte], "plays", "", Some(0.0)),
-        SmartRuleField::LastPlayed => m("Last played", Kind::Num, &[O::Never, O::OlderThanDays, O::WithinDays], "days", "", Some(180.0)),
-        SmartRuleField::DateAdded => m("Added to library", Kind::Num, &[O::WithinDays, O::OlderThanDays], "days", "", Some(30.0)),
-        SmartRuleField::Genre => m("Genre", Kind::Text, &[O::Is, O::Contains, O::IsNot], "", "e.g. Jazz", None),
-        SmartRuleField::Year => m("Year", Kind::Num, &[O::Gte, O::Lte, O::Eq], "", "", Some(2000.0)),
-        SmartRuleField::Artist => m("Artist", Kind::Text, &[O::Is, O::Contains, O::IsNot], "", "e.g. Aphex Twin", None),
-        SmartRuleField::Duration => m("Duration", Kind::Num, &[O::Gte, O::Lte], "seconds", "", Some(300.0)),
-        SmartRuleField::Format => m("Format", Kind::Text, &[O::Is, O::IsNot], "", "flac, mp3, m4a…", None),
-        SmartRuleField::BitDepth => m("Bit depth", Kind::Num, &[O::Gte, O::Eq, O::Lte], "bit", "", Some(24.0)),
-        SmartRuleField::SampleRate => m("Sample rate", Kind::Num, &[O::Gte, O::Eq, O::Lte], "Hz", "", Some(88200.0)),
+        SmartRuleField::Rating => m(tr!(SmartFieldRating), Kind::Num, &[O::Gte, O::Lte, O::Eq, O::Unrated], "★ (1-5)", "", Some(4.0)),
+        SmartRuleField::Starred => m(tr!(SmartFieldStarred), Kind::None, &[O::Yes, O::No], "", "", None),
+        SmartRuleField::PlayCount => m(tr!(SmartFieldPlayCount), Kind::Num, &[O::Eq, O::Gte, O::Lte], tr!(SmartUnitPlays), "", Some(0.0)),
+        SmartRuleField::LastPlayed => m(tr!(SmartFieldLastPlayed), Kind::Num, &[O::Never, O::OlderThanDays, O::WithinDays], tr!(SmartUnitDays), "", Some(180.0)),
+        SmartRuleField::DateAdded => m(tr!(SmartFieldDateAdded), Kind::Num, &[O::WithinDays, O::OlderThanDays], tr!(SmartUnitDays), "", Some(30.0)),
+        SmartRuleField::Genre => m(tr!(InfoGenre), Kind::Text, &[O::Is, O::Contains, O::IsNot], "", tr!(SmartPlaceholderGenre), None),
+        SmartRuleField::Year => m(tr!(InfoYear), Kind::Num, &[O::Gte, O::Lte, O::Eq], "", "", Some(2000.0)),
+        SmartRuleField::Artist => m(tr!(ColArtist), Kind::Text, &[O::Is, O::Contains, O::IsNot], "", tr!(SmartPlaceholderArtist), None),
+        SmartRuleField::Duration => m(tr!(InfoDuration), Kind::Num, &[O::Gte, O::Lte], tr!(SmartUnitSeconds), "", Some(300.0)),
+        SmartRuleField::Format => m(tr!(InfoFormat), Kind::Text, &[O::Is, O::IsNot], "", "flac, mp3, m4a…", None),
+        SmartRuleField::BitDepth => m(tr!(InfoBitDepth), Kind::Num, &[O::Gte, O::Eq, O::Lte], "bit", "", Some(24.0)),
+        SmartRuleField::SampleRate => m(tr!(InfoSampleRate), Kind::Num, &[O::Gte, O::Eq, O::Lte], "Hz", "", Some(88200.0)),
     }
 }
 
@@ -56,65 +59,80 @@ pub const FIELD_ORDER: [SmartRuleField; 12] = [
 
 pub fn op_label(field: SmartRuleField, op: SmartRuleOp) -> &'static str {
     match op {
-        O::Eq => "is exactly",
+        O::Eq => tr!(SmartOpEq),
         O::Gte => {
             if field == SmartRuleField::DateAdded {
-                "after"
+                tr!(SmartOpAfter)
             } else {
-                "at least (≥)"
+                tr!(SmartOpGte)
             }
         }
-        O::Lte => "at most (≤)",
-        O::Unrated => "is unrated",
-        O::Yes => "yes",
-        O::No => "no",
-        O::Never => "never",
-        O::OlderThanDays => "more than … days ago",
-        O::WithinDays => "within the last … days",
-        O::Is => "is",
-        O::IsNot => "is not",
-        O::Contains => "contains",
+        O::Lte => tr!(SmartOpLte),
+        O::Unrated => tr!(SmartOpUnrated),
+        O::Yes => tr!(SmartOpYes),
+        O::No => tr!(SmartOpNo),
+        O::Never => tr!(SmartOpNever),
+        O::OlderThanDays => tr!(SmartOpOlderThanDays),
+        O::WithinDays => tr!(SmartOpWithinDays),
+        O::Is => tr!(SmartOpIs),
+        O::IsNot => tr!(SmartOpIsNot),
+        O::Contains => tr!(SmartOpContains),
     }
 }
 
 pub fn sort_label(s: SmartSort) -> &'static str {
     match s {
-        SmartSort::Random => "Random",
-        SmartSort::RecentlyAdded => "Recently added",
-        SmartSort::MostPlayed => "Most played",
-        SmartSort::RecentlyPlayed => "Recently played",
-        SmartSort::Title => "Title",
-        SmartSort::Artist => "Artist",
-        SmartSort::Rating => "Rating",
+        SmartSort::Random => tr!(SortRandom),
+        SmartSort::RecentlyAdded => tr!(SmartSortRecentlyAdded),
+        SmartSort::MostPlayed => tr!(ArtistMostPlayed),
+        SmartSort::RecentlyPlayed => tr!(SmartSortRecentlyPlayed),
+        SmartSort::Title => tr!(ColTitle),
+        SmartSort::Artist => tr!(ColArtist),
+        SmartSort::Rating => tr!(SmartFieldRating),
+    }
+}
+
+/// The sort as the description's tail ("by rating" / "nach Bewertung").
+fn sort_phrase(s: SmartSort) -> &'static str {
+    match s {
+        SmartSort::Random => tr!(SmartDescRandom),
+        SmartSort::RecentlyAdded => tr!(SmartDescByRecentlyAdded),
+        SmartSort::MostPlayed => tr!(SmartDescByMostPlayed),
+        SmartSort::RecentlyPlayed => tr!(SmartDescByRecentlyPlayed),
+        SmartSort::Title => tr!(SmartDescByTitle),
+        SmartSort::Artist => tr!(SmartDescByArtist),
+        SmartSort::Rating => tr!(SmartDescByRating),
     }
 }
 
 pub const SORT_ORDER: [SmartSort; 7] =
     [SmartSort::Random, SmartSort::RecentlyAdded, SmartSort::MostPlayed, SmartSort::RecentlyPlayed, SmartSort::Title, SmartSort::Artist, SmartSort::Rating];
 
-/// Number formatting for rule descriptions: whole numbers without a fraction, a missing value as "undefined".
+/// Number formatting for rule descriptions: whole numbers without a fraction (locale decimal separator otherwise),
+/// a missing value as "undefined".
 fn num_str(v: &Option<SmartValue>) -> String {
     match v {
         Some(SmartValue::Num(n)) if n.fract() == 0.0 => format!("{}", *n as i64),
-        Some(SmartValue::Num(n)) => format!("{n}"),
+        Some(SmartValue::Num(n)) => sonix_i18n::fmt::decimal(&format!("{n}")),
         Some(SmartValue::Text(t)) => t.clone(),
-        None => "undefined".into(),
+        None => tr!(SmartUndefined).into(),
     }
 }
 
 pub fn describe_rule(r: &SmartRule) -> String {
     let f = meta(r.field);
     let v = num_str(&r.value);
+    let label = f.label;
     match r.op {
-        O::Unrated => "Unrated".into(),
-        O::Yes => if r.field == SmartRuleField::Starred { "Liked" } else { "Yes" }.into(),
-        O::No => "Not liked".into(),
-        O::Never => "Never played".into(),
-        O::OlderThanDays => format!("{}: more than {v} days ago", f.label),
-        O::WithinDays => format!("{}: within {v} days", f.label),
-        O::Is => format!("{} is {v}", f.label),
-        O::IsNot => format!("{} is not {v}", f.label),
-        O::Contains => format!("{} contains \"{v}\"", f.label),
+        O::Unrated => tr!(SmartDescUnrated).into(),
+        O::Yes => if r.field == SmartRuleField::Starred { tr!(SmartDescLiked) } else { tr!(SmartDescYes) }.into(),
+        O::No => tr!(SmartDescNotLiked).into(),
+        O::Never => tr!(SmartDescNeverPlayed).into(),
+        O::OlderThanDays => tr!(SmartDescOlderThan, field = label, value = v),
+        O::WithinDays => tr!(SmartDescWithin, field = label, value = v),
+        O::Is => tr!(SmartDescIs, field = label, value = v),
+        O::IsNot => tr!(SmartDescIsNot, field = label, value = v),
+        O::Contains => tr!(SmartDescContains, field = label, value = v),
         op => {
             let unit = match r.field {
                 SmartRuleField::Rating => "★",
@@ -128,20 +146,20 @@ pub fn describe_rule(r: &SmartRule) -> String {
                 O::Gte => "≥",
                 _ => "≤",
             };
-            format!("{} {cmp} {v}{unit}", f.label)
+            format!("{label} {cmp} {v}{unit}")
         }
     }
 }
 
 pub fn describe_smart(d: &SmartInput) -> String {
     let rules = if d.rules.is_empty() {
-        "All tracks".to_string()
+        tr!(SmartDescAllTracks).to_string()
     } else {
-        d.rules.iter().map(describe_rule).collect::<Vec<_>>().join(if d.match_mode == SmartMatchMode::All { " AND " } else { " OR " })
+        let join = if d.match_mode == SmartMatchMode::All { tr!(SmartDescAnd) } else { tr!(SmartDescOr) };
+        d.rules.iter().map(describe_rule).collect::<Vec<_>>().join(&format!(" {join} "))
     };
-    let sort = if d.sort == SmartSort::Random { "random".to_string() } else { format!("by {}", sort_label(d.sort).to_lowercase()) };
-    let limit = d.limit.map(|l| format!(" · max {}", sonix_api::format::fmt_int(l as u64))).unwrap_or_default();
-    format!("{rules} · {sort}{limit}")
+    let limit = d.limit.map(|l| format!(" · {}", tr!(SmartDescMax, count = l))).unwrap_or_default();
+    format!("{rules} · {}{limit}", sort_phrase(d.sort))
 }
 
 #[cfg(test)]
