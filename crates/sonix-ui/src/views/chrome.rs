@@ -213,7 +213,7 @@ impl Shell {
         let fg = if active { th.accent_text } else { th.muted };
         div()
             .id(id)
-            .tab_index(0)
+            .tab_index(0).focus(crate::widgets::focus_ring(th))
             .group("hv")
             .flex()
             .flex_row()
@@ -255,7 +255,7 @@ impl Shell {
             let fg = if active { th.accent_text } else { th.muted };
             div()
                 .id(id)
-                .tab_index(0)
+                .tab_index(0).focus(crate::widgets::focus_ring(th))
                 .group("hv")
                 .flex()
                 .flex_row()
@@ -293,14 +293,14 @@ impl Shell {
                 .px(px(sb::TITLE_PAD_X))
                 .pt(px(sb::TITLE_PAD_TOP))
                 .pb(px(sb::TITLE_PAD_BOTTOM))
-                .child(div().id("pl-title").tab_index(0).flex().cursor(CursorStyle::PointingHand).child(txt(&th, LABEL_CAPS, tr!(NavPlaylists)).color(if *route == Route::Playlists { th.accent_fg } else { th.muted })).on_click(cx.listener(|this, _, _, cx| this.navigate(Route::Playlists, cx))))
+                .child(div().id("pl-title").tab_index(0).focus(crate::widgets::focus_ring(th)).flex().cursor(CursorStyle::PointingHand).child(txt(&th, LABEL_CAPS, tr!(NavPlaylists)).color(if *route == Route::Playlists { th.accent_fg } else { th.muted })).on_click(cx.listener(|this, _, _, cx| this.navigate(Route::Playlists, cx))))
                 .child(
                     div()
                         .flex()
                         .flex_row()
                         .gap(px(sb::ADD_GAP))
-                        .child(div().id("pl-add-smart").tab_index(0).flex().cursor(CursorStyle::PointingHand).child(icon("bolt", sb::ADD_ICON, th.muted)).tip(tr!(SidebarNewSmart), th).on_click(cx.listener(|this, _, _, cx| this.lists_new_smart(cx))))
-                        .child(div().id("pl-add").tab_index(0).flex().cursor(CursorStyle::PointingHand).child(icon("add", sb::ADD_ICON, th.muted)).tip(tr!(SidebarNewPlaylist), th).on_click(cx.listener(|this, _, _, cx| this.lists_new_playlist(cx)))),
+                        .child(div().id("pl-add-smart").tab_index(0).focus(crate::widgets::focus_ring(th)).flex().items_center().justify_center().size(px(sb::ADD_HIT)).m(px(-(sb::ADD_HIT - sb::ADD_ICON) / 2.)).cursor(CursorStyle::PointingHand).child(icon("bolt", sb::ADD_ICON, th.muted)).tip(tr!(SidebarNewSmart), th).on_click(cx.listener(|this, _, _, cx| this.lists_new_smart(cx))))
+                        .child(div().id("pl-add").tab_index(0).focus(crate::widgets::focus_ring(th)).flex().items_center().justify_center().size(px(sb::ADD_HIT)).m(px(-(sb::ADD_HIT - sb::ADD_ICON) / 2.)).cursor(CursorStyle::PointingHand).child(icon("add", sb::ADD_ICON, th.muted)).tip(tr!(SidebarNewPlaylist), th).on_click(cx.listener(|this, _, _, cx| this.lists_new_playlist(cx)))),
                 ));
         let liked = self.counts.liked.map(|n| sonix_i18n::fmt::int(n as u64)).unwrap_or_else(|| "—".into());
         lists = lists.child(pl_row("pl-liked".into(), *route == Route::Liked, "heart-filled", tr!(LikedSongs).into(), liked)
@@ -347,7 +347,7 @@ impl Shell {
         let profile = div()
             .id("profile")
             .tip(tr!(ProfileSwitch), th)
-            .tab_index(0)
+            .tab_index(0).focus(crate::widgets::focus_ring(th))
             .group("hv")
             .flex()
             .flex_row()

@@ -221,7 +221,7 @@ impl Render for LoginView {
                         div()
                             .id("login-cancel")
                             .tab_index(0)
-                            .focus(move |s| if crate::widgets::key_nav() { s.text_color(th.accent_fg) } else { s })
+                            .focus(move |s| if crate::widgets::key_nav() { crate::widgets::ring(s.text_color(th.accent_fg), th) } else { s })
                             .px(px(space::SM))
                             .py(px(space::XS))
                             .text_color(th.muted)

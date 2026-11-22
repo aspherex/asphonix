@@ -44,3 +44,14 @@ pub fn key_nav() -> bool {
 pub fn set_key_nav(on: bool) {
     KEY_NAV.with(|k| k.set(on));
 }
+
+/// Keyboard focus indicator for controls without a border of their own: a ring drawn as a spread shadow outside the
+/// element (no layout shift), in `th.focus` (>= 17:1 against the page in both themes, WCAG 2.4.7 / 1.4.11).
+pub fn focus_ring(th: Theme) -> impl Fn(gpui::StyleRefinement) -> gpui::StyleRefinement + 'static {
+    move |s| if key_nav() { ring(s, th) } else { s }
+}
+
+/// Adds the focus ring to a focus style that also changes other properties.
+pub fn ring(s: gpui::StyleRefinement, th: Theme) -> gpui::StyleRefinement {
+    s.shadow(vec![BoxShadow { color: th.focus, offset: point(px(0.), px(0.)), blur_radius: px(0.), spread_radius: px(crate::metrics::FOCUS_RING) }])
+}

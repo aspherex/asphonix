@@ -89,7 +89,7 @@ pub fn ghost_icon_with(id: impl Into<ElementId>, th: Theme, name: &str, icon_siz
     if disabled {
         d = d.opacity(0.5).cursor(CursorStyle::OperationNotAllowed);
     } else {
-        d = d.tab_index(0).focus(move |s| if super::key_nav() { s.bg(th.high) } else { s }).cursor(CursorStyle::PointingHand).hover(move |s| s.text_color(th.accent_fg));
+        d = d.tab_index(0).focus(move |s| if super::key_nav() { super::ring(s.bg(th.high), th) } else { s }).cursor(CursorStyle::PointingHand).hover(move |s| s.text_color(th.accent_fg));
     }
     d
 }

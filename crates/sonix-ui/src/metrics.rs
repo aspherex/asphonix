@@ -6,6 +6,9 @@
 #![allow(dead_code)]
 
 /// Spacing scale.
+/// Width of the keyboard focus ring (`widgets::focus_ring`).
+pub const FOCUS_RING: f32 = 2.0;
+
 pub mod space {
     pub const XS: f32 = 4.0;
     pub const SM: f32 = 8.0;
@@ -94,8 +97,11 @@ pub mod sidebar {
     pub const TITLE_PAD_X: f32 = super::space::MD;
     pub const TITLE_PAD_BOTTOM: f32 = super::space::XS;
     /// "New playlist" buttons next to the section title.
-    pub const ADD_GAP: f32 = super::space::SM;
+    /// Centers 24 px apart so the 24x24 hit boxes below do not overlap (WCAG 2.5.8).
+    pub const ADD_GAP: f32 = super::space::MD;
     pub const ADD_ICON: f32 = 12.0;
+    /// Hit box around the 12 px icon (WCAG 2.5.8 minimum target); a negative margin keeps the visual footprint.
+    pub const ADD_HIT: f32 = 24.0;
     /// 1 px separator between smart and server playlists.
     pub const SEP_MARGIN_Y: f32 = super::space::XS;
     pub const SEP_MARGIN_X: f32 = super::space::MD;

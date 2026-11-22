@@ -35,7 +35,7 @@ pub fn segmented(id: &'static str, th: &Theme, options: &[(&str, &str)], value: 
         // segment labels are buttons: no letter-spacing
         let seg = div()
             .id((id, i))
-            .tab_index(0)
+            .tab_index(0).focus(crate::widgets::focus_ring(th))
             .flex()
             .flex_row()
             .items_center()
