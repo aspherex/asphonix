@@ -6,7 +6,7 @@ use super::*;
 use crate::tests::{install, soon, ticks};
 use gpui::{TestAppContext, VisualTestContext};
 use rand::rngs::StdRng;
-use sonix_api::{PlaybackStatus, QueueSourceInfo, SourceKind, SourceMode, Track, Waveform};
+use sonix_api::{PlaybackStatus, PlayerApi, QueueSourceInfo, SourceKind, SourceMode, Track, Waveform};
 use sonix_testkit::{FakeBackend, fixtures};
 use std::cell::Cell;
 use std::rc::Rc;
@@ -276,4 +276,30 @@ fn answers_in_flight_at_minimize_do_not_refill_released_rows(cx: &mut TestAppCon
         (crate::views::queue_rail::gpui_tests::rail_rows(sh.queue.read(cx)), crate::views::tracks::gpui_tests::resident(sh.tracks.read(cx)).len())
     });
     assert_eq!((rail, rows), (None, 0), "released while minimized");
+}
+
+/// A queue change (`Event::QueueChanged`) reaches the docked rail while the window is live; minimized, only the
+/// queue source is re-read (the rail is released and re-reads on restore).
+#[gpui::test(iterations = 20)]
+fn queue_changed_refreshes_the_rail_and_only_the_source_while_minimized(cx: &mut TestAppContext) {
+    let fake = FakeBackend::new().with_queue(fixtures::tracks(3), 1).arc();
+    let (shell, cx) = mount(cx, &fake);
+    let backend_rows = |fake: &FakeBackend| fake.state(|s| (s.queue.iter().map(|it| it.track.id.clone()).collect::<Vec<_>>(), s.current.map(|c| c as i64).unwrap_or(-1)));
+    let rail = |shell: &Entity<Shell>, cx: &mut VisualTestContext| shell.read_with(cx, |sh, cx| crate::views::queue_rail::gpui_tests::rail_rows(sh.queue.read(cx)));
+
+    fake.player_enqueue(sonix_api::EnqueueRequest { track_ids: vec!["x".into()], position: sonix_api::EnqueuePosition::Next }).unwrap();
+    let reads = fake.count("player_get_queue");
+    send(&shell, cx, Event::QueueChanged);
+    cx.run_until_parked();
+    assert_eq!(rail(&shell, cx), Some(backend_rows(&fake)), "the rail shows the new row");
+    // rail + queue source (+ one more rail refresh: the one-album static queue grew, which repaints play buttons)
+    assert!(fake.count("player_get_queue") - reads >= 2);
+
+    shell.update_in(cx, |sh, window, cx| sh.on_minimize_change(true, window, cx));
+    cx.run_until_parked();
+    let reads = fake.count("player_get_queue");
+    send(&shell, cx, Event::QueueChanged);
+    cx.run_until_parked();
+    assert_eq!(fake.count("player_get_queue") - reads, 1, "minimized: the queue source only");
+    assert_eq!(rail(&shell, cx), None, "the released rail stays empty");
 }
