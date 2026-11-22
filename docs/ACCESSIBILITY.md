@@ -59,10 +59,15 @@ provides), so wiring roles later is mechanical.
 WCAG 1.4.4 requires text resizable to 200 % without loss of content or function; EN 301 549 11.7 requires
 honoring the platform text-size preference.
 
-Proposed implementation (feasible, mostly mechanical):
-- A crate-local `px()` that multiplies by a global UI zoom (`AtomicU32`, read per call - negligible cost)
-  replacing the `gpui::px` import in sonix-ui. Text sizes go through `text::txt`/`TypeSpec`, so they scale too.
-  Whole-UI zoom (not text-only) avoids clipping in fixed-height rows (`ROW_H` 30/36 px).
+Proposed implementation:
+- Whole-UI zoom (not text-only) avoids clipping in fixed-height rows (`ROW_H` 30/36 px).
+- **Not** a crate-local scaled `px()`: tried on paper and rejected. sonix-ui converts `Pixels` back to `f32` in
+  ~105 places (`f32::from(..)`, `natural_width`, viewport math) and often feeds the result into `px()` again,
+  which would apply the zoom twice - silently, with no compiler help.
+- Instead GPUI's intended mechanism (what Zed uses for its UI font size): sizes in `rems`, zoom via
+  `window.set_rem_size(16 px * zoom)`. Converting `metrics.rs` / `tracking.rs` values to rems turns every place
+  that needs absolute pixels into a **compile error** to fix deliberately (convert with `window.rem_size()`),
+  instead of a silent double scaling. Larger change; scheduled after 0.2, with a 200 % parity run behind login.
 - Initial zoom = Windows `TextScaleFactor` (listen for `TextScaleFactorChanged`); user override in Settings
   (100-200 %, steps of 10 %) + Ctrl+= / Ctrl+- / Ctrl+0.
 - On change: invalidate cached parts/views (same mechanism as the runtime language switch), re-measure layouts.
@@ -126,9 +131,9 @@ Non-text (needs 3:1 for UI component boundaries and state indicators):
 
 | # | Item | Size | Dependency |
 |---|---|---|---|
-| 1 | Contrast fixes: `clip` colors, control borders >= 3:1 where they are the boundary, light accent fills | S | - |
-| 2 | 24x24 hit boxes for small icon buttons; focus border for all focusables | S | - |
-| 3 | UI zoom (scaled `px`), Windows TextScaleFactor, Ctrl+=/-/0, Settings | M | after i18n merge (both touch every view) |
+| 1 | Contrast fixes: `clip` colors (**done**, test-guarded), control borders >= 3:1 where they are the boundary, light accent fills (open, need a visual check per control) | S | - |
+| 2 | 24x24 hit boxes for small icon buttons; focus indicator for all focusables (**done**: sidebar buttons, `widgets::focus_ring` on every `tab_index` element) | S | - |
+| 3 | UI zoom via rems + `set_rem_size`, Windows TextScaleFactor, Ctrl+=/-/0, Settings | M-L | after 0.2; needs a logged-in visual check |
 | 4 | Reduce motion (Windows setting + toggle) | S | - |
 | 5 | High-contrast detection + palette | M | 1 |
 | 6 | Screen reader support | L | owner decision: wait for crates.io GPUI vs git dependency |
