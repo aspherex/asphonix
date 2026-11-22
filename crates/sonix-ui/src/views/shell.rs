@@ -140,7 +140,24 @@ impl Shell {
                 window.focus(&f);
             }
         }));
-        subs.push(cx.observe_window_activation(window, |this: &mut Shell, window, _cx| this.main_active = window.is_window_active()));
+        subs.push(cx.observe_window_activation(window, |this: &mut Shell, window, cx| {
+            this.main_active = window.is_window_active();
+            if !this.main_active && !this.suspended {
+                // Visible but in the background (the user works elsewhere): once it stays that way for a few seconds, trim
+                // the working set like a minimize does (pages come back on demand when the window is used again).
+                cx.spawn(async move |this, cx| {
+                    gpui::Timer::after(Duration::from_secs(5)).await;
+                    let _ = this.update(cx, |sh, _| {
+                        if !sh.main_active && !sh.suspended {
+                            let before = crate::winffi::private_ws();
+                            crate::winffi::empty_working_set();
+                            crate::log(&format!("inactive trim: pws {:.1} -> {:.1} MB", before as f64 / 1048576.0, crate::winffi::private_ws() as f64 / 1048576.0));
+                        }
+                    });
+                })
+                .detach();
+            }
+        }));
         subs.push(cx.subscribe(&np, |this: &mut Shell, _, ev: &NpEvent, cx| this.on_np_event(ev, cx)));
         // `TopBar.svelte: onSearchFocus`: focusing the search box navigates to the Search route
         let search_focus = search.read(cx).focus_handle.clone();
@@ -245,6 +262,9 @@ impl Shell {
 
     /// idle 5 s -> scroll the whole list -> idle 4 s -> Now Playing 60 s -> back to Tracks.
     fn run_script(&mut self, cx: &mut Context<Self>) {
+        if std::env::var("SONIX_SCRIPT").is_ok_and(|v| v == "real") {
+            return self.run_script_real(cx);
+        }
         cx.spawn(async move |this, cx| {
             let t = |ms: u64| gpui::Timer::after(Duration::from_millis(ms));
             t(1500).await;
@@ -287,6 +307,48 @@ impl Shell {
             crate::log("phase np_60s");
             let _ = this.update(cx, |sh, cx| sh.navigate(Route::Tracks, cx));
             t(500).await;
+            crate::log("phase done");
+        })
+        .detach();
+    }
+
+    /// Real-backend memory run (`SONIX_SCRIPT=real`, no input synthesis, no focus needed): idle -> scroll the library ->
+    /// play (queue restored from the session) -> Now Playing -> back; the harness minimizes/restores the window itself.
+    fn run_script_real(&mut self, cx: &mut Context<Self>) {
+        cx.spawn(async move |this, cx| {
+            let t = |ms: u64| gpui::Timer::after(Duration::from_millis(ms));
+            t(8000).await;
+            crate::log("phase idle_start");
+            t(5000).await;
+            crate::log("phase idle_end");
+            crate::log("phase scroll_start");
+            let mut ix = 0usize;
+            while ix < 2000 {
+                ix += 12;
+                if this.update(cx, |sh, cx| sh.tracks.update(cx, |t, cx| t.script_scroll(ix, cx))).is_err() {
+                    return;
+                }
+                t(16).await;
+            }
+            crate::log("phase scroll_done");
+            t(3000).await;
+            crate::log("phase post_scroll_idle");
+            t(2000).await;
+            let _ = this.update(cx, |_, cx| {
+                app::call(cx, |b| {
+                    let _ = b.player_play();
+                });
+            });
+            t(4000).await;
+            crate::log("phase playing");
+            t(2000).await;
+            let _ = this.update(cx, |sh, cx| sh.navigate(Route::NowPlaying, cx));
+            t(4000).await;
+            crate::log("phase np_start");
+            t(12_000).await;
+            crate::log("phase np_end");
+            let _ = this.update(cx, |sh, cx| sh.navigate(Route::Tracks, cx));
+            t(2500).await;
             crate::log("phase done");
         })
         .detach();
@@ -359,6 +421,9 @@ impl Shell {
             Event::PlayerState(s) => {
                 let live = !self.suspended;
                 let changed = self.player.read(cx).current_id() != s.track.as_ref().map(|t| t.id.as_str()) || self.player.read(cx).state.status != s.status;
+                if changed {
+                    crate::log(&format!("player status={:?} track={:?} err={:?}", s.status, s.track.as_ref().map(|t| t.id.as_str()), s.error));
+                }
                 self.player.update(cx, |p, cx| p.apply_state(*s, live, cx));
                 if changed {
                     self.refresh_source(cx);

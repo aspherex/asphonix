@@ -407,3 +407,33 @@ mod tests {
         assert_eq!(caption_button_command(2, false), None);
     }
 }
+
+/// Private working set of this process in bytes (diagnostics, `$SONIX_LOG`).
+#[cfg(windows)]
+pub fn private_ws() -> u64 {
+    #[repr(C)]
+    struct Pmc {
+        cb: u32,
+        page_faults: u32,
+        peak_ws: usize,
+        ws: usize,
+        quota: [usize; 4],
+        pagefile: usize,
+        peak_pagefile: usize,
+        private_usage: usize,
+        private_ws: usize,
+        shared_commit: u64,
+    }
+    #[link(name = "kernel32")]
+    unsafe extern "system" {
+        fn GetCurrentProcess() -> *mut std::ffi::c_void;
+        fn K32GetProcessMemoryInfo(p: *mut std::ffi::c_void, c: *mut Pmc, cb: u32) -> i32;
+    }
+    let mut m = Pmc { cb: std::mem::size_of::<Pmc>() as u32, page_faults: 0, peak_ws: 0, ws: 0, quota: [0; 4], pagefile: 0, peak_pagefile: 0, private_usage: 0, private_ws: 0, shared_commit: 0 };
+    unsafe { K32GetProcessMemoryInfo(GetCurrentProcess(), &mut m, m.cb) };
+    m.private_ws as u64
+}
+#[cfg(not(windows))]
+pub fn private_ws() -> u64 {
+    0
+}
