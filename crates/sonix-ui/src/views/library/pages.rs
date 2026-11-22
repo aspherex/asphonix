@@ -95,6 +95,11 @@ impl AlbumsView {
                         cx.notify();
                     }
                 }
+                // native-only: any current answer (a failure too) ends the first-load skeleton
+                if !t.grid.loaded && epoch == t.grid.pager.epoch {
+                    t.grid.loaded = true;
+                    cx.notify();
+                }
             });
         })
         .detach();
@@ -196,6 +201,11 @@ impl ArtistsView {
                         t.grid.pager.total = p.total;
                         cx.notify();
                     }
+                }
+                // native-only: any current answer (a failure too) ends the first-load skeleton
+                if !t.grid.loaded && epoch == t.grid.pager.epoch {
+                    t.grid.loaded = true;
+                    cx.notify();
                 }
             });
         })
@@ -300,6 +310,10 @@ impl GenreDetailView {
                         t.grid.loaded = true;
                         cx.notify();
                     }
+                } else if !t.grid.loaded && epoch == t.grid.pager.epoch {
+                    // native-only: a failed first page ends the skeleton (the empty note shows instead)
+                    t.grid.loaded = true;
+                    cx.notify();
                 }
             });
         })
