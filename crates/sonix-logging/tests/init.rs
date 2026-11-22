@@ -17,6 +17,7 @@ fn init_writes_json_lines_to_the_dated_file_bridges_log_and_reloads() {
     tracing::debug!(target: "sonix_core::audio::engine", "debug before verbose");
     log::warn!(target: "symphonia_core::probe", "a dependency still on log");
     log::debug!(target: "symphonia_core::probe", "filtered log debug");
+    log::error!(target: "", "a record without a target");
     sonix_logging::set_verbose(true);
     tracing::debug!(target: "sonix_core::audio::engine", "debug after verbose");
     std::thread::Builder::new().name("worker".into()).spawn(|| tracing::info!(target: "sonix_real", "from another thread")).unwrap().join().unwrap();
@@ -41,6 +42,7 @@ fn init_writes_json_lines_to_the_dated_file_bridges_log_and_reloads() {
     assert_eq!(dep["level"], "WARN");
     assert!(dep["fields"].as_object().unwrap().is_empty(), "log.* bridge fields are dropped: {dep}");
     assert!(find("filtered log debug").is_none());
+    assert_eq!(find("a record without a target").unwrap()["target"], "init", "empty target -> module path");
     assert!(find("debug before verbose").is_none());
     assert!(find("debug after verbose").is_some());
     assert!(find("debug after quiet").is_none());

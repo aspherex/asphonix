@@ -1213,6 +1213,7 @@ impl Engine {
                 let _ = reply.send(self.player_state());
             }
             EngineCommand::Stop => {
+                tracing::info!("playback stopped");
                 // Through the writer: logout / account switch follow up with
                 // `FlushListen` before wiping, so the row is never orphaned
                 // in the next account, and this handler never waits on SQLite.
@@ -1327,6 +1328,7 @@ impl Engine {
     /// then starts on arrival — see `poll_autoplay`). Going *back* past the
     /// first track never autoplays.
     fn stop_at_end_of_queue(&mut self, forward: bool) {
+        tracing::info!("playback: end of queue");
         if forward && self.prefs.autoplay() && self.autoplay.inflight.is_some() {
             self.autoplay.start_on_arrival = true;
             self.status = PlaybackStatus::Loading;
@@ -1720,6 +1722,16 @@ impl Engine {
         } else {
             PlaybackStatus::Playing
         };
+        if let Some(pb) = &self.playback {
+            tracing::info!(
+                track_id = %p.id,
+                sample_rate = pb.negotiated.sample_rate,
+                format = %pb.negotiated.format_label(""),
+                mode = ?pb.negotiated.mode,
+                paused = p.start_paused,
+                "playback started"
+            );
+        }
         self.last_error = None; // a track is actually playing again
         self.consecutive_failures = 0;
         let queue = self.queue.clone();

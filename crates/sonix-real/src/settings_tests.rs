@@ -683,3 +683,24 @@ fn logout_disarms_the_deferred_restore() {
     let _ = b.auth_logout();
     assert!(!b.0.restore_retry.load(std::sync::atomic::Ordering::SeqCst));
 }
+
+/// A failed login is logged (default filter) with the error, without the user name, password or server address.
+/// (Request URLs at trace carry the host, never credentials: see the subsonic redaction test.)
+#[test]
+fn failed_login_is_logged_without_credentials() {
+    let e = Env::new("login-log");
+    let closed = TcpListener::bind("127.0.0.1:0").unwrap();
+    let url = format!("http://{}", closed.local_addr().unwrap());
+    drop(closed);
+    let b = e.open();
+    let logs = sonix_logging::test_support::capture_with_filter(false);
+    let r = b.auth_connect(ConnectRequest { url: url.clone(), username: "carol-user".into(), password: "pw-secret-456".into() });
+    assert!(r.is_err());
+    let ev = logs.find("login failed").expect("login failure logged");
+    assert_eq!(ev["level"], "WARN");
+    assert!(ev["fields"]["error"].is_string());
+    let text = logs.text();
+    for secret in ["carol-user", "pw-secret-456", url.as_str()] {
+        assert!(!text.contains(secret), "{secret} in {text}");
+    }
+}

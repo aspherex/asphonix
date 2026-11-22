@@ -45,6 +45,6 @@ impl<S: Subscriber> Layer<S> for Forward {
         let meta = normalized.as_ref().unwrap_or_else(|| event.metadata());
         let mut f = Fields::default();
         event.record(&mut f);
-        (self.sink)(&format_line(meta.target(), &f));
+        (self.sink)(&format_line(crate::json::target_of(meta), &f));
     }
 }

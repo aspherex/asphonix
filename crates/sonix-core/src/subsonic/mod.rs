@@ -153,11 +153,11 @@ impl Client {
         url
     }
 
-    /// Sends one GET. Logged at debug only, with the auth params redacted: the connection monitor probes
+    /// Sends one GET. Logged at trace (failures at debug), with the auth params redacted: the connection monitor probes
     /// periodically, and an offline server must not turn that into periodic warnings. Callers log failures
     /// that matter.
     async fn send_logged(&self, endpoint: &str, url: Url) -> Result<reqwest::Response, IpcError> {
-        tracing::debug!(endpoint, url = %crate::redact::redact_url(url.as_str()), "subsonic request");
+        tracing::trace!(endpoint, url = %crate::redact::redact_url(url.as_str()), "subsonic request");
         self.http.get(url).send().await.map_err(|e| {
             let e = map_reqwest_err(e); // `without_url`: no auth params in the message
             tracing::debug!(endpoint, error = %e.message, "subsonic request failed");
@@ -212,7 +212,7 @@ impl Client {
         let resp = self.send_logged(endpoint, url).await?;
         let status = resp.status();
         let bytes = resp.bytes().await.map_err(map_reqwest_err)?;
-        tracing::debug!(endpoint, status = status.as_u16(), bytes = bytes.len(), duration_ms = started.elapsed().as_millis() as u64, "subsonic response");
+        tracing::trace!(endpoint, status = status.as_u16(), bytes = bytes.len(), duration_ms = started.elapsed().as_millis() as u64, "subsonic response");
         if !status.is_success() {
             return Err(IpcError {
                 code: if status == StatusCode::UNAUTHORIZED || status == StatusCode::FORBIDDEN {

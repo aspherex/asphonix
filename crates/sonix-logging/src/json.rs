@@ -98,6 +98,14 @@ impl JsonLayer {
     }
 }
 
+/// The event target; `log` records with an empty target (GPUI's) fall back to their module path.
+pub(crate) fn target_of<'a>(meta: &'a tracing::Metadata<'a>) -> &'a str {
+    match meta.target() {
+        "" => meta.module_path().unwrap_or(""),
+        t => t,
+    }
+}
+
 /// `2026-11-22T10:15:30.123Z` (UTC, milliseconds).
 pub(crate) fn ts_now() -> String {
     let t = time::OffsetDateTime::now_utc();
@@ -155,7 +163,7 @@ where
             "{{\"ts\":\"{}\",\"level\":\"{}\",\"target\":{},\"message\":{},\"fields\":{}",
             ts_now(),
             meta.level(),
-            json_str(meta.target()),
+            json_str(target_of(meta)),
             json_str(f.message.as_deref().unwrap_or("")),
             object(None, &f.map)
         );
