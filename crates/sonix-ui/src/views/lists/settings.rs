@@ -12,6 +12,7 @@ use crate::widgets::context_menu::{ContextMenu, MenuItem};
 use crate::widgets::text_input::{InputEvent, TextInput};
 use crate::widgets::ui::segmented;
 use crate::widgets::{hard_shadow, icon};
+use crate::widgets::tooltip::Tip;
 use gpui::{AnyElement, ClickEvent, ClipboardItem, Context, CursorStyle, Entity, EventEmitter, IntoElement, Render, ScrollHandle, Subscription, Timer, WeakEntity, Window, div, prelude::*, px};
 use sonix_api::format as fmt;
 use sonix_api::*;
@@ -367,7 +368,7 @@ impl Render for SettingsView {
             let mut out_rows: Vec<AnyElement> = vec![Self::row(&th, "Device", device_sel).into_any_element(), Self::row(&th, "Mode", pid("set.mode", mode_tog)).into_any_element()];
             if let Some(o) = &self.out {
                 if let Some(e) = &o.exclusive_error {
-                    out_rows.push(Self::row(&th, "Exclusive unavailable", div().flex().child(txt(&th, MONO_DATA, e.clone()).color(th.clip))).into_any_element());
+                    out_rows.push(Self::row(&th, "Exclusive unavailable", div().id("excl-err").tip(e.clone(), th).flex().child(txt(&th, MONO_DATA, e.clone()).color(th.clip))).into_any_element());
                 }
                 if let Some(sr) = o.sample_rate {
                     let khz = (sr as f64 / 1000.0 * 10.0).round() / 10.0;

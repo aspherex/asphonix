@@ -15,6 +15,7 @@ use crate::widgets::context_menu::{ContextMenu, MenuItem};
 use crate::widgets::text_input::{InputEvent, TextInput};
 use crate::widgets::ui::segmented;
 use crate::widgets::{hard_shadow, icon, icon_g};
+use crate::widgets::tooltip::Tip;
 use gpui::{AnyElement, ClickEvent, Context, CursorStyle, Entity, EventEmitter, IntoElement, MouseButton, Render, SharedString, Subscription, Timer, WeakEntity, Window, div, prelude::*, px, rgba};
 use sonix_api::*;
 use std::sync::Arc;
@@ -464,6 +465,7 @@ impl Render for SmartEditor {
                 chips = chips.child(
                     div()
                         .id(("ed-chip", i))
+                        .tip(p.description.clone(), th)
                         .px(px(space::SM))
                         .py(px(4.))
                         .bg(th.high)
