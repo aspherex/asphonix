@@ -1,6 +1,7 @@
-//! Render accounting for CPU work (diagnostics only, active when `$SONIX_LOG` is set): how often each view's
-//! `render()` runs and what a whole window frame costs on the UI thread (root `render()` start to the end of the
-//! paint pass), logged once a second as `renders/s root=.. tracks=.. ... frame_ms avg=.. max=..`.
+//! Render accounting for CPU work (diagnostics only, active when `$SONIX_RCOUNT` is set; the lines go to
+//! `$SONIX_LOG`): how often each view's `render()` runs and what a whole window frame costs on the UI thread (root
+//! `render()` start to the end of the paint pass), logged once a second as
+//! `renders/s root=.. tracks=.. ... frame_ms avg=.. max=..`.
 use std::collections::BTreeMap;
 use std::sync::Mutex;
 use std::sync::atomic::{AtomicBool, Ordering::Relaxed};
@@ -20,9 +21,10 @@ struct Acc {
 }
 static ACC: Mutex<Acc> = Mutex::new(Acc { hits: BTreeMap::new(), frames: 0, frame_ns: 0, frame_max_ns: 0, phase_ns: [0; 3], start: None, prepaint_at: None, paint_at: None });
 
-/// Call once at startup: turns the counters on when `$SONIX_LOG` is set and starts the 1 Hz logger.
+/// Call once at startup: turns the counters on when `$SONIX_RCOUNT` (and `$SONIX_LOG`, where the lines go) is set and
+/// starts the 1 Hz logger.
 pub fn init() {
-    if std::env::var_os("SONIX_LOG").is_none() {
+    if std::env::var_os("SONIX_RCOUNT").is_none() || std::env::var_os("SONIX_LOG").is_none() {
         return;
     }
     ON.store(true, Relaxed);

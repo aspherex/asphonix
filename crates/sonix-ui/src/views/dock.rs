@@ -38,24 +38,27 @@ pub struct DockView {
     title_hover: bool,
     _sub: Subscription,
     pos_gate: crate::app::PosGate,
+    scale: f32,
 }
 
 impl DockView {
     pub fn new(backend: Arc<dyn Backend>, art: ArtHandle, player: &Entity<PlayerModel>, cx: &mut Context<Self>) -> Self {
         // cached view (`crate::part`): repaint when the shown second or the seek bar's pixel changes, not on every tick
         let sub = cx.observe(player, |this: &mut Self, p, cx| {
-            let steps = f32::from(this.seek.bounds.get().size.width) * 2.0;
+            // the seek bar width in device px (`scale`: the window scale factor at the last render)
+            let steps = f32::from(this.seek.bounds.get().size.width) * this.scale;
             if this.pos_gate.changed(&p.read(cx).state, steps) {
                 cx.notify();
             }
         });
-        Self { backend, art, player: player.clone(), seek: slider::new_handle(), seek_preview: None, vol: slider::new_handle(), last_audible: 0.5, art_hover: false, title_hover: false, _sub: sub, pos_gate: Default::default() }
+        Self { backend, art, player: player.clone(), seek: slider::new_handle(), seek_preview: None, vol: slider::new_handle(), last_audible: 0.5, art_hover: false, title_hover: false, _sub: sub, pos_gate: Default::default(), scale: 1.0 }
     }
 }
 
 impl Render for DockView {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         crate::rcount::hit("dock");
+        self.scale = window.scale_factor();
         let th: Theme = app::theme(cx);
         let ps = self.player.read(cx).state.clone();
         let vw = f32::from(window.viewport_size().width);
