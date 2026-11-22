@@ -74,6 +74,7 @@ crates/sonix-core   Subsonic client, library DB + sync, audio engine, scrobbling
 crates/sonix-real   Backend implementation on top of sonix-core (+ cover-art cache)
 crates/sonix-ui     the GPUI app, binary `sonix`
 crates/sonix-mcp    MCP stdio server `sonix-mcp` that connects to a running SONIX
+crates/sonix-logging  structured JSON-lines logging (subscriber, daily files, runtime verbosity) for both binaries
 assets/             fonts (TTF, SIL OFL), icons (SVG), pre-rendered backdrops
 scripts/            perf harness and memory tools (docs/PERF.md), font fix-up script
 docs/               PERF, GPUI-GAPS, UPDATES

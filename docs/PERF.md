@@ -37,6 +37,7 @@ Other diagnostics (all off unless the variable is set):
 | Variable | Effect |
 |---|---|
 | `SONIX_LOG=<file>` | timestamped startup/phase/backend log lines |
+| `SONIX_LOG_LEVEL=<filter>` | EnvFilter directives for the JSON log files (`<data dir>/logs/sonix.YYYY-MM-DD.jsonl`), e.g. `sonix_core::audio=trace,warn`; default `sonix=info,warn`, Settings > Verbose logging = `sonix=debug,warn`; the variable wins over the setting |
 | `SONIX_FPSLOG=1` | frame-interval statistics |
 | `SONIX_RCOUNT=1` | per-view render counters (needs `SONIX_LOG`) |
 | `SONIX_PAUSE_MS=<ms>` | toggle play/pause once after `<ms>` (CPU of a real pause without input) |
