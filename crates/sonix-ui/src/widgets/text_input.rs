@@ -552,7 +552,12 @@ impl EntityInputHandler for TextInput {
             .or(self.marked_range.clone())
             .unwrap_or(self.selected_range.clone());
 
-        self.history.record(&self.content, &self.selected_range, &range, new_text);
+        // committing an IME composition: its snapshot was taken when it started (`replace_and_mark_text_in_range`)
+        if self.marked_range.is_none() {
+            self.history.record(&self.content, &self.selected_range, &range, new_text);
+        } else {
+            self.history.typing_at = None;
+        }
         self.content =
             (self.content[0..range.start].to_owned() + new_text + &self.content[range.end..])
                 .into();
@@ -576,6 +581,11 @@ impl EntityInputHandler for TextInput {
             .or(self.marked_range.clone())
             .unwrap_or(self.selected_range.clone());
 
+        // a composition starts: snapshot the text before it, so undo never restores half-composed text
+        if self.marked_range.is_none() {
+            self.history.record(&self.content, &self.selected_range, &range, "");
+            self.history.typing_at = None;
+        }
         self.content =
             (self.content[0..range.start].to_owned() + new_text + &self.content[range.end..])
                 .into();
