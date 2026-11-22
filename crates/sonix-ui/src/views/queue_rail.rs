@@ -13,6 +13,7 @@ use crate::theme::Theme;
 use crate::tracking::{BODY_LG, BODY_MD, BODY_SM, LABEL_CAPS, MONO_CODE, MONO_DATA};
 use crate::widgets::context_menu::ContextMenu;
 use crate::widgets::{hard_shadow, icon};
+use crate::widgets::tooltip::Tip;
 use crate::selection::Selection;
 use crate::rail_dnd::{self, Gap, Hit, RowBox};
 use std::cell::{Cell, RefCell};
@@ -549,7 +550,7 @@ impl QueueRail {
                     let rows = self.rows.clone();
                     canvas(move |b, _, _| { rows.borrow_mut().insert(i, (b, user)); }, |_, _, _, _| {}).absolute().top_0().left_0().size_full()
                 })
-                .child(icon("drag", 13., th.muted))
+                .child(div().flex().flex_none().cursor(CursorStyle::OpenHand).child(icon("drag", 13., th.muted))) // `.drag { cursor: grab }`
                 .child(
                     div()
                         .flex_1()
@@ -558,7 +559,7 @@ impl QueueRail {
                         .flex_col()
                         .child(div().flex().min_w_0().child(txt(&th, BODY_MD, t.title.clone()).color(th.text).ellipsis()))
                         .child(div().flex().min_w_0().child(entity_link(&th, (LinkKind::Artist, t.artist_id.as_deref()), &t.artist, MONO_CODE, th.muted, &format!("rail{i}"), window)))
-                        .children((flow_rows && it.origin != QueueItemOrigin::User).then(|| div().flex().min_w_0().h(px(14.)).child(txt(&th, MONO_CODE, fmt::flow_line(it.flow.as_ref())).color(th.accent_fg).ellipsis()))),
+                        .children((flow_rows && it.origin != QueueItemOrigin::User).then(|| div().id(("rail-flow", idx)).tip("Why this track is here", th).flex().min_w_0().h(px(14.)).child(txt(&th, MONO_CODE, fmt::flow_line(it.flow.as_ref())).color(th.accent_fg).ellipsis()))),
                 )
                 .child(div().flex_none().child(txt(&th, MONO_CODE, fmt::format_duration(Some(t.duration))).color(th.muted)))
                 .child(pid(format!("rail.row.{n}.more"),

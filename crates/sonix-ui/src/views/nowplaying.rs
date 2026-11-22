@@ -12,6 +12,7 @@ use crate::theme::Theme;
 use crate::tracking::{BODY_LG, BODY_MD, BODY_SM, HEADLINE_LG, HEADLINE_SM, LABEL_CAPS, MONO_CODE, MONO_DATA, MONO_METRIC, TypeSpec};
 use crate::widgets::slider::{self, OnChange, SliderHandle, slider};
 use crate::widgets::{hard_shadow, icon, icon_g};
+use crate::widgets::tooltip::Tip;
 use gpui::{
     AnyElement, Bounds, Context, CursorStyle, Div, ElementId, Entity, Hsla, IntoElement, MouseButton, Render, SharedString, Stateful, Subscription, Window, canvas, div, fill, point, prelude::*, px, size,
 };
@@ -753,7 +754,7 @@ impl Render for NowPlayingView {
                 .gap(px(12.))
                 .max_w_full()
                 .min_w_0()
-                .child(pid("np.title.text", div().flex().min_w_0().child(txt(&th, HEADLINE_LG, t.title.clone()).color(th.text).ellipsis())))
+                .child(pid("np.title.text", div().id("np-title").tip(t.title.clone(), th).flex().min_w_0().child(txt(&th, HEADLINE_LG, t.title.clone()).color(th.text).ellipsis())))
                 .child(div().flex_none().pb(px(3.)).child(pid("np.title.dur", div().child(txt(&th, MONO_METRIC, fmt::format_duration(Some(ps.duration_sec))).color(th.accent_fg))))),
         );
         let link = |id: &'static str, label: String, strong: bool, nav: Option<Route>| {
@@ -838,6 +839,7 @@ impl Render for NowPlayingView {
                         let title: SharedString = t.title.clone().into();
                         pid(format!("np.star.{n}"), div()
                             .id(("np-rate", n as usize))
+                            .tip(if n == 1 { "1 star: purged from the library nightly".to_string() } else { format!("{n} stars") }, th)
                             .group("hv")
                             .w(px(22.))
                             .h(px(30.))
@@ -1125,6 +1127,7 @@ impl Render for NowPlayingView {
                 .child({
                     let on = ps.loop_a.is_some();
                     chip("np-loop", th, 40.0, 12.0, th.low, on)
+                        .tip("A to B loop: press to set A, again to set B, again to clear (A)", th)
                         .child(chip_icon(th, "loop-ab", 15., on))
                         .child(txt(&th, MONO_DATA, loop_label))
                         .on_click(cx.listener(|_, _, _, cx| app::call(cx, |b| drop(b.player_loop_cycle()))))
@@ -1175,7 +1178,7 @@ impl Render for NowPlayingView {
                         .child(slider("np-vol", th, &self.vol, ps.volume as f32, None, vol_cb)),
                 )
                 .child(div().min_w(px(56.)).flex().justify_end().child(txt(&th, MONO_CODE, fmt::volume_label(&ps)).color(if muted { th.muted } else { th.accent_fg })))
-                .child(chip("np-mute", th, 32.0, 12.0, th.low, muted).child(txt(&th, MONO_DATA, format!("MUTE [{}]", key_lbl("m")))).on_click(cx.listener(|this, _, _, cx| this.toggle_mute(cx)))),
+                .child(chip("np-mute", th, 32.0, 12.0, th.low, muted).tip("Mute (M)", th).child(txt(&th, MONO_DATA, format!("MUTE [{}]", key_lbl("m")))).on_click(cx.listener(|this, _, _, cx| this.toggle_mute(cx)))),
         );
         // up next
         let more = self.queue_total.saturating_sub(self.next_start);
@@ -1201,6 +1204,7 @@ impl Render for NowPlayingView {
                 .child(
                     div()
                         .id("np-un-main")
+                        .tip("Show the next tracks", th)
                         .group("hv")
                         .flex_1()
                         .min_w_0()
@@ -1252,6 +1256,7 @@ impl Render for NowPlayingView {
                             let idx = start + k;
                             div()
                                 .id(("np-qrow", k))
+                                .tip("Play this track", th)
                                 .w_full()
                                 .min_h(px(30.))
                                 .px(px(12.))
@@ -1281,7 +1286,7 @@ impl Render for NowPlayingView {
                                 // `.q-flow { margin-top: -6px; padding: 0 0 5px 32px }`
                                 .children({
                                     let line = fmt::flow_line(u.flow.as_ref());
-                                    (!line.is_empty()).then(|| div().flex().min_w_0().mt(px(-6.)).pb(px(5.)).pl(px(32.)).child(txt(&th, MONO_CODE, line).color(th.accent_fg).ellipsis()))
+                                    (!line.is_empty()).then(|| div().id(("np-qflow", k)).tip("Why this track is next", th).flex().min_w_0().mt(px(-6.)).pb(px(5.)).pl(px(32.)).child(txt(&th, MONO_CODE, line).color(th.accent_fg).ellipsis()))
                                 })
                                 .on_click(cx.listener(move |this, _, _, cx| {
                                     this.upnext_open = false;
@@ -1383,6 +1388,7 @@ impl NowPlayingView {
             .children(t.map(|_| {
                 let mut d = div()
                     .id("np-source")
+                    .tip_opt(source_route.as_ref().map(|_| "Go to source"), th)
                     .flex()
                     .flex_row()
                     .min_w_0()
@@ -1397,6 +1403,7 @@ impl NowPlayingView {
             }))
             .children(t.map(|_| div().w(px(1.)).h(px(16.)).flex_none().bg(th.border)))
             .children(t.map(|_| {
+                let ft = line.clone();
                 let inner: AnyElement = if let Some(e) = &ps.error {
                     txt(&th, MONO_DATA, e.clone()).color(th.clip).ellipsis().into_any_element()
                 } else if loading {
@@ -1404,12 +1411,13 @@ impl NowPlayingView {
                 } else {
                     txt(&th, MONO_DATA, line).color(th.muted).ellipsis().into_any_element()
                 };
-                pid("np.strip.fmt", div().flex().flex_1().min_w_0().child(inner))
+                pid("np.strip.fmt", div().id("np-fmt").tip(ft, th).flex().flex_1().min_w_0().child(inner))
             }))
             .child(div().when(t.is_none(), |d| d.flex_1().min_w_0()).when(t.is_some(), |d| d.flex_none().w(px(0.))))
             .child(pid(
                 "np.hbtn.lyrics",
                 chip("np-lyrics", th, 28.0, 12.0, th.mid, lyr_on)
+                    .tip("Lyrics (T)", th)
                     .child(chip_icon(th, "lyrics", 14., lyr_on))
                     .children((!compact).then(|| txt(&th, MONO_DATA, format!("LYRICS [{key_t}]"))))
                     .on_click(cx.listener(|this, _, _, cx| {
@@ -1420,7 +1428,7 @@ impl NowPlayingView {
             .children(track_id.map(|id| {
                 pid(
                     "np.hbtn.like",
-                    chip("np-like", th, 28.0, 8.0, th.mid, starred).child(chip_icon(th, if starred { "heart-filled" } else { "heart" }, 15., starred)).on_click(cx.listener(move |_, _, _, cx| {
+                    chip("np-like", th, 28.0, 8.0, th.mid, starred).tip(if starred { "Liked - L to unlike" } else { "Like (L)" }, th).child(chip_icon(th, if starred { "heart-filled" } else { "heart" }, 15., starred)).on_click(cx.listener(move |_, _, _, cx| {
                         let id = id.clone();
                         app::call(cx, move |b| {
                             let req = StarRequest { id, kind: StarTargetType::Track };
@@ -1432,6 +1440,7 @@ impl NowPlayingView {
             .child(pid(
                 "np.hbtn.min",
                 chip("np-close", th, 28.0, 12.0, th.mid, false)
+                    .tip("Close (Esc)", th)
                     .child(chip_icon(th, "collapse", 14., false))
                     .children((!compact).then(|| txt(&th, MONO_DATA, "MINIMIZE [ESC]")))
                     .on_click(cx.listener(|_, _, _, cx| cx.emit(NpEvent::Close))),

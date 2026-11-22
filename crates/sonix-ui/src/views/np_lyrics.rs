@@ -6,6 +6,7 @@ use crate::probe::pid;
 use crate::text::txt;
 use crate::theme::Theme;
 use crate::tracking::{BODY_LG, HEADLINE_SM, LABEL_CAPS, MONO_CODE, MONO_DATA};
+use crate::widgets::tooltip::Tip;
 use gpui::{AnyElement, Context, CursorStyle, IntoElement, MouseButton, ScrollHandle, ScrollWheelEvent, Window, div, point, prelude::*, px};
 use sonix_api::*;
 use std::collections::HashMap;
@@ -172,6 +173,7 @@ impl NowPlayingView {
                         let spec = crate::tracking::TypeSpec { caps: false, ..HEADLINE_SM };
                         row = row
                             .cursor(CursorStyle::PointingHand)
+                            .tip("Seek to this line", th)
                             .text_color(col)
                             .hover(move |s| if cur { s } else { s.text_color(th.text) })
                             .child(crate::typo::ts(&th, spec).child(text))
