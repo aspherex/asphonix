@@ -36,6 +36,8 @@ Bit-perfect on Windows · light on resources · open to AI agents.
 - **Instant browse and search** from a local index of your server library.
 - **Now Playing** with waveform seek bar, spectrum, peak meters and synced lyrics.
 - **Smart playlists and Flow**, a queue ordering by tempo, key and genre.
+- **History, artist pages and a track-change preview** that appears while the app sits in the background.
+- **Dark and light themes** with WCAG 2.2 AA text contrast; English and German UI.
 - **MCP bridge for AI agents**, opt-in and local. No telemetry.
 
 | | Compatibility at a glance |
@@ -130,10 +132,13 @@ goes in and what stays out.
 | | |
 |---|---|
 | **Playback** | Gapless · WASAPI exclusive or shared output · optional ReplayGain · A-B loop · ±10 s skips · session resume · optional play-queue sync with the server |
-| **Library** | Home, Albums, Artists, Tracks, Genres, History · playlists and Liked Songs · ratings and stars · local smart playlists with a rule editor · full-text search on a local SQLite (FTS5) mirror of your server library |
+| **Library** | Home, Albums, Artists, Tracks, Genres · playlists and Liked Songs · ratings and stars · local smart playlists with a rule editor · full-text search on a local SQLite (FTS5) mirror of your server library |
+| **Discovery** | **History**: your listening, day by day · artist pages with top tracks, biography and similar artists · genre browsing · "jump back in" sessions on Home |
 | **Now Playing** | Waveform seek bar · 28-band FFT spectrum · peak meters · synced lyrics |
 | **Queue** | Rolling queue window · drag-and-drop reordering · shuffle with artist spread · **Flow** ordering by tempo, key and genre (where your tags provide them) · autoplay / radio when the queue runs out |
-| **Desktop** | Windows media controls and media keys · scrobbling to your server · light and dark theme · multiple server profiles |
+| **Desktop** | **Track-change preview**: a small card in a screen corner of your choice when the track changes while ASPHONIX is in the background · Windows media controls and media keys · scrobbling to your server · light and dark theme · multiple server profiles |
+| **Languages** | English and German, switchable at runtime (follows the OS language by default) |
+| **Accessibility** | Text contrast meets WCAG 2.2 AA (4.5:1) for every text colour on every surface, in both the dark and the light theme, enforced by tests · visible keyboard focus on every control · keyboard shortcuts for all common actions ([status](docs/ACCESSIBILITY.md)) |
 | **Agents** | MCP bridge with 17 read tools and 8 opt-in control tools ([details](#-agentic-interaction-mcp)) |
 
 <table>
@@ -303,10 +308,12 @@ For a detailed trace, start ASPHONIX with the environment variable `ASPHONIX_LOG
 </details>
 
 <details>
-<summary><b>Can I use a screen reader?</b></summary>
+<summary><b>How accessible is it? Can I use a screen reader?</b></summary>
 
-Not yet. The UI toolkit (GPUI) has no accessibility support so far, so screen readers see an unlabeled window
-([docs/GPUI-GAPS.md](docs/GPUI-GAPS.md)).
+Text contrast meets WCAG 2.2 AA in both themes (checked by tests), every control shows a visible keyboard focus
+ring, and common actions have shortcuts. Not yet: screen readers (the UI toolkit, GPUI, has no published
+accessibility support, so screen readers see an unlabeled window), text zoom, and a reduce-motion setting.
+The full assessment against WCAG 2.2 AA is in [docs/ACCESSIBILITY.md](docs/ACCESSIBILITY.md).
 </details>
 
 ## // Contributing

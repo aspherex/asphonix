@@ -420,10 +420,7 @@ fn wave_canvas(th: Theme, d: WaveDraw) -> impl IntoElement {
             let gap = s.round().max(1.0);
             let mid = h / 2.0;
             let played_x = d.ratio * w;
-            let mut top = 64.0f32;
-            for i in 0..d.filled.min(d.buckets.len()) {
-                top = top.max(d.buckets[i] as f32);
-            }
+            let top = d.buckets.iter().take(d.filled).fold(64.0f32, |t, &v| t.max(v as f32));
             if let Some(a) = d.loop_a {
                 let ax = a * w;
                 let bx = d.loop_b.map(|b| b * w).unwrap_or(ax);
