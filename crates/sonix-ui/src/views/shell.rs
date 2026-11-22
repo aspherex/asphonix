@@ -1047,3 +1047,7 @@ impl Shell {
         .detach();
     }
 }
+
+#[cfg(test)]
+#[path = "shell_tests.rs"]
+mod gpui_tests;

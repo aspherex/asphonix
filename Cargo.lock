@@ -5711,11 +5711,13 @@ dependencies = [
  "gpui",
  "image",
  "log",
+ "rand 0.9.5",
  "raw-window-handle",
  "serde",
  "serde_json",
  "sonix-api",
  "sonix-real",
+ "sonix-testkit",
  "unicode-segmentation",
 ]
 

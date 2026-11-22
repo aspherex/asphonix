@@ -732,3 +732,7 @@ impl Render for TracksView {
             )
     }
 }
+
+#[cfg(test)]
+#[path = "tracks_tests.rs"]
+pub(crate) mod gpui_tests;

@@ -129,13 +129,19 @@ pub mod size_hook {
     }
 }
 
-#[cfg(windows)]
+#[cfg(all(windows, not(test)))]
 pub fn hwnd_of(window: &gpui::Window) -> Option<isize> {
     use raw_window_handle::{HasWindowHandle, RawWindowHandle};
     match HasWindowHandle::window_handle(window).ok()?.as_raw() {
         RawWindowHandle::Win32(h) => Some(h.hwnd.get()),
         _ => None,
     }
+}
+
+/// No native handle: other platforms, and GPUI test windows (`TestWindow::window_handle` is `unimplemented!`).
+#[cfg(any(not(windows), test))]
+pub fn hwnd_of(_: &gpui::Window) -> Option<isize> {
+    None
 }
 
 
