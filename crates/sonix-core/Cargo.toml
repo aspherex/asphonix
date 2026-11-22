@@ -49,3 +49,4 @@ cpal = "0.15"
 
 [dev-dependencies]
 minisign = "0.7"
+proptest.workspace = true

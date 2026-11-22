@@ -20,6 +20,8 @@ rand = "0.8"
 chrono = "0.4"
 url = "2"
 image = { version = "0.25.1", default-features = false }
+# tests only
+proptest = { version = "1.12", default-features = false, features = ["std"] }
 
 [profile.release]
 opt-level = 3
