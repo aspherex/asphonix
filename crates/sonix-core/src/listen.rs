@@ -353,7 +353,7 @@ pub fn spawn_feedback(db: &Arc<Db>, track_id: &str, kind: FeedbackKind, value: O
     let at = chrono::Utc::now().timestamp_millis();
     crate::rt::spawn_blocking(move || {
         if let Err(e) = record_feedback(&db, &id, at, kind, value) {
-            log::warn!("failed to record feedback event: {}", e.message);
+            tracing::warn!(error = %e.message, "failed to record feedback event");
         }
     });
 }
@@ -384,7 +384,7 @@ pub fn spawn_writer(db: Arc<Db>) -> UnboundedSender<WriterMsg> {
                     match msg {
                         WriterMsg::Session(s) => {
                             if let Err(e) = insert_session(&db, &s) {
-                                log::warn!("failed to record listen event: {}", e.message);
+                                tracing::warn!(error = %e.message, "failed to record listen event");
                             }
                         }
                         WriterMsg::Flush(reply) => {

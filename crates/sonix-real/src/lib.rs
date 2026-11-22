@@ -156,6 +156,9 @@ impl RealBackend {
         let db = Arc::new(Db::open(&data).expect("library db"));
         let client: Arc<std::sync::RwLock<Option<Client>>> = Arc::new(std::sync::RwLock::new(None));
         let settings = secrets::load_settings(&dir);
+        if settings.verbose_logging {
+            sonix_logging::set_verbose(true); // the stored "Verbose logging" setting (no-op before `sonix_logging::init`)
+        }
         let prefs = Arc::new(sonix_core::audio::Prefs::new(settings.autoplay_enabled, settings.sync_play_queue, settings.replay_gain_mode));
         prefs.set_play_threshold_sec(settings.play_threshold_sec);
         let scrobbling = Arc::new(std::sync::atomic::AtomicBool::new(settings.scrobbling_enabled));
@@ -339,7 +342,22 @@ impl RealBackend {
     /// Probe, store the password (only after a successful probe), persist config + profile list, install the client.
     fn connect(&self, url: &str, username: &str, password: &str, save: bool) -> ApiResult<ServerCapabilities> {
         let client = Client::new(url, username, password).map_err(err)?;
-        let caps = self.0.rt.block_on(client.probe_capabilities()).map_err(err)?;
+        // No user name or server URL in the log: the user travels as the `u` auth parameter.
+        let caps = match self.0.rt.block_on(client.probe_capabilities()) {
+            Ok(c) => c,
+            Err(e) => {
+                tracing::warn!(error = %e.message, "login failed");
+                return Err(err(e));
+            }
+        };
+        tracing::info!(
+            server_type = %caps.server_type,
+            server_version = %caps.server_version,
+            api_version = %caps.api_version,
+            ping_ms = caps.ping_ms,
+            track_count = caps.track_count,
+            "login: connected"
+        );
         let wire = wire_caps(&caps);
         let previous = self.0.session.lock().unwrap().cfg.clone();
         if save {

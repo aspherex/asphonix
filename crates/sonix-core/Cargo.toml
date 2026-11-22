@@ -14,7 +14,7 @@ serde.workspace = true
 serde_json.workspace = true
 thiserror = "1"
 tokio = { workspace = true, features = ["rt-multi-thread", "macros", "time", "sync", "fs", "net"] }
-log.workspace = true
+tracing.workspace = true
 reqwest = { version = "0.12", default-features = false, features = ["json", "gzip", "rustls-tls", "stream"] }
 url.workspace = true
 md-5 = "0.10"
@@ -48,4 +48,5 @@ keyring = { version = "3", features = ["sync-secret-service", "crypto-rust"] }
 cpal = "0.15"
 
 [dev-dependencies]
+sonix-logging = { path = "../sonix-logging", features = ["test-support"] }
 minisign = "0.7"

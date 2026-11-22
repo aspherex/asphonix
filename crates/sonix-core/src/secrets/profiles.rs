@@ -131,7 +131,7 @@ fn load_unlocked(config_dir: &Path, active: Option<&ConnectionConfig>) -> Vec<St
         Ok(data) => match serde_json::from_slice::<ProfilesFile>(&data) {
             Ok(file) => file.profiles,
             Err(e) => {
-                log::warn!("profiles.json is unreadable ({e}); moving it aside");
+                tracing::warn!("profiles.json is unreadable ({e}); moving it aside");
                 let _ = fs::rename(&path, config_dir.join(format!("{PROFILES_FILE_NAME}.bad")));
                 Vec::new()
             }

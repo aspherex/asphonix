@@ -240,7 +240,7 @@ impl WaveformStore {
         let media = match self.source.open_shared(track_id, cancel.clone()) {
             Ok(m) => m,
             Err(e) => {
-                log::debug!("waveform: no shared source for {track_id}: {e}");
+                tracing::debug!(%track_id, error = %e, "waveform: no shared source");
                 // Keep what an earlier attempt got rather than nothing.
                 return match stale {
                     Some(item) => {
@@ -282,7 +282,7 @@ fn spawn_scan(media: Box<dyn MediaSource>, id: String, hint: f64, entry: Arc<Ent
         }
     });
     if let Err(e) = spawned {
-        log::warn!("waveform thread not started: {e}");
+        tracing::warn!(error = %e, "waveform thread not started");
         entry.finish_empty();
     }
 }
@@ -306,7 +306,7 @@ fn scan(media: Box<dyn MediaSource>, id: &str, duration_hint_sec: f64, entry: &E
     let probed = match symphonia::default::get_probe().format(&Hint::new(), mss, &fmt_opts, &MetadataOptions::default()) {
         Ok(p) => p,
         Err(e) => {
-            log::debug!("waveform: probe {id}: {e}");
+            tracing::debug!(track_id = %id, error = %e, "waveform: probe failed");
             return;
         }
     };

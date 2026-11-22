@@ -52,6 +52,23 @@ pub fn config_dir() -> Option<PathBuf> {
     base.map(|b| b.join(APP_IDENTIFIER))
 }
 
+/// Where logs go (`<data dir>/logs`): `SONIX_MCP_DATA_DIR`, else the per-OS equivalent of `%LOCALAPPDATA%` for
+/// [`APP_IDENTIFIER`]. Same rule as `sonix_real::data_dir`, so both binaries log into one folder.
+pub fn data_dir() -> Option<PathBuf> {
+    if let Some(d) = std::env::var_os("SONIX_MCP_DATA_DIR").filter(|d| !d.is_empty()) {
+        return Some(PathBuf::from(d));
+    }
+    #[cfg(windows)]
+    let base = std::env::var_os("LOCALAPPDATA").map(PathBuf::from);
+    #[cfg(target_os = "macos")]
+    let base = std::env::var_os("HOME").map(|h| PathBuf::from(h).join("Library/Application Support"));
+    #[cfg(all(not(windows), not(target_os = "macos")))]
+    let base = std::env::var_os("XDG_DATA_HOME")
+        .map(PathBuf::from)
+        .or_else(|| std::env::var_os("HOME").map(|h| PathBuf::from(h).join(".local/share")));
+    base.map(|b| b.join(APP_IDENTIFIER))
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Discovery {
     /// Named pipe name (`\\.\pipe\...`) or Unix socket path.

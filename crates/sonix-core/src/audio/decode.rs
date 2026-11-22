@@ -129,7 +129,7 @@ impl Session {
                     }
                     Err(e) => {
                         // Typically a seek past the end: treat as end of track.
-                        log::warn!("seek to {seconds:.3}s failed: {e}");
+                        tracing::warn!(seconds, error = %e, "seek failed");
                         Flow::Exit.then_eof(self, events)
                     }
                 }
@@ -337,7 +337,7 @@ fn run(
         let decoded = match s.decoder.decode(&packet) {
             Ok(d) => d,
             Err(SymphoniaError::DecodeError(e)) => {
-                log::debug!("skipping undecodable packet: {e}");
+                tracing::debug!(error = %e, "skipping undecodable packet");
                 continue;
             }
             Err(SymphoniaError::IoError(e)) if e.kind() == std::io::ErrorKind::UnexpectedEof => {

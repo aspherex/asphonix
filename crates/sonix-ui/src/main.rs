@@ -41,7 +41,7 @@ use gpui::{
 use sonix_api::Backend;
 use std::borrow::Cow;
 use std::io::Write;
-use std::sync::{Arc, OnceLock};
+use std::sync::{Arc, Mutex, OnceLock};
 use std::time::Instant;
 use views::shell::{self, Shell};
 
@@ -88,6 +88,10 @@ fn install_crash_log() {
             }
         }
         let _ = std::io::stderr().write_all(text.as_bytes());
+        // Best effort, after the synchronous write: `panic = "abort"` ends the process before the log
+        // writer thread flushes, so this line may never reach the file.
+        let loc = info.location().map(|l| format!("{}:{}", l.file(), l.line())).unwrap_or_default();
+        tracing::error!(target: "sonix::panic", thread = %name, location = %loc, "panic: {info}");
     }));
 }
 
@@ -105,33 +109,29 @@ macro_rules! fonts {
     ($($f:literal),*) => { vec![$(Cow::Borrowed(&include_bytes!(concat!("../../../assets/fonts/", $f, ".ttf"))[..])),*] };
 }
 
-/// Forwards the backend crates' `log` records (info and up, `sonix_*` targets only) to $SONIX_LOG. Without a
-/// logger every `log::info!` in sonix-core/sonix-real (session restore skipped, engine commands, sync) went nowhere.
-struct BackendLog;
-impl ::log::Log for BackendLog {
-    fn enabled(&self, m: &::log::Metadata) -> bool {
-        m.level() <= ::log::Level::Info && m.target().starts_with("sonix")
-    }
-    fn log(&self, r: &::log::Record) {
-        if self.enabled(r.metadata()) {
-            log(&format!("[{}] {}", r.target(), r.args()));
-        }
-    }
-    fn flush(&self) {}
-}
+/// The app log (`sonix-logging`): JSON lines in `logs/sonix.YYYY-MM-DD.jsonl` in the data dir. Held until quit
+/// and dropped after the backend shutdown, so the writer thread flushes the last lines.
+static LOG_GUARD: Mutex<Option<sonix_logging::LogGuard>> = Mutex::new(None);
 
-fn install_backend_log() {
-    static L: BackendLog = BackendLog;
-    if std::env::var_os("SONIX_LOG").is_some() && ::log::set_logger(&L).is_ok() {
-        ::log::set_max_level(::log::LevelFilter::Info);
+/// Installs the subscriber and returns the root span `app{run_id, version, os}` for the main thread. With
+/// $SONIX_LOG set, the backend crates' info-and-up `sonix*` events are also forwarded there as
+/// `[target] message k=v` lines, as before (the perf harness only parses `log()`'s own lines).
+fn install_logging() -> tracing::Span {
+    let mut cfg = sonix_logging::LogConfig::new(Some(sonix_real::data_dir().join("logs")), "sonix", env!("CARGO_PKG_VERSION"));
+    if std::env::var_os("SONIX_LOG").is_some() {
+        cfg.forward = Some(Box::new(log));
     }
+    let guard = sonix_logging::init(cfg);
+    let root = guard.root().clone();
+    *LOG_GUARD.lock().unwrap_or_else(|p| p.into_inner()) = Some(guard);
+    root
 }
 
 fn main() {
     T0.set(Instant::now()).ok();
     install_crash_log();
     rcount::init();
-    install_backend_log();
+    let _root = install_logging().entered();
     log("main_start");
     #[cfg(feature = "memprof")]
     memprof::start();
@@ -159,7 +159,11 @@ fn main() {
             let b = cx.global::<app::Services>().backend.clone();
             cx.on_app_quit(move |_| {
                 let b = b.clone();
-                async move { b.shutdown() }
+                async move {
+                    b.shutdown();
+                    tracing::info!("app quit");
+                    drop(LOG_GUARD.lock().unwrap_or_else(|p| p.into_inner()).take());
+                }
             })
             .detach();
         }

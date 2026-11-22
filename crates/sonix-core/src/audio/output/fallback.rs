@@ -95,6 +95,7 @@ pub fn spawn_render(
     let paused = Arc::new(AtomicBool::new(start_paused));
     let played_frames = Arc::new(AtomicU64::new(0));
     let gap_frames = Arc::new(AtomicU64::new(0)); // not tracked by the cpal fallback
+    let stream_parks = Arc::new(AtomicU64::new(0)); // never parks
     let volume_bits = Arc::new(AtomicU32::new(initial_volume.to_bits()));
     let (seek_tx, seek_rx) = std::sync::mpsc::channel::<Consumer<u8>>();
     let seeks_applied = Arc::new(AtomicU64::new(0));
@@ -104,6 +105,7 @@ pub fn spawn_render(
     let thread_played = played_frames.clone();
     let thread_volume = volume_bits.clone();
     let (ready_tx, ready_rx) = std::sync::mpsc::channel::<Result<(), String>>();
+    // rt-path:begin -- the cpal render thread and its callbacks: no logging (see windows.rs).
     let join = std::thread::Builder::new()
         .name("sonix-render-cpal".into())
         .spawn(move || {
@@ -195,8 +197,8 @@ pub fn spawn_render(
                         tap.peaks.record(peak_l, peak_r);
                     }
                 },
+                // The engine logs it ("output device lost"); no logging on cpal's audio threads.
                 move |err| {
-                    log::error!("cpal output stream error: {err}");
                     let _ = stream_events.send(RenderEvent::DeviceLost(err.to_string()));
                 },
                 None,
@@ -218,12 +220,14 @@ pub fn spawn_render(
             }
         })
         .map_err(|e| format!("spawn cpal render thread: {e}"))?;
+    // rt-path:end
     match ready_rx.recv_timeout(Duration::from_secs(5)) {
         Ok(Ok(())) => Ok(RenderHandle {
             stop,
             paused,
             played_frames,
             gap_frames,
+            stream_parks,
             volume_bits,
             seek_tx,
             seeks_applied,

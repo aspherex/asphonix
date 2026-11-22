@@ -69,7 +69,7 @@ impl crate::audio::autoplay::AutoplaySource for ServerAutoplay {
         match crate::rt::block_on(radio_pool(&client, &self.db, StarTargetType::Track, seed_track_id)) {
             Ok((ids, artists)) => ids.into_iter().zip(artists).collect(),
             Err(e) => {
-                log::info!("autoplay lookup failed: {}", e.message);
+                tracing::info!(error = %e.message, "autoplay lookup failed");
                 Vec::new()
             }
         }
@@ -119,7 +119,7 @@ pub async fn check_server_queue(
         Ok(Some(pq)) => pq,
         Ok(None) => return Ok(None),
         Err(e) => {
-            log::debug!("getPlayQueue failed: {}", e.message);
+            tracing::debug!(error = %e.message, "getPlayQueue failed");
             return Ok(None);
         }
     };

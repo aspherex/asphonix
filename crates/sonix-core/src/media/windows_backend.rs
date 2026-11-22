@@ -52,7 +52,7 @@ pub fn attach(host: Arc<dyn MediaHost>, hwnd: isize, generation: Arc<AtomicU64>,
     let smtc = match register(&host, hwnd) {
         Ok(s) => s,
         Err(e) => {
-            log::warn!("SMTC registration failed: {e}");
+            tracing::warn!(error = %e, "SMTC registration failed");
             return;
         }
     };
@@ -266,7 +266,7 @@ async fn fetch_and_set_thumbnail(host: &Arc<dyn MediaHost>, display: &Display, c
     let thumb = match thumbnail_stream(&bytes).await {
         Ok(t) => t,
         Err(e) => {
-            log::debug!("SMTC thumbnail stream failed: {e}");
+            tracing::debug!(error = %e, "SMTC thumbnail stream failed");
             return;
         }
     };

@@ -315,7 +315,7 @@ impl Updater {
         match self.check_inner().await {
             Ok(info) => Ok(info),
             Err(e) => {
-                log::debug!("update check failed: {e}");
+                tracing::debug!(error = %e, "update check failed");
                 Err(updater_err("Could not check for updates"))
             }
         }
@@ -364,24 +364,24 @@ impl Updater {
         let mut pending = self.pending.lock().unwrap_or_else(|p| p.into_inner()).clone();
         if pending.is_none() {
             self.check_inner().await.map_err(|e| {
-                log::debug!("update re-check failed: {e}");
+                tracing::debug!(error = %e, "update re-check failed");
                 updater_err("Could not check for updates")
             })?;
             pending = self.pending.lock().unwrap_or_else(|p| p.into_inner()).clone();
         }
         let p = pending.ok_or_else(|| updater_err("No update available"))?;
         let bytes = self.get_capped(&p.url, MAX_INSTALLER_BYTES, DOWNLOAD_TIMEOUT, progress).await.map_err(|e| {
-            log::debug!("update download failed: {e}");
+            tracing::debug!(error = %e, "update download failed");
             updater_err("Update download failed or could not be verified")
         })?;
         // Nothing is executed (or even written) before this passes.
         verify_signature(&bytes, &p.signature, &self.cfg.pubkey, &p.version).map_err(|e| {
-            log::debug!("update verification failed: {e}");
+            tracing::debug!(error = %e, "update verification failed");
             updater_err("Update download failed or could not be verified")
         })?;
         before_install();
         self.installer.install(&bytes, &p.version).map_err(|e| {
-            log::debug!("update install failed: {e}");
+            tracing::debug!(error = %e, "update install failed");
             updater_err("Update could not be installed")
         })
     }

@@ -63,8 +63,10 @@ pub fn handle_message(msg: &Value, cfg: &Config) -> Option<Value> {
         return id.map(|id| rpc_error(id, -32600, "Invalid Request"));
     };
     let Some(id) = id.filter(|i| i.is_string() || i.is_number()) else {
+        tracing::debug!(method, "notification");
         return None; // notification (or an unusable id): never answered
     };
+    tracing::debug!(method, "request");
     let params = obj.get("params");
     Some(match method {
         "initialize" => {
@@ -94,9 +96,21 @@ pub fn handle_message(msg: &Value, cfg: &Config) -> Option<Value> {
                 Some(a) if a.is_object() => a.clone(),
                 Some(_) => return Some(rpc_error(id, -32602, "arguments must be an object")),
             };
-            match call_app(cfg, name, &args) {
-                Ok(v) => rpc_result(id, tool_result(v.to_string(), false)),
-                Err(e) => rpc_result(id, tool_result(e.to_string(), true)),
+            // The tool name and timing only: arguments and results are library data, the token never leaves `client`.
+            let span = tracing::info_span!("mcp_call", mcp_tool = name);
+            let _enter = span.enter();
+            let started = std::time::Instant::now();
+            let r = call_app(cfg, name, &args);
+            let duration_ms = started.elapsed().as_millis() as u64;
+            match r {
+                Ok(v) => {
+                    tracing::info!(duration_ms, "tool call");
+                    rpc_result(id, tool_result(v.to_string(), false))
+                }
+                Err(e) => {
+                    tracing::warn!(duration_ms, error = %e, "tool call failed");
+                    rpc_result(id, tool_result(e.to_string(), true))
+                }
             }
         }
         _ => rpc_error(id, -32601, "Method not found"),

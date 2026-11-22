@@ -9,13 +9,6 @@ fn env_file() -> Vec<(String, String)> {
     std::fs::read_to_string(path).unwrap().lines().filter_map(|l| l.split_once('=').map(|(k, v)| (k.trim().to_string(), v.trim().trim_matches('"').to_string()))).collect()
 }
 
-struct L;
-impl log::Log for L {
-    fn enabled(&self, _: &log::Metadata) -> bool { true }
-    fn log(&self, r: &log::Record) { eprintln!("LOG {} {}", r.level(), r.args()); }
-    fn flush(&self) {}
-}
-
 #[test]
 #[ignore]
 fn login_profiles_restore_logout() {
@@ -26,7 +19,12 @@ fn login_profiles_restore_logout() {
     unsafe { std::env::set_var("LOCALAPPDATA", &tmp) };
     let kv = env_file();
     let get = |k: &str| kv.iter().find(|(a, _)| a == k).map(|(_, v)| v.clone()).unwrap();
-    let _ = log::set_logger(&L).map(|()| log::set_max_level(log::LevelFilter::Debug));
+    // The real logging stack (verbose, JSON file in the temp dir) plus info-and-up lines on stderr.
+    let mut cfg = sonix_logging::LogConfig::new(Some(tmp.join("logs")), "sonix", env!("CARGO_PKG_VERSION"));
+    cfg.verbose = true;
+    cfg.forward = Some(Box::new(|l| eprintln!("LOG {l}")));
+    let log_guard = sonix_logging::init(cfg);
+    let log_file = log_guard.file().map(std::path::Path::to_path_buf);
     let b = RealBackend::open();
     assert_eq!(b.auth_session_status().unwrap().state, ConnectionState::Disconnected);
     // wrong password must fail and change nothing
@@ -106,5 +104,10 @@ fn login_profiles_restore_logout() {
     b2.auth_logout().unwrap();
     assert_eq!(b2.auth_session_status().unwrap().state, ConnectionState::Disconnected);
     assert!(b2.profiles_list().unwrap().is_empty());
+    drop(log_guard);
+    let log = log_file.and_then(|p| std::fs::read_to_string(p).ok()).unwrap_or_default();
+    assert!(!log.is_empty(), "the session wrote a log file");
+    assert!(!log.contains(&get("SONIX_DEV_PASS")), "the password never reaches the log");
+    assert!(!log.contains("&t=") && !log.contains("?t="), "no Subsonic auth token in the log");
     let _ = std::fs::remove_dir_all(&tmp);
 }

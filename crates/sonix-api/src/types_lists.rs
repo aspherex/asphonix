@@ -216,4 +216,5 @@ pub enum SettingChange {
     FreeMemoryWhenMinimized(bool),
     McpEnabled(bool),
     McpAllowControl(bool),
+    VerboseLogging(bool),
 }

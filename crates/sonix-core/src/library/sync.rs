@@ -81,7 +81,7 @@ const META_SYNC_GEN: &str = "syncGen";
 /// User-initiated full sync (first login, or "Resync" in Settings): always
 /// re-fetches the catalog (still in place, never truncating).
 pub async fn run_full_sync(client: &Client, db: &Db, progress: &dyn SyncProgressSink) -> Result<SyncOutcome, IpcError> {
-    run_sync(client, db, progress, true, None).await
+    run_sync_logged(client, db, progress, true, None).await
 }
 
 /// Background resync: skips the catalog when the server's scan fingerprint
@@ -94,7 +94,28 @@ pub async fn run_incremental_sync(
     progress: &dyn SyncProgressSink,
     known_status: Option<ScanStatus>,
 ) -> Result<SyncOutcome, IpcError> {
-    run_sync(client, db, progress, false, known_status).await
+    run_sync_logged(client, db, progress, false, known_status).await
+}
+
+/// [`run_sync`] with its outcome logged. An unchanged catalog (the connection monitor's routine check) and
+/// a failed background sync stay at debug, so an idle or offline app does not log periodically.
+async fn run_sync_logged(
+    client: &Client,
+    db: &Db,
+    progress: &dyn SyncProgressSink,
+    full: bool,
+    known_status: Option<ScanStatus>,
+) -> Result<SyncOutcome, IpcError> {
+    let started = std::time::Instant::now();
+    let r = run_sync(client, db, progress, full, known_status).await;
+    let duration_ms = started.elapsed().as_millis() as u64;
+    match &r {
+        Ok(SyncOutcome::CatalogSynced) => tracing::info!(full, duration_ms, "sync: catalog synced"),
+        Ok(SyncOutcome::CatalogUnchanged) => tracing::debug!(full, duration_ms, "sync: catalog unchanged"),
+        Err(e) if full => tracing::warn!(full, duration_ms, error = %e.message, "sync failed"),
+        Err(e) => tracing::debug!(full, duration_ms, error = %e.message, "sync failed"),
+    }
+    r
 }
 
 /// The fingerprint stored after a catalog sync; `None` while a scan is
@@ -177,7 +198,7 @@ async fn sync_inner(
     // Best-effort: home section caching failing shouldn't fail the whole
     // sync (the UI keeps the previous lists until the next sync).
     if let Err(e) = refresh_home_sections(client, db, progress).await {
-        log::warn!("home section refresh failed: {}", e.message);
+        tracing::warn!(error = %e.message, "home section refresh failed");
     }
 
     let now = chrono::Utc::now().to_rfc3339();
@@ -232,7 +253,7 @@ async fn refresh_user_state(client: &Client, db: &Db, progress: &dyn SyncProgres
     stars?;
     playlists?;
     if let Err(e) = home {
-        log::warn!("home section refresh failed: {}", e.message);
+        tracing::warn!(error = %e.message, "home section refresh failed");
     }
     Ok(())
 }

@@ -128,10 +128,10 @@ fn write_files(dir: &Path, state: &SessionState, pools: Option<&SourcePools>) {
         match serde_json::to_vec(p) {
             Ok(b) => {
                 if let Err(e) = write_atomic(&source_path(dir), &b) {
-                    log::warn!("session: writing source pools failed: {e}");
+                    tracing::warn!(error = %e, "session: writing source pools failed");
                 }
             }
-            Err(e) => log::warn!("session: serializing source pools failed: {e}"),
+            Err(e) => tracing::warn!(error = %e, "session: serializing source pools failed"),
         }
     } else if state.queue.source.is_none() {
         let _ = fs::remove_file(source_path(dir)); // stale pools of an earlier source
@@ -139,10 +139,10 @@ fn write_files(dir: &Path, state: &SessionState, pools: Option<&SourcePools>) {
     match serde_json::to_vec(state) {
         Ok(b) => {
             if let Err(e) = write_atomic(&session_path(dir), &b) {
-                log::warn!("session: writing session failed: {e}");
+                tracing::warn!(error = %e, "session: writing session failed");
             }
         }
-        Err(e) => log::warn!("session: serializing session failed: {e}"),
+        Err(e) => tracing::warn!(error = %e, "session: serializing session failed"),
     }
 }
 
@@ -271,13 +271,13 @@ impl SessionStore {
             writer_loop(rx, dir, writer_mark, push_tx, writer_prefs);
         });
         if let Err(e) = spawned {
-            log::warn!("session writer thread not started: {e}");
+            tracing::warn!(error = %e, "session writer thread not started");
         }
         let spawned = std::thread::Builder::new().name("sonix-session-push".into()).spawn(move || {
             push_loop(push_rx, client, prefs);
         });
         if let Err(e) = spawned {
-            log::warn!("session push thread not started: {e}");
+            tracing::warn!(error = %e, "session push thread not started");
         }
         Arc::new(Self { tx: Mutex::new(tx), mark })
     }
@@ -421,8 +421,8 @@ fn push_loop(rx: Receiver<PushJob>, client: Arc<RwLock<Option<Client>>>, prefs: 
         });
         match result {
             Ok(Ok(())) => last_sent = Some((job.ids.clone(), job.current.clone(), job.position_ms)),
-            Ok(Err(e)) => log::debug!("savePlayQueue failed: {}", e.message),
-            Err(_) => log::debug!("savePlayQueue timed out"),
+            Ok(Err(e)) => tracing::debug!(error = %e.message, "savePlayQueue failed"),
+            Err(_) => tracing::debug!("savePlayQueue timed out"),
         }
         if let Some(a) = job.ack {
             let _ = a.send(());

@@ -671,7 +671,7 @@ async fn download_with_retries(
                 }
                 offset = stalled_at;
                 let backoff = (RETRY_BACKOFF_BASE * 2u32.pow(attempt - 1)).min(RETRY_BACKOFF_MAX);
-                log::warn!(
+                tracing::warn!(
                     "stream download stalled/dropped at byte {offset}; retrying with Range resume in {backoff:?} (attempt {attempt}/{MAX_RETRIES})"
                 );
                 tokio::time::sleep(backoff).await;
@@ -735,14 +735,16 @@ async fn download_once(
     if offset > 0 {
         req = req.header(reqwest::header::RANGE, format!("bytes={offset}-"));
     }
+    tracing::debug!(url = %crate::redact::redact_url(url), offset, "stream request");
     let resp = match req.send().await {
         Ok(r) => r,
         Err(e) => {
             // `without_url`: the stream URL carries Subsonic auth params (u/t/s).
-            log::warn!("stream connect failed at byte {offset}: {}", e.without_url());
+            tracing::warn!(url = %crate::redact::redact_url(url), offset, error = %e.without_url(), "stream connect failed");
             return Err(offset); // resumable: caller retries with backoff
         }
     };
+    tracing::debug!(status = resp.status().as_u16(), content_length = resp.content_length(), "stream response");
     if !resp.status().is_success() {
         set_error(state, generation, my_gen, cond, format!("HTTP {}", resp.status()));
         return Ok(()); // a non-transient failure (e.g. 404): don't retry
@@ -933,6 +935,7 @@ impl GapFill {
             };
             let Ok(rt) = tokio::runtime::Builder::new_current_thread().enable_all().build() else { return finish(&p) };
             rt.block_on(async {
+                tracing::debug!(url = %crate::redact::redact_url(&url), start, end, "waveform gap range request");
                 let req = client.get(&url).header(reqwest::header::RANGE, format!("bytes={start}-{}", end - 1)).send();
                 let resp = until_stopped(req, &s).await?.ok()?;
 
@@ -1746,5 +1749,65 @@ mod temp_file_error_tests {
         // Plain OS errors keep their code too.
         let os = temp_file_error(&io::Error::from_raw_os_error(5));
         assert!(os.to_string().contains("(os error 5)"), "{os}");
+    }
+}
+
+#[cfg(test)]
+mod redaction_tests {
+    //! The stream download log sites with a Subsonic-style authenticated URL: events present, credentials not.
+    use super::*;
+    use std::io::Write as _;
+    use std::net::TcpListener;
+
+    fn state() -> Mutex<DownloadState> {
+        Mutex::new(DownloadState {
+            base_offset: 0,
+            downloaded_to: 0,
+            total_len: None,
+            finished: false,
+            error: None,
+            generation: 0,
+            valid_prefix: 0,
+            abandoned: false,
+            gen_started: Instant::now(),
+            rate: None,
+        })
+    }
+
+    #[tokio::test]
+    async fn stream_request_logs_carry_no_credentials() {
+        let logs = sonix_logging::test_support::capture();
+        let q = "/rest/stream?u=alice-user&t=0123456789abcdef0123456789abcdef&s=salt42&v=1.16.1&c=sonix&id=tr-9&format=raw";
+        let tmp = tempfile::NamedTempFile::new().unwrap();
+        let (cond, generation) = (Condvar::new(), AtomicU64::new(0));
+        let client = reqwest::Client::new();
+
+        // connect failure (resumable): the warn site
+        let closed = TcpListener::bind("127.0.0.1:0").unwrap();
+        let dead = format!("http://127.0.0.1:{}{q}", closed.local_addr().unwrap().port());
+        drop(closed);
+        let st = state();
+        assert_eq!(download_once(&client, &dead, 7, tmp.path(), &st, &cond, &generation, 0, Duration::from_secs(2)).await, Err(7));
+
+        // a served download
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let live = format!("http://127.0.0.1:{}{q}", listener.local_addr().unwrap().port());
+        let server = std::thread::spawn(move || {
+            let (mut s, _) = listener.accept().unwrap();
+            let mut buf = [0u8; 4096];
+            let _ = s.read(&mut buf);
+            s.write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 4\r\nConnection: close\r\n\r\nfLaC").unwrap();
+        });
+        let st = state();
+        download_once(&client, &live, 0, tmp.path(), &st, &cond, &generation, 0, Duration::from_secs(2)).await.unwrap();
+        server.join().unwrap();
+
+        let failed = logs.find("stream connect failed").expect("warn site logged");
+        assert_eq!(failed["level"], "WARN");
+        assert_eq!(failed["fields"]["offset"], 7);
+        assert!(failed["fields"]["url"].as_str().unwrap().contains("id=tr-9"), "{failed}");
+        assert_eq!(logs.events().iter().filter(|e| e["message"] == "stream request").count(), 2);
+        assert!(logs.find("stream response").is_some());
+        crate::redact::assert_redacted(&logs.text(), &["alice-user", "0123456789abcdef0123456789abcdef", "salt42"]);
     }
 }

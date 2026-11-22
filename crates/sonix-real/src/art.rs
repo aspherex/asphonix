@@ -570,7 +570,7 @@ impl RealBackend {
         for cover in &covers {
             match self.cover_image(cover, size) {
                 Ok(img) => tiles.push(Arc::try_unwrap(img).unwrap_or_else(|a| (*a).clone())),
-                Err(e) => log::debug!("mosaic: cover {cover} unavailable: {}", e.message),
+                Err(e) => tracing::debug!("mosaic: cover {cover} unavailable: {}", e.message),
             }
         }
         if tiles.is_empty() {
@@ -675,7 +675,7 @@ impl RealBackend {
                             }
                             Err(e) if e.code == ErrorCode::Network => {
                                 if net_errors.fetch_add(1, Ordering::Relaxed) + 1 >= PREFETCH_MAX_NET_ERRORS {
-                                    log::info!("art prefetch: server unreachable, pass ended");
+                                    tracing::info!("art prefetch: server unreachable, pass ended");
                                     stop.store(true, Ordering::Relaxed);
                                 }
                             }

@@ -75,7 +75,7 @@ async fn fetch_lyrics(client: &Client, track: &Track) -> Result<Option<Lyrics>, 
             Ok(None) if ext == Some(true) => return Ok(None),
             Ok(None) => failed = false,
             Err(e) => {
-                log::debug!("getLyricsBySongId failed: {}", e.message);
+                tracing::debug!(error = %e.message, "getLyricsBySongId failed");
                 failed = true;
             }
         }
@@ -86,7 +86,7 @@ async fn fetch_lyrics(client: &Client, track: &Track) -> Result<Option<Lyrics>, 
     match client.get_lyrics(&track.artist, &track.title).await {
         Ok(l) => Ok(l.map(|l| to_lyrics(l, "classic"))),
         Err(e) => {
-            log::debug!("getLyrics failed: {}", e.message);
+            tracing::debug!(error = %e.message, "getLyrics failed");
             Err(())
         }
     }
@@ -144,7 +144,7 @@ pub async fn artist_top_tracks(db: &Db, client: Option<Client>, id: &str) -> Ipc
                             let _ = library::discovery::cache_put(db, &key, &json, now);
                         }
                     }
-                    Err(e) => log::debug!("getTopSongs failed: {}", e.message),
+                    Err(e) => tracing::debug!(error = %e.message, "getTopSongs failed"),
                 }
             }
         }
@@ -175,7 +175,7 @@ pub async fn artist_info(db: &Db, client: Option<Client>, id: &str) -> IpcResult
                         let _ = library::discovery::cache_put(db, &key, &json, now);
                     }
                 }
-                Err(e) => log::debug!("getArtistInfo2 failed: {}", e.message),
+                Err(e) => tracing::debug!(error = %e.message, "getArtistInfo2 failed"),
             }
         }
     let mut similar: Vec<Artist> = Vec::new();

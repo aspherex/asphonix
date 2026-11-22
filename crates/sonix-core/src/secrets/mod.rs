@@ -103,6 +103,11 @@ pub struct Settings {
     /// "Allow playback control" for MCP clients. Defaults off.
     #[serde(default)]
     pub mcp_allow_control: bool,
+    // --- diagnostics ---
+    /// "Verbose logging": debug-level events from SONIX in the log file (`sonix_logging::set_verbose`,
+    /// applied live). Defaults off.
+    #[serde(default)]
+    pub verbose_logging: bool,
 }
 
 fn default_true() -> bool {
@@ -139,6 +144,7 @@ impl Default for Settings {
             track_overlay_corner: Default::default(),
             mcp_enabled: false,
             mcp_allow_control: false,
+            verbose_logging: false,
         }
     }
 }
@@ -270,10 +276,10 @@ pub fn load_profile_password(url: &str, username: &str) -> Result<Option<String>
     match save_profile_password(url, username, &pw) {
         Ok(()) => {
             if let Err(e) = delete_password(username) {
-                log::warn!("migrated keychain entry but could not delete the legacy one: {}", e.message);
+                tracing::warn!(error = %e.message, "migrated keychain entry but could not delete the legacy one");
             }
         }
-        Err(e) => log::warn!("could not migrate legacy keychain entry: {}", e.message),
+        Err(e) => tracing::warn!(error = %e.message, "could not migrate legacy keychain entry"),
     }
     Ok(Some(pw))
 }

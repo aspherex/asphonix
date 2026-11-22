@@ -153,6 +153,18 @@ impl Client {
         url
     }
 
+    /// Sends one GET. Logged at trace (failures at debug), with the auth params redacted: the connection monitor probes
+    /// periodically, and an offline server must not turn that into periodic warnings. Callers log failures
+    /// that matter.
+    async fn send_logged(&self, endpoint: &str, url: Url) -> Result<reqwest::Response, IpcError> {
+        tracing::trace!(endpoint, url = %crate::redact::redact_url(url.as_str()), "subsonic request");
+        self.http.get(url).send().await.map_err(|e| {
+            let e = map_reqwest_err(e); // `without_url`: no auth params in the message
+            tracing::debug!(endpoint, error = %e.message, "subsonic request failed");
+            e
+        })
+    }
+
     /// `ping` — cheapest possible liveness/latency check.
     pub async fn ping(&self) -> Result<u32, IpcError> {
         let started = std::time::Instant::now();
@@ -196,9 +208,11 @@ impl Client {
         #[cfg(test)]
         tests::record_request(endpoint);
         let url = self.build_url(endpoint, extra);
-        let resp = self.http.get(url).send().await.map_err(map_reqwest_err)?;
+        let started = std::time::Instant::now();
+        let resp = self.send_logged(endpoint, url).await?;
         let status = resp.status();
         let bytes = resp.bytes().await.map_err(map_reqwest_err)?;
+        tracing::trace!(endpoint, status = status.as_u16(), bytes = bytes.len(), duration_ms = started.elapsed().as_millis() as u64, "subsonic response");
         if !status.is_success() {
             return Err(IpcError {
                 code: if status == StatusCode::UNAUTHORIZED || status == StatusCode::FORBIDDEN {
@@ -528,7 +542,7 @@ impl Client {
             extra.push(("size", s.to_string()));
         }
         let url = self.build_url("getCoverArt", &extra);
-        let resp = self.http.get(url).send().await.map_err(map_reqwest_err)?;
+        let resp = self.send_logged("getCoverArt", url).await?;
         let status = resp.status();
         if !status.is_success() {
             return Err(IpcError {
@@ -871,6 +885,39 @@ pub(crate) mod tests {
         let err = client.get_cover_art("al-1", Some(320)).await.unwrap_err();
         assert!(err.message.contains("larger than"), "{}", err.message);
         assert_eq!(MAX_COVER_ART_BYTES, 20 * 1024 * 1024);
+    }
+
+    /// The request log sites (`send_logged`, `get_body`, `get_cover_art`) at trace: the events are there, with
+    /// the endpoint, and no credential (user, password, token, salt) reaches the output.
+    #[tokio::test]
+    async fn request_logs_carry_no_credentials() {
+        let logs = sonix_logging::test_support::capture();
+        let (url, handle) = mock_server_once(r#"{"subsonic-response":{"status":"ok","version":"1.16.1"}}"#);
+        let client = Client::new(&url, "alice-user", "pw-secret-123").unwrap();
+        client.ping().await.unwrap();
+        let seen = handle.join().unwrap();
+        assert!(seen.contains("u=alice-user") && seen.contains("&t="), "the server did get the credentials: {seen}");
+
+        let art = mock_server_raw(b"HTTP/1.1 200 OK\r\nContent-Type: image/jpeg\r\nContent-Length: 3\r\nConnection: close\r\n\r\nabc".to_vec());
+        let client2 = Client::new(&art, "alice-user", "pw-secret-123").unwrap();
+        client2.get_cover_art("al-1", Some(320)).await.unwrap();
+
+        // connection refused: the failure site
+        let closed = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let dead = format!("http://alice-user:pw-secret-123@{}", closed.local_addr().unwrap());
+        drop(closed);
+        let client3 = Client::new(&dead, "alice-user", "pw-secret-123").unwrap();
+        assert!(client3.ping().await.is_err());
+
+        let req: Vec<_> = logs.events().into_iter().filter(|e| e["message"] == "subsonic request").collect();
+        assert_eq!(req.len(), 3, "{}", logs.text());
+        assert_eq!(req[0]["fields"]["endpoint"], "ping");
+        assert!(req[0]["fields"]["url"].as_str().unwrap().contains("/rest/ping?u=REDACTED&t=REDACTED&s=REDACTED"), "{}", req[0]);
+        assert_eq!(req[1]["fields"]["endpoint"], "getCoverArt");
+        assert!(req[1]["fields"]["url"].as_str().unwrap().contains("id=al-1"), "harmless params stay: {}", req[1]);
+        assert!(logs.find("subsonic response").is_some());
+        assert!(logs.find("subsonic request failed").is_some(), "{}", logs.text());
+        crate::redact::assert_redacted(&logs.text(), &["alice-user", "pw-secret-123"]);
     }
 
     #[tokio::test]

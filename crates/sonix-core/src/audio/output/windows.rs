@@ -352,7 +352,7 @@ fn negotiate_inner(
         containers.join("/"),
         last_err.unwrap_or_else(|| "unknown error".into())
     );
-    log::warn!("WASAPI: {reason}; falling back to shared mode");
+    tracing::warn!(error = %reason, "WASAPI: exclusive mode rejected; falling back to shared mode");
     // The UI gets a plain-language version; the HRESULTs stay in the log.
     let device_name = device
         .get_friendlyname()
@@ -475,18 +475,13 @@ fn unsupported_format_message(device: &str, rate: u32, bit_depth: Option<u8>, ac
 /// Sets the calling thread's MMCSS characteristics to "Pro Audio" (elevated,
 /// glitch-resistant scheduling for the render loop). Best-effort: playback
 /// continues at normal thread priority if this fails.
-fn set_mmcss_pro_audio() -> Option<windows::Win32::Foundation::HANDLE> {
+fn set_mmcss_pro_audio() -> Result<windows::Win32::Foundation::HANDLE, String> {
     let name: Vec<u16> = "Pro Audio\0".encode_utf16().collect();
     let mut task_index: u32 = 0;
     // SAFETY: `name` is a NUL-terminated UTF-16 buffer that outlives the call; `task_index` is a valid out-pointer.
     match unsafe { AvSetMmThreadCharacteristicsW(PCWSTR(name.as_ptr()), &mut task_index) } {
-        Ok(h) => Some(h),
-        Err(e) => {
-            log::warn!(
-                "AvSetMmThreadCharacteristicsW(\"Pro Audio\") failed ({e}); default priority"
-            );
-            None
-        }
+        Ok(h) => Ok(h),
+        Err(e) => Err(format!("AvSetMmThreadCharacteristicsW(\"Pro Audio\") failed ({e}); default priority")),
     }
 }
 
@@ -536,6 +531,7 @@ fn init_exclusive(
     wf: &WaveFormat,
     sample_rate: u32,
     period_hns: i64,
+    notes: &mut Vec<String>,
 ) -> Result<wasapi::AudioClient, WasapiError> {
     let mut client = device.get_iaudioclient()?;
     let aligned = client.calculate_aligned_period_near(period_hns, Some(128), wf).unwrap_or(period_hns);
@@ -544,7 +540,7 @@ fn init_exclusive(
         Err(e) if hresult_of(&e) == Some(AUDCLNT_E_BUFFER_SIZE_NOT_ALIGNED) => {
             let frames = client.get_buffer_size()?;
             let period = calculate_period_100ns(frames as i64, sample_rate as i64);
-            log::info!("WASAPI: buffer not aligned; retrying with {frames} frames ({period} hns)");
+            notes.push(format!("buffer not aligned; retrying with {frames} frames ({period} hns)"));
             client = device.get_iaudioclient()?;
             client.initialize_client(wf, &Direction::Render, &StreamMode::EventsExclusive { period_hns: period })?;
             Ok(client)
@@ -555,7 +551,7 @@ fn init_exclusive(
 
 /// Opens + initializes the device for `format`. Exclusive tries a ~30 ms
 /// period first and the default period if the device refuses it.
-fn open_stream(device_id: Option<&str>, format: &NegotiatedFormat) -> Result<OpenStream, String> {
+fn open_stream(device_id: Option<&str>, format: &NegotiatedFormat, notes: &mut Vec<String>) -> Result<OpenStream, String> {
     let device = open_device(device_id).map_err(|e| format!("open device: {}", describe(&e)))?;
     let wf = negotiated_waveformat(format);
     let client = device.get_iaudioclient().map_err(|e| describe(&e))?;
@@ -566,14 +562,14 @@ fn open_stream(device_id: Option<&str>, format: &NegotiatedFormat) -> Result<Ope
             let candidates = period_candidates(def_period, min_period);
             let mut result = None;
             for (i, period) in candidates.iter().enumerate() {
-                match init_exclusive(&device, &wf, format.sample_rate, *period) {
+                match init_exclusive(&device, &wf, format.sample_rate, *period, notes) {
                     Ok(c) => {
-                        log::info!("WASAPI exclusive period {} hns (device default {def_period})", period);
+                        notes.push(format!("exclusive period {period} hns (device default {def_period})"));
                         result = Some(Ok(c));
                         break;
                     }
                     Err(e) if retry_with_default_period(hresult_of(&e)) && i + 1 < candidates.len() => {
-                        log::info!("WASAPI: exclusive period {period} hns failed ({}); trying the default period", describe(&e));
+                        notes.push(format!("exclusive period {period} hns failed ({}); trying the default period", describe(&e)));
                     }
                     Err(e) => {
                         result = Some(Err(describe(&e)));
@@ -607,6 +603,16 @@ fn open_stream(device_id: Option<&str>, format: &NegotiatedFormat) -> Result<Ope
     })
 }
 
+/// What the render thread reports once the device is open. It never logs itself (real-time rule: no logging
+/// on the render thread); `spawn_render`, on the engine thread, logs this.
+struct OpenInfo {
+    buffer_frames: usize,
+    /// Period negotiation steps (`open_stream`).
+    notes: Vec<String>,
+    /// MMCSS "Pro Audio" registration failure (playback runs at normal priority).
+    mmcss_error: Option<String>,
+}
+
 /// Spawns the render thread and waits for it to open the device. Returns
 /// `Err(reason)` if `Initialize` fails (e.g. the device is held exclusively
 /// by another app) so the caller can fall back to shared mode.
@@ -623,15 +629,17 @@ pub fn spawn_render(
     let paused = Arc::new(AtomicBool::new(start_paused));
     let played_frames = Arc::new(AtomicU64::new(0));
     let gap_frames = Arc::new(AtomicU64::new(0));
+    let stream_parks = Arc::new(AtomicU64::new(0));
     let volume_bits = Arc::new(AtomicU32::new(initial_volume.to_bits()));
     let (seek_tx, seek_rx) = std::sync::mpsc::channel::<Consumer<u8>>();
     let seeks_applied = Arc::new(AtomicU64::new(0));
-    let (ready_tx, ready_rx) = std::sync::mpsc::channel::<Result<(), String>>();
+    let (ready_tx, ready_rx) = std::sync::mpsc::channel::<Result<OpenInfo, (String, Vec<String>)>>();
     let ctx = RenderCtx {
         stop: stop.clone(),
         paused: paused.clone(),
         played_frames: played_frames.clone(),
         gap_frames: gap_frames.clone(),
+        stream_parks: stream_parks.clone(),
         volume_bits: volume_bits.clone(),
         seeks_applied: seeks_applied.clone(),
         events,
@@ -640,19 +648,41 @@ pub fn spawn_render(
         .name("sonix-render".into())
         .spawn(move || render_thread(device_id, format, consumer, mono_tap, ctx, seek_rx, ready_tx))
         .map_err(|e| format!("spawn render thread: {e}"))?;
+    let mode = format!("{:?}", format.mode);
     match ready_rx.recv_timeout(Duration::from_secs(5)) {
-        Ok(Ok(())) => Ok(RenderHandle {
-            stop,
-            paused,
-            played_frames,
-            gap_frames,
-            volume_bits,
-            seek_tx,
-            seeks_applied,
-            join,
-        }),
-        Ok(Err(reason)) => {
+        Ok(Ok(info)) => {
+            for n in &info.notes {
+                tracing::info!(mode, "WASAPI: {n}");
+            }
+            if let Some(e) = &info.mmcss_error {
+                tracing::warn!(error = %e, "WASAPI: MMCSS registration failed");
+            }
+            tracing::info!(
+                mode,
+                sample_rate = format.sample_rate,
+                channels = format.channels,
+                container = format.container.label(),
+                buffer_frames = info.buffer_frames,
+                "WASAPI stream open"
+            );
+            Ok(RenderHandle {
+                stop,
+                paused,
+                played_frames,
+                gap_frames,
+                stream_parks,
+                volume_bits,
+                seek_tx,
+                seeks_applied,
+                join,
+            })
+        }
+        Ok(Err((reason, notes))) => {
             let _ = join.join();
+            for n in &notes {
+                tracing::info!(mode, "WASAPI: {n}");
+            }
+            tracing::warn!(mode, error = %reason, "WASAPI open failed");
             Err(reason)
         }
         Err(_) => {
@@ -667,11 +697,15 @@ struct RenderCtx {
     paused: Arc<AtomicBool>,
     played_frames: Arc<AtomicU64>,
     gap_frames: Arc<AtomicU64>,
+    stream_parks: Arc<AtomicU64>,
     volume_bits: Arc<AtomicU32>,
     seeks_applied: Arc<AtomicU64>,
     events: Sender<RenderEvent>,
 }
 
+// rt-path:begin -- the render thread. No logging (`tracing`/`log`) from here to `rt-path:end`: the thread runs
+// at MMCSS "Pro Audio" priority and a blocked or slow log call is an audible glitch. Report through atomics or
+// `ctx.events`; the engine thread logs (`rt_path_has_no_logging` checks this).
 fn render_thread(
     device_id: Option<String>,
     format: NegotiatedFormat,
@@ -679,31 +713,24 @@ fn render_thread(
     mut mono_tap: Option<MonoTap>,
     ctx: RenderCtx,
     seek_rx: std::sync::mpsc::Receiver<Consumer<u8>>,
-    ready: Sender<Result<(), String>>,
+    ready: Sender<Result<OpenInfo, (String, Vec<String>)>>,
 ) {
     let _ = initialize_mta();
-    let stream = match open_stream(device_id.as_deref(), &format) {
+    let mut notes = Vec::new();
+    let stream = match open_stream(device_id.as_deref(), &format, &mut notes) {
         Ok(s) => s,
         Err(reason) => {
-            log::warn!("WASAPI {:?} open failed: {reason}", format.mode);
-            let _ = ready.send(Err(reason));
+            let _ = ready.send(Err((reason, notes)));
             return;
         }
     };
-    log::info!(
-        "WASAPI {:?} stream open: {} Hz, {} ch, {}, buffer {} frames",
-        format.mode,
-        format.sample_rate,
-        format.channels,
-        format.container.label(),
-        stream.buffer_frames
-    );
     let mmcss = set_mmcss_pro_audio();
     // Pre-allocated once: the render loop below never allocates again.
     let bytes_per_frame = format.bytes_per_frame();
     let mut scratch = vec![0u8; stream.buffer_frames * bytes_per_frame];
     let mut mono_scratch: Vec<f32> = vec![0.0; stream.buffer_frames];
-    let _ = ready.send(Ok(()));
+    let mmcss_error = mmcss.as_ref().err().cloned();
+    let _ = ready.send(Ok(OpenInfo { buffer_frames: stream.buffer_frames, notes, mmcss_error }));
 
     let result = render_loop(
         &stream,
@@ -716,12 +743,12 @@ fn render_thread(
         &mut mono_scratch,
     );
     let _ = stream.client.stop_stream();
-    if let Some(h) = mmcss {
+    if let Ok(h) = mmcss {
         // SAFETY: `h` is the handle returned by AvSetMmThreadCharacteristicsW on this same thread and is reverted exactly once.
         let _ = unsafe { AvRevertMmThreadCharacteristics(h) };
     }
     if let Err(e) = result {
-        log::warn!("WASAPI render thread exiting: {e:?}");
+        // The engine logs it ("output device lost").
         let _ = ctx.events.send(e);
     }
 }
@@ -848,7 +875,7 @@ fn park_stopped(
 ) -> Result<(), RenderEvent> {
     let lost = |e: WasapiError| RenderEvent::DeviceLost(describe(&e));
     stream.client.stop_stream().map_err(lost)?;
-    log::debug!("WASAPI: paused > {PAUSE_STOP_GRACE:?}, device stream stopped");
+    ctx.stream_parks.fetch_add(1, Ordering::Relaxed); // reported by the engine; no logging here
     loop {
         if ctx.stop.load(Ordering::Relaxed) {
             return Ok(());
@@ -873,7 +900,6 @@ fn park_stopped(
     let prefill = stream.client.get_available_space_in_frames().map_err(lost)? as usize;
     fill_output(stream, consumer, mono_tap, prefill, format, ctx, tracker, gaps, scratch, mono_scratch).map_err(lost)?;
     stream.client.start_stream().map_err(lost)?;
-    log::debug!("WASAPI: resumed, device stream restarted");
     Ok(())
 }
 
@@ -1096,6 +1122,8 @@ fn sample_to_f32(bytes: &[u8], container: Container) -> f32 {
     }
 }
 
+// rt-path:end
+
 // ---------------------------------------------------------------------------
 // Diagnostics (examples/probe_formats.rs)
 // ---------------------------------------------------------------------------
@@ -1176,7 +1204,7 @@ pub fn probe_all_devices(do_init: bool) -> Vec<DeviceProbe> {
                                 NegotiatedFormat::new(rate, 2, container, OutputMode::Exclusive);
                             f.channel_mask = mask;
                             f.plain_wfx = plain;
-                            match open_stream(Some(&d.id), &f) {
+                            match open_stream(Some(&d.id), &f, &mut Vec::new()) {
                                 Ok(st) => s.push_str(&format!(
                                     " | INIT OK, buffer {} frames",
                                     st.buffer_frames

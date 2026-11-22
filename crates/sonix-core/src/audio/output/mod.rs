@@ -118,6 +118,9 @@ pub struct RenderHandle {
     /// Silence frames inserted *between* real frames by underruns (audible
     /// dropouts / track-change gaps within this stream). Diagnostics only.
     pub gap_frames: Arc<AtomicU64>,
+    /// Times the render thread stopped the device stream for a long pause (`windows::park_stopped`).
+    /// Counted here instead of logged there: no logging on the render thread; the engine reports it.
+    pub stream_parks: Arc<AtomicU64>,
     /// Current volume (`f32` bits via `to_bits`/`from_bits`), read by the
     /// render thread on every callback and applied to the already-packed
     /// container bytes popped from the ring, right before they're written to
@@ -322,5 +325,28 @@ mod peak_meter_tests {
         assert_eq!(m.take(), (0.75, 0.5));
         // Nothing rendered since (paused/stopped): the next reading is silence.
         assert_eq!(m.take(), (0.0, 0.0));
+    }
+}
+
+#[cfg(test)]
+mod rt_rule_tests {
+    /// The real-time rule as a machine check: between `rt-path:begin` and `rt-path:end` in the output backends
+    /// (the render threads, their loops and device callbacks) nothing logs. Counters and `RenderEvent`s carry
+    /// diagnostics to the engine thread, which logs them.
+    #[test]
+    fn rt_path_has_no_logging() {
+        const FORBIDDEN: &[&str] = &["tracing::", "log::", "info!(", "warn!(", "debug!(", "error!(", "trace!(", "event!(", "println!", "eprintln!"];
+        for (name, src) in [("windows.rs", include_str!("windows.rs")), ("fallback.rs", include_str!("fallback.rs"))] {
+            let begin = src.find("// rt-path:begin").unwrap_or_else(|| panic!("{name}: no rt-path:begin marker"));
+            let end = src[begin..].find("// rt-path:end").map(|e| begin + e).unwrap_or_else(|| panic!("{name}: no rt-path:end marker"));
+            let region = &src[begin..end];
+            assert!(region.len() > 500, "{name}: the marked region should cover the render thread");
+            for (i, line) in region.lines().enumerate() {
+                let code = line.split("//").next().unwrap_or("");
+                for f in FORBIDDEN {
+                    assert!(!code.contains(f), "{name}: `{f}` on the real-time path (line +{i} after rt-path:begin): {line}");
+                }
+            }
+        }
     }
 }
