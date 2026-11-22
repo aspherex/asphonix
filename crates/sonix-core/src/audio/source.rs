@@ -828,7 +828,6 @@ impl Read for ProgressiveDownload {
             return Ok(0); // EOF
         }
         self.file.seek(SeekFrom::Start(self.pos))?;
-
         let n = self.file.read(&mut buf[..avail as usize])?;
         self.pos += n as u64;
         Ok(n)
@@ -922,7 +921,9 @@ impl Drop for GapFill {
 
 impl GapFill {
     fn start(client: reqwest::Client, url: String, start: u64, end: u64) -> io::Result<Self> {
-        let mut named = tempfile::Builder::new().prefix("sonix-wave-gap-").tempfile()?;
+        // `sonix-stream-*.tmp`: the stale sweep reaps it after a crash; no path in the error.
+        let mut named =
+            tempfile::Builder::new().prefix("sonix-stream-gap-").suffix(".tmp").tempfile().map_err(|e| temp_file_error(&e))?;
         let file = File::open(named.path())?; // own cursor: the writer and the reader must not share one
 
         let progress: Arc<(Mutex<GapProgress>, Condvar)> = Arc::default();
@@ -938,14 +939,15 @@ impl GapFill {
             };
             let Ok(rt) = tokio::runtime::Builder::new_current_thread().enable_all().build() else { return finish(&p) };
             rt.block_on(async {
-                let resp = client.get(&url).header(reqwest::header::RANGE, format!("bytes={start}-{}", end - 1)).send().await.ok()?;
+                let req = client.get(&url).header(reqwest::header::RANGE, format!("bytes={start}-{}", end - 1)).send();
+                let resp = until_stopped(req, &s).await?.ok()?;
 
                 // 206 = the range; a 200 would be the whole file from byte 0 (server ignores Range): not usable.
                 if resp.status() != reqwest::StatusCode::PARTIAL_CONTENT {
                     return None;
                 }
                 let mut stream = resp.bytes_stream();
-                while let Some(chunk) = tokio::time::timeout(READ_IDLE_TIMEOUT, stream.next()).await.ok()? {
+                while let Some(chunk) = until_stopped(stream.next(), &s).await? {
                     if s.load(Ordering::Relaxed) {
                         return None;
                     }
@@ -972,7 +974,7 @@ impl GapFill {
         let mut g = self.progress.0.lock().unwrap_or_else(|e| e.into_inner());
         while g.written <= rel {
             if cancel.load(Ordering::Relaxed) {
-                return Err(io::Error::new(io::ErrorKind::Interrupted, "analysis cancelled"));
+                return Err(io::Error::other("analysis cancelled"));
             }
             if g.done {
                 return Err(io::Error::other("could not fetch the missing part of the track"));
@@ -984,6 +986,21 @@ impl GapFill {
         self.file.seek(SeekFrom::Start(rel))?;
         self.file.read(&mut buf[..n])
     }
+}
+
+/// `fut`'s output, or `None` once `stop` is set (the scan is gone: checked
+/// every 200 ms, so a cancelled fill drops its connection promptly) or after
+/// [`READ_IDLE_TIMEOUT`] without an answer (also bounds the response headers,
+/// which the client's `connect_timeout` does not).
+async fn until_stopped<F: std::future::Future>(fut: F, stop: &AtomicBool) -> Option<F::Output> {
+    let mut fut = std::pin::pin!(fut);
+    let t0 = Instant::now();
+    while !stop.load(Ordering::Relaxed) && t0.elapsed() < READ_IDLE_TIMEOUT {
+        if let Ok(v) = tokio::time::timeout(Duration::from_millis(200), &mut fut).await {
+            return Some(v);
+        }
+    }
+    None
 }
 
 impl SharedReader {
@@ -1008,14 +1025,23 @@ impl SharedReader {
         let mut g = self.state.lock().unwrap_or_else(|p| p.into_inner());
         loop {
             if self.cancel.load(Ordering::Relaxed) {
-                return Err(io::Error::new(io::ErrorKind::Interrupted, "analysis cancelled"));
+                return Err(io::Error::other("analysis cancelled"));
             }
-            let Some(end) = g.readable_until(offset) else {
-                // A gap: it ends where the current request starts.
-                return Ok(if g.base_offset > offset { Avail::Gap(g.base_offset) } else { Avail::Main(0) });
-            };
-            if end > offset {
-                return Ok(Avail::Main((end - offset).min(len)));
+            match g.readable_until(offset) {
+                Some(end) if end > offset => return Ok(Avail::Main((end - offset).min(len))),
+                Some(_) => {}
+                // A gap: it ends where the current request starts. It is fetched only once playback's own
+                // request has finished, so the extra request never competes with playback for bandwidth
+                // (right after a resume/seek its buffer is thinnest). Playback gone, or its download failed:
+                // an error, never `Ok(0)` (which symphonia's FLAC reader re-reads forever) and never a fetch.
+                None if g.abandoned || g.error.is_some() => {
+                    return Err(io::Error::other("the rest of the track is not being downloaded"));
+                }
+                None if g.finished => return Ok(Avail::Gap(g.base_offset)),
+                None => {
+                    g = self.cond.wait_timeout(g, Duration::from_millis(200)).unwrap_or_else(|p| p.into_inner()).0;
+                    continue;
+                }
             }
             if g.finished || g.abandoned {
                 return Ok(Avail::Main(0));
@@ -1265,7 +1291,7 @@ mod tests {
 
         cancelled.seek(SeekFrom::Start(20)).unwrap(); // past the data: would wait
         cancel.store(true, Ordering::SeqCst);
-        assert_eq!(cancelled.read(&mut buf).unwrap_err().kind(), io::ErrorKind::Interrupted);
+        assert_eq!(cancelled.read(&mut buf).unwrap_err().kind(), io::ErrorKind::Other, "not Interrupted: symphonia retries that");
         drop((reader, cancelled));
         assert!(!path.exists());
         server.join().unwrap();
