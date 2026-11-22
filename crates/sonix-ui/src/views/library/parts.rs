@@ -178,6 +178,9 @@ pub struct PageScroll {
     /// When this page was created, and whether the same page (scroll id) overflowed last time.
     born: std::time::Instant,
     seed: Cell<Option<bool>>,
+    /// consecutive frames the watch asked for because the gutter decision flipped (a gutter that toggles the overflow
+    /// itself would otherwise ask forever)
+    flips: Rc<Cell<u8>>,
 }
 
 thread_local! {
@@ -199,7 +202,7 @@ impl Default for PageScroll {
 
 impl PageScroll {
     pub fn new() -> Self {
-        Self { handle: gpui::ScrollHandle::new(), used: Rc::new(Cell::new(false)), born: std::time::Instant::now(), seed: Cell::new(None) }
+        Self { handle: gpui::ScrollHandle::new(), used: Rc::new(Cell::new(false)), born: std::time::Instant::now(), seed: Cell::new(None), flips: Default::default() }
     }
 
     pub fn wrap(&self, window: &mut Window, th: &Theme, id: &'static str, content: impl IntoElement) -> AnyElement {
@@ -219,14 +222,21 @@ impl PageScroll {
         if measured || settled {
             GUTTERS.with(|g| g.borrow_mut().insert(id, measured));
         }
+        if !settled {
+            self.flips.set(0); // the grace period may keep frames coming (bounded by GUTTER_SEED_GRACE)
+        }
         self.used.set(overflow);
-        let (handle, used) = (self.handle.clone(), self.used.clone());
+        let (handle, used, flips) = (self.handle.clone(), self.used.clone(), self.flips.clone());
         let watch = canvas(
             |_, _, _| (),
             move |_, _, window, _| {
                 let now = f32::from(handle.max_offset().height) > 0.5;
-                if now != used.get() {
-                    window.refresh();
+                // in paint `refresh()` is a no-op while drawing; ask the page (a cached view) for one more frame instead
+                if now == used.get() {
+                    flips.set(0);
+                } else if flips.get() < 4 {
+                    flips.set(flips.get() + 1);
+                    window.request_animation_frame();
                 }
             },
         )
