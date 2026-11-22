@@ -52,6 +52,14 @@ impl Shell {
             cx.stop_propagation();
             return;
         }
+        // N / Shift+N: toggle Now Playing, not on key repeat, not over an open menu/dialog (`shortcuts.ts`)
+        if ev.keystroke.key == "n" {
+            if !ev.is_held && !self.overlay_open(cx) {
+                self.toggle_now_playing(cx);
+                cx.stop_propagation();
+            }
+            return;
+        }
         // `scrollStage(±120)`: J/K scroll the page everywhere but Now Playing (there they skip -10/+10 s); held keys repeat
         let dy = match ev.keystroke.key.as_str() {
             "j" => 120.0,

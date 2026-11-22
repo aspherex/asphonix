@@ -180,7 +180,7 @@ fn bind_keys(cx: &mut App) {
         KeyBinding::new("menu", shell::OpenMenuKey, Some("TrackList")),
         KeyBinding::new("shift-f10", shell::OpenMenuKey, Some("TrackList")),
         KeyBinding::new("space", shell::PlayPause, Some("Root && !TextInput && !ContextMenu && !Dialog")),
-        KeyBinding::new("n", shell::ToggleNowPlaying, Some("Root && !TextInput && !ContextMenu && !Dialog")),
+        // plain N (Now Playing) lives in `shell_keys::feel_key_down`: the web ignores key repeat, a binding cannot see it
         KeyBinding::new("escape", shell::Escape, Some("Root")),
         KeyBinding::new("ctrl-t", shell::ToggleTheme, Some("Root")),
         KeyBinding::new("ctrl-k", shell::FocusSearch, Some("Root")),

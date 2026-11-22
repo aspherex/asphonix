@@ -212,6 +212,10 @@ pub fn drive(window: &mut Window, sc: Scrollable) -> AnyElement {
 pub fn scroll_largest(delta: f32) -> bool {
     let mut cands = LAST_FRAME.with(|l| l.borrow().clone());
     cands.sort_by(|a, b| b.1.total_cmp(&a.1));
+    // the web only considers a viewport taller than half the stage (`clientHeight > target.clientHeight / 2`): never fall
+    // through to the narrow sidebar / queue rail when the page itself cannot scroll
+    let biggest = cands.first().map(|c| c.1).unwrap_or(0.0);
+    cands.retain(|c| c.1 >= biggest * 0.5);
     for (key, _) in cands {
         let Some(sc) = SETTERS.with(|s| s.borrow().get(&key).cloned()) else { continue };
         let max = (sc.max)();
