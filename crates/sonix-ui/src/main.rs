@@ -12,6 +12,8 @@ mod icons_gen;
 mod metrics;
 mod overlays;
 mod menus;
+#[cfg(feature = "memprof")]
+mod memprof;
 mod pager;
 mod playback;
 mod playerkeys;
@@ -41,6 +43,10 @@ use std::io::Write;
 use std::sync::{Arc, OnceLock};
 use std::time::Instant;
 use views::shell::{self, Shell};
+
+#[cfg(feature = "memprof")]
+#[global_allocator]
+static ALLOC: memprof::Counting = memprof::Counting;
 
 static T0: OnceLock<Instant> = OnceLock::new();
 
@@ -105,6 +111,8 @@ fn main() {
     T0.set(Instant::now()).ok();
     install_crash_log();
     log("main_start");
+    #[cfg(feature = "memprof")]
+    memprof::start();
     #[cfg(not(feature = "parity"))]
     let prefs = settings::load();
     #[cfg(feature = "parity")]
