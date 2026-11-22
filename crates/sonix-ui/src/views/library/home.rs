@@ -392,6 +392,13 @@ impl Render for HomeView {
         let (_, card_w) = auto_fill(content_w, m::CARD_GRID_MIN, sp::MD);
 
         // Jump Back In // Sessions
+        // native-only: until the sections arrive, one row of placeholders per section keeps the page from jumping down
+        let loading_sections = self.sections.is_none() && !self.sections_unavailable;
+        if loading_sections {
+            let (cols_t, _) = auto_fill(content_w, m::TILE_GRID_MIN, sp::MD);
+            let t: Vec<AnyElement> = (0..cols_t.min(6)).map(|_| super::cards::tile_skeleton(&th, tile_w)).collect();
+            children.push(div().flex().flex_col().child(Self::block_title(&th, "Jump Back In // Sessions")).child(Self::grid(t, sp::MD)).into_any_element());
+        }
         if let Some(s) = self.sections.clone().filter(|s| !s.recently_played.is_empty()) {
             let mut tiles = Vec::new();
             for (i, a) in s.recently_played.iter().enumerate() {
@@ -480,6 +487,11 @@ impl Render for HomeView {
         if let Some(s) = self.sections.clone().filter(|s| !s.frequent.is_empty()) {
             let cards: Vec<AnyElement> = s.frequent.iter().enumerate().map(|(i, a)| card(&ctx, &th, CardItem::Album(a), card_w, None, Some(format!("home.card.{i}")), window, cx)).collect();
             children.push(div().flex().flex_col().child(Self::block_title(&th, "Heavy Rotation")).child(Self::grid(cards, sp::MD)).into_any_element());
+        }
+        if loading_sections {
+            let (cols_c, _) = auto_fill(content_w, m::CARD_GRID_MIN, sp::MD);
+            let c: Vec<AnyElement> = (0..cols_c.min(5)).map(|_| super::cards::card_skeleton(&th, card_w)).collect();
+            children.push(div().flex().flex_col().child(Self::block_title(&th, "Heavy Rotation")).child(Self::grid(c, sp::MD)).into_any_element());
         }
         if self.sections.is_none() && self.sections_unavailable {
             children.push(div().child(txt(&th, BODY_SM, "Unavailable until a server is connected.").color(th.muted)).into_any_element());

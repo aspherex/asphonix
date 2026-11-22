@@ -14,7 +14,7 @@ use crate::probe::pid;
 use crate::router::Route;
 use crate::text::txt;
 use crate::theme::Theme;
-use crate::tracking::{BODY_MD, HEADLINE_LG, HEADLINE_SM, LABEL_CAPS, MONO_CODE, MONO_DATA};
+use crate::tracking::{BODY_MD, BODY_SM, HEADLINE_LG, HEADLINE_SM, LABEL_CAPS, MONO_CODE, MONO_DATA};
 use crate::views::shell::{EnqueueSelected, OpenMenuKey, PlaySelected, SelDown, SelUp};
 use crate::widgets::{hard_shadow, icon};
 use crate::widgets::tooltip::Tip;
@@ -381,6 +381,38 @@ impl ArtistDetailView {
         pid("artist.header", div().flex().flex_row().gap(px(m::PAGE_PAD)).flex_none().child(art).child(info)).into_any_element()
     }
 
+    /// Native-only: `header()` with placeholders at the real sizes. The buttons carry their invisible labels so their
+    /// widths are the loaded ones.
+    fn header_skeleton(th: &Theme) -> AnyElement {
+        use crate::widgets::skeleton as sk;
+        let th = *th;
+        let ghost = |s: crate::tracking::TypeSpec, t: &str| txt(&th, s, t.to_string()).color(gpui::transparent_black());
+        let btn = |pad: f32, ic: f32, border: bool, spec: crate::tracking::TypeSpec, label: &str| {
+            div().flex().flex_row().items_center().gap(px(crate::metrics::space::SM)).h(px(m::BTN_H)).px(px(pad)).flex_none().bg(th.mid).opacity(0.6).when(border, |d| d.border_1()).child(div().size(px(ic)).flex_none()).child(ghost(spec, label))
+        };
+        let actions = div()
+            .flex()
+            .flex_row()
+            .items_center()
+            .gap(px(crate::metrics::space::SM))
+            .mt(px(crate::metrics::space::SM))
+            .child(pid("artist.btn.play", btn(crate::metrics::space::LG, 16.0, false, HEADLINE_SM, "PLAY DISCOGRAPHY")))
+            .child(pid("artist.btn.flow", btn(crate::metrics::space::MD, 15.0, true, LABEL_CAPS, "FLOW")))
+            .child(pid("artist.btn.star", sk::block(&th, m::BTN_H, m::BTN_H)))
+            .child(pid("artist.btn.more", sk::block(&th, m::BTN_H, m::BTN_H)));
+        let info = div()
+            .flex()
+            .flex_col()
+            .gap(px(crate::metrics::space::XS))
+            .justify_end()
+            .min_w_0()
+            .child(pid("artist.name", sk::text_slot(&th, HEADLINE_LG.line, 24.0, 1.0).w(px(320.))))
+            .child(pid("artist.stats", sk::text_slot(&th, MONO_DATA.line, 12.0, 1.0).w(px(220.))))
+            .child(pid("artist.actions", actions));
+        let art = pid("artist.art", div().size(px(m::ARTIST_ART)).flex_none().bg(th.high).border_1().border_color(th.border));
+        pid("artist.header", div().flex().flex_row().gap(px(m::PAGE_PAD)).flex_none().child(art).child(info)).into_any_element()
+    }
+
     fn section_title(th: &Theme, text: &str) -> AnyElement {
         div().flex().child(txt(th, LABEL_CAPS, text.to_string()).color(th.muted)).into_any_element()
     }
@@ -393,12 +425,15 @@ impl ArtistDetailView {
             title = title.child(div().ml(px(crate::metrics::space::SM)).opacity(0.8).child(txt(&th, MONO_CODE, "FROM YOUR LISTENING HISTORY").color(th.muted)));
         }
         let mut sec = div().flex().flex_col().gap(px(crate::metrics::space::SM)).min_w_0().child(pid("artist.top.title", title));
-        if self.top_pending {
+        if self.top_pending || self.loading {
             let mut rows_v = div().flex().flex_col().border_1().border_color(th.border).bg(th.low);
             for _ in 0..10 {
-                rows_v = rows_v.child(div().relative().h(px(m::TOP_ROW_H)).border_b_1().border_color(th.mid).opacity(0.5).child(div().absolute().left_0().top_0().bottom_0().w(gpui::relative(0.4)).bg(th.mid)));
+                rows_v = rows_v.child(crate::widgets::skeleton::row(&th, m::TOP_ROW_H));
             }
             sec = sec.child(pid("artist.top.list", rows_v));
+        } else if self.top_items().is_empty() {
+            // native-only: keep the column (the web drops it) so About does not jump wider when no tracks arrive
+            sec = sec.child(pid("artist.top.list", div().flex().items_center().h(px(m::TOP_ROW_H)).px(px(crate::metrics::space::MD)).border_1().border_color(th.border).bg(th.low).child(txt(&th, MONO_CODE, "NO TRACKS.").color(th.muted))));
         } else {
             let o = RowOpts { show_artist: false, cols: visible_columns(self.top_w.get()), actions: 2 };
             let n = self.top_items().len();
@@ -452,16 +487,10 @@ impl ArtistDetailView {
     fn about(&mut self, th: &Theme, window: &mut Window, _cx: &mut Context<Self>) -> AnyElement {
         let th = *th;
         let mut sec = div().relative().flex().flex_col().gap(px(crate::metrics::space::SM)).min_w_0().child(Self::section_title(&th, "About")).child(measure(&self.bio_w));
-        if self.info_pending {
-            sec = sec.child(
-                div()
-                    .flex()
-                    .flex_col()
-                    .gap(px(crate::metrics::space::XS))
-                    .child(div().h(px(14.)).bg(th.mid).opacity(0.6))
-                    .child(div().h(px(14.)).bg(th.mid).opacity(0.6))
-                    .child(div().h(px(14.)).w(gpui::relative(0.6)).bg(th.mid).opacity(0.6)),
-            );
+        if self.info_pending || self.loading {
+            // native-only: 4 slots of the bio's 19.5 px line height = the clamped height, so the arrival keeps it
+            let sk = crate::widgets::skeleton::text_slot;
+            sec = sec.child(pid("artist.bio", div().flex().flex_col().child(sk(&th, 19.5, 14.0, 1.0)).child(sk(&th, 19.5, 14.0, 1.0)).child(sk(&th, 19.5, 14.0, 1.0)).child(sk(&th, 19.5, 14.0, 0.6))));
         } else if let Some(bio) = self.info.as_ref().and_then(|i| i.biography.clone()) {
             // `line-height: 1.5` of the 13 px body font, clamped to 4 lines until expanded
             let lh = 13.0 * 1.5;
@@ -494,6 +523,9 @@ impl ArtistDetailView {
                     })),
                 );
             }
+        } else {
+            // native-only: the column stays (the web drops About), so Popular keeps its width
+            sec = sec.child(div().flex().child(txt(&th, BODY_SM, "No biography.").color(th.muted)));
         }
         pid("artist.about", sec).into_any_element()
     }
@@ -543,15 +575,18 @@ impl Focusable for ArtistDetailView {
 impl Render for ArtistDetailView {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let th = app::theme(cx);
-        let content: AnyElement = if self.loading {
-            div().p(px(crate::metrics::space::XL)).child(txt(&th, MONO_CODE, "LOADING ARTIST…").color(th.muted)).into_any_element()
-        } else if let Some(d) = self.detail.clone() {
+        let detail = self.detail.clone();
+        let content: AnyElement = if self.loading || detail.is_some() {
+            let sk = self.loading;
             let vw = f32::from(window.viewport_size().width);
-            let header = self.header(&th, &d, window, cx);
+            let header = match &detail {
+                Some(d) if !sk => self.header(&th, d, window, cx),
+                _ => Self::header_skeleton(&th),
+            };
             let mut page = div().relative().w_full().flex_none().flex().flex_col().p(px(m::PAGE_PAD)).gap(px(crate::metrics::space::XL)).child(super::parts::measure_keyed("artist.page", &self.page_w)).child(header);
             let content_w = (self.page_w.get() - 2.0 * m::PAGE_PAD).max(1.0);
-            let show_top = self.top_pending || !self.top_items().is_empty();
-            let show_about = self.info_pending || self.info.as_ref().is_some_and(|i| i.biography.is_some());
+            // native-only: both columns always exist (skeleton, content or a short empty note), so nothing re-flows
+            let (show_top, show_about) = (true, true);
             if show_top || show_about {
                 // `.extras { grid-template-columns: minmax(0, 1.4fr) minmax(0, 1fr); gap: lg }`, one column below 1100 px
                 let stacked = vw < m::EXTRAS_STACK_BELOW;
@@ -581,11 +616,20 @@ impl Render for ArtistDetailView {
             }
             // Core Releases
             let (cols, cw) = auto_fill(content_w, 160.0, crate::metrics::space::MD);
-            let _ = cols;
             let mut grid = div().flex().flex_row().flex_wrap().gap(px(crate::metrics::space::MD));
-            for (i, a) in d.albums.iter().enumerate() {
-                let ids = (i < 8).then(|| format!("artist.album.{i}"));
-                grid = grid.child(card(&self.ctx.clone(), &th, CardItem::Album(a), cw, None, ids, window, cx));
+            match detail.as_ref().filter(|_| !sk) {
+                Some(d) => {
+                    for (i, a) in d.albums.iter().enumerate() {
+                        let ids = (i < 8).then(|| format!("artist.album.{i}"));
+                        grid = grid.child(card(&self.ctx.clone(), &th, CardItem::Album(a), cw, None, ids, window, cx));
+                    }
+                }
+                // native-only: two rows of placeholder cards (the page keeps its scroll-gutter decision)
+                None => {
+                    for _ in 0..cols * 2 {
+                        grid = grid.child(super::cards::card_skeleton(&th, cw));
+                    }
+                }
             }
             page = page.child(pid(
                 "artist.albums",
