@@ -262,7 +262,10 @@ impl TracksView {
     }
 
     // ------------------------------------------------------------ actions
+    #[track_caller]
     fn play_from(&mut self, id: String, cx: &mut Context<Self>) {
+        let at = std::panic::Location::caller();
+        crate::log(&format!("tracks play_from {id} ({}:{})", at.file(), at.line()));
         let (field, dir) = (self.sort, self.dir);
         let filter = if self.filter.trim().is_empty() { None } else { Some(self.filter.clone()) };
         app::call(cx, move |b| {
@@ -446,7 +449,7 @@ impl TracksView {
         let th = self.th;
         let Some(t) = self.pager.get(ix).cloned() else {
             self.request_page(ix / PAGE, cx);
-            return div().id(("trow", ix)).h(px(tr::ROW_H)).w_full().bg(th.mid).into_any_element();
+            return crate::widgets::skeleton::row(&th, tr::ROW_H).w_full().into_any_element();
         };
         let active = self.current_id.as_deref() == Some(t.id.as_str());
         let selected = self.sel.contains(ix);
@@ -710,10 +713,17 @@ impl Render for TracksView {
         .track_scroll(self.list.clone())
         .size_full();
 
-        let body: AnyElement = if total == 0 {
+        let body: AnyElement = if total == 0 && !self.loaded {
+            // native-only: skeleton rows at the real row height instead of a "Loading…" line
+            let mut rows_v = div().flex().flex_col().size_full().overflow_hidden();
+            for _ in 0..40 {
+                rows_v = rows_v.child(crate::widgets::skeleton::row(&th, tr::ROW_H));
+            }
+            rows_v.into_any_element()
+        } else if total == 0 {
             div()
                 .p(px(crate::metrics::space::MD))
-                .child(txt(&th, BODY_SM, if !self.loaded { "Loading…" } else if self.filter.trim().is_empty() { "No tracks in your library yet." } else { "No tracks match your filter." }).color(th.muted))
+                .child(txt(&th, BODY_SM, if self.filter.trim().is_empty() { "No tracks in your library yet." } else { "No tracks match your filter." }).color(th.muted))
                 .into_any_element()
         } else {
             div()

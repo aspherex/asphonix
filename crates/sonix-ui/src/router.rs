@@ -109,6 +109,17 @@ pub fn decode_component(s: &str) -> String {
     String::from_utf8_lossy(&out).into_owned()
 }
 
+/// The route a cold start opens: `router.svelte.ts parseHash()` with no hash is `home` (the native app has no URL
+/// to resume). `SONIX_ROUTE` (screenshots) picks another one; the env-driven perf/debug scripts (`SONIX_SCRIPT`,
+/// `SONIX_PLAY`, `SONIX_MENU`) drive the Tracks list and start there unless a route is given.
+pub fn initial_route(env_route: Option<&str>, scripted: bool) -> Route {
+    match env_route.and_then(Route::parse) {
+        Some(r) => r,
+        None if scripted => Route::Tracks,
+        None => Route::Home,
+    }
+}
+
 /// Browser-like history: navigating drops the forward entries; navigating to the
 /// route already shown is a no-op.
 #[derive(Debug, Clone)]
@@ -161,6 +172,15 @@ impl Router {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn cold_start_opens_home_like_parse_hash_without_a_hash() {
+        assert_eq!(initial_route(None, false), Route::Home);
+        assert_eq!(initial_route(Some("albums"), false), Route::Albums);
+        assert_eq!(initial_route(Some("#/nope"), false), Route::Home, "an unknown route falls back to home");
+        assert_eq!(initial_route(None, true), Route::Tracks, "perf/debug scripts drive the Tracks list");
+        assert_eq!(initial_route(Some("nowplaying"), true), Route::NowPlaying);
+    }
 
     #[test]
     fn parse_and_path_round_trip() {

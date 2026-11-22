@@ -4,6 +4,7 @@
 pub mod button;
 pub mod context_menu;
 pub mod scrollbar;
+pub mod skeleton;
 pub mod slider;
 pub mod smooth;
 pub mod text_input;

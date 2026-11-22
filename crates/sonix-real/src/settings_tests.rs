@@ -593,3 +593,91 @@ fn rolling_sources_start_at_the_clicked_row_and_static_queues_keep_the_earlier_r
         assert_eq!(q.current_index, 2);
     }
 }
+
+/// `session.json` as another client (or an older run) left it: t1..t3, current t2 at 112.676 s, volume 0.705.
+fn write_saved_session(e: &Env) -> String {
+    std::fs::create_dir_all(e.cfg()).unwrap();
+    let state = SessionState {
+        version: sonix_core::audio::session::SESSION_VERSION,
+        saved_at_ms: 1,
+        position_ms: 112_676,
+        volume: Some(0.705),
+        queue: core_of(&["t1", "t2", "t3"], 1),
+    };
+    let json = serde_json::to_string(&state).unwrap();
+    std::fs::write(e.cfg().join(sonix_core::audio::session::SESSION_FILE), &json).unwrap();
+    json
+}
+
+/// The library is behind the session (its tracks were added on the server after the last sync): the 300 ms restore
+/// skips it, and the first successful sync, which brought the tracks in, offers it again: paused at the saved
+/// position and volume, and the saved session is not rewritten by the restore alone.
+#[test]
+fn a_session_skipped_for_unknown_tracks_is_restored_after_the_first_sync() {
+    let e = Env::new("restore-retry");
+    let saved = write_saved_session(&e);
+    let b = e.open();
+    std::thread::sleep(Duration::from_millis(600)); // the startup restore ran against the empty library
+    let st = b.player_get_state().unwrap();
+    assert_eq!(st.status, PlaybackStatus::Stopped);
+    assert!(st.track.is_none() && queue_ids(&b).is_empty());
+    seed(&b); // what the startup sync adds
+    b.after_first_sync();
+    wait_until("restored queue", || queue_ids(&b).len() == 3);
+    let st = b.player_get_state().unwrap();
+    assert_eq!(st.status, PlaybackStatus::Paused);
+    assert_eq!(st.track.map(|t| t.id), Some("t2".to_string()));
+    assert!((st.position_sec - 112.676).abs() < 1e-6, "{}", st.position_sec);
+    assert!((st.volume - 0.705).abs() < 1e-6, "{}", st.volume);
+    std::thread::sleep(Duration::from_millis(300));
+    let on_disk = std::fs::read_to_string(e.cfg().join(sonix_core::audio::session::SESSION_FILE)).unwrap();
+    assert_eq!(on_disk, saved, "restoring alone must not rewrite the saved session");
+    // only once per run: a later sync does not re-offer it (the user may have cleared the queue meanwhile)
+    assert!(!b.0.restore_retry.load(std::sync::atomic::Ordering::SeqCst));
+}
+
+/// Whatever the user started before the first sync finished wins over the deferred restore.
+#[test]
+fn the_deferred_restore_never_replaces_a_queue_the_user_started() {
+    let e = Env::new("restore-retry-user");
+    write_saved_session(&e);
+    let b = e.open();
+    std::thread::sleep(Duration::from_millis(600));
+    seed(&b);
+    b.player_play_queue(PlayQueueRequest { track_ids: vec!["t3".into(), "t1".into()], start_index: 0 }).unwrap();
+    wait_until("user queue", || queue_ids(&b).len() == 2);
+    b.after_first_sync();
+    std::thread::sleep(Duration::from_millis(300));
+    assert_eq!(queue_ids(&b), ["t3", "t1"]);
+    assert_ne!(b.player_get_state().unwrap().track.map(|t| t.id), Some("t2".to_string()));
+}
+
+/// The user queued something and emptied the queue again before the first sync finished (the session file may still
+/// hold the old queue: writes are debounced): the deferred restore must not bring the saved session back.
+#[test]
+fn the_deferred_restore_never_refills_a_queue_the_user_emptied() {
+    let e = Env::new("restore-retry-emptied");
+    write_saved_session(&e);
+    let b = e.open();
+    std::thread::sleep(Duration::from_millis(600));
+    seed(&b);
+    b.player_enqueue(EnqueueRequest { track_ids: vec!["t3".into()], position: EnqueuePosition::End }).unwrap();
+    wait_until("enqueued", || queue_ids(&b).len() == 1);
+    b.player_remove_from_queue(0).unwrap();
+    wait_until("emptied", || queue_ids(&b).is_empty());
+    b.after_first_sync();
+    std::thread::sleep(Duration::from_millis(300));
+    assert!(queue_ids(&b).is_empty(), "{:?}", queue_ids(&b));
+    assert_eq!(b.player_get_state().unwrap().status, PlaybackStatus::Stopped);
+}
+
+/// Logging out disarms the deferred restore: the next account's first sync must not get the old account's session.
+#[test]
+fn logout_disarms_the_deferred_restore() {
+    let e = Env::new("restore-retry-logout");
+    write_saved_session(&e);
+    let b = e.open();
+    std::thread::sleep(Duration::from_millis(600));
+    let _ = b.auth_logout();
+    assert!(!b.0.restore_retry.load(std::sync::atomic::Ordering::SeqCst));
+}

@@ -274,6 +274,32 @@ fn idle_player_state() -> PlayerState {
     }
 }
 
+/// One-line trace of the commands that replace or move the queue (native addition: with `SONIX_LOG` set the UI's
+/// logger writes it, so a startup log names who started what). `None` for queries and high-frequency commands.
+fn describe_queue_command(cmd: &EngineCommand) -> Option<String> {
+    Some(match cmd {
+        EngineCommand::PlaySource { kind, mode, track_ids, start_track_id, .. } => {
+            format!("PlaySource kind={kind:?} mode={mode:?} n={} start={start_track_id:?}", track_ids.len())
+        }
+        EngineCommand::PlayQueue { track_ids, start_index } => format!("PlayQueue n={} start_index={start_index}", track_ids.len()),
+        EngineCommand::RestoreSession { state, force, .. } => format!(
+            "RestoreSession force={force} entries={} current={:?} position_ms={} volume={:?}",
+            state.queue.entries.len(),
+            state.queue.current,
+            state.position_ms,
+            state.volume
+        ),
+        EngineCommand::JumpTo(i) => format!("JumpTo {i}"),
+        EngineCommand::Next => "Next".into(),
+        EngineCommand::Previous => "Previous".into(),
+        EngineCommand::Play => "Play".into(),
+        EngineCommand::PlayPause => "PlayPause".into(),
+        EngineCommand::Stop => "Stop".into(),
+        EngineCommand::SetVolume(v) => format!("SetVolume {v}"),
+        _ => return None,
+    })
+}
+
 /// The handle `ipc.rs` commands talk to via `tauri::State`. The actual
 /// engine lives on its own thread once started.
 pub struct EngineHandle {
@@ -667,6 +693,10 @@ struct Engine {
     /// See `MAX_CONSECUTIVE_FAILURES`; reset when a track starts or the user
     /// picks something to play.
     consecutive_failures: u32,
+    /// Native addition: set by the first command that changes the queue (play, enqueue, remove, reorder, jump,
+    /// skip, stop, a forced restore). A startup (non-forced) restore is refused from then on, even when the queue
+    /// is empty again: the user emptied it on purpose, and a re-offered saved session must not bring it back.
+    queue_touched: bool,
     /// Set by a failure reported *while* `fail_current_track` is already
     /// skipping (a synchronous open failure inside its `advance`), so the
     /// skip continues in its loop instead of recursing (deep queues used to
@@ -770,6 +800,7 @@ impl Engine {
             resume_at: None,
             last_error: None,
             consecutive_failures: 0,
+            queue_touched: false,
             skip_pending: false,
             in_failure_chain: false,
             last_emit: Instant::now(),
@@ -831,6 +862,11 @@ impl Engine {
                             | EngineCommand::LoopCycle
                             | EngineCommand::RestoreSession { force: false, .. }
                     );
+                    if log::log_enabled!(log::Level::Info) {
+                        if let Some(what) = describe_queue_command(&cmd) {
+                            log::info!("engine: {what}");
+                        }
+                    }
                     self.handle(cmd);
                     if mutates {
                         self.tracking.queue_dirty = true;
@@ -921,6 +957,21 @@ impl Engine {
     }
 
     fn handle(&mut self, cmd: EngineCommand) {
+        if matches!(
+            cmd,
+            EngineCommand::PlayQueue { .. }
+                | EngineCommand::PlaySource { .. }
+                | EngineCommand::Enqueue { .. }
+                | EngineCommand::RemoveFromQueue(_)
+                | EngineCommand::ReorderQueue { .. }
+                | EngineCommand::JumpTo(_)
+                | EngineCommand::Next
+                | EngineCommand::Previous
+                | EngineCommand::Stop
+                | EngineCommand::RestoreSession { force: true, .. }
+        ) {
+            self.queue_touched = true;
+        }
         match cmd {
             EngineCommand::PlayQueue {
                 track_ids,
@@ -2633,7 +2684,8 @@ impl Engine {
     /// saved session untouched rather than judging every id deleted.
     fn restore_session(&mut self, state: SessionState, pools: Option<SourcePools>, force: bool) {
         if !force
-            && (self.status != PlaybackStatus::Stopped
+            && (self.queue_touched
+                || self.status != PlaybackStatus::Stopped
                 || self.playback.is_some()
                 || self.pending_start.is_some()
                 || !self.queue.is_empty())
@@ -3712,6 +3764,7 @@ mod tests {
         };
         let pools = engine.queue.snapshot_pools();
         engine.queue = Queue::new();
+        engine.queue_touched = false; // a fresh engine (next app start): the startup restore applies
         engine.handle(EngineCommand::RestoreSession { state: Box::new(state), pools, force: false });
         let (arc, cov) = engine.queue.flow_info().expect("restored Flow source");
         assert_eq!(arc, ipc::FlowArc::Build);

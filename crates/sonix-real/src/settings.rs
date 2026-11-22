@@ -146,10 +146,30 @@ impl RealBackend {
         let b = self.clone();
         std::thread::spawn(move || {
             std::thread::sleep(Duration::from_millis(300));
-            if let Some((state, pools)) = sonix_core::audio::session::load(&b.0.dir) {
-                b.0.engine.send(EngineCommand::RestoreSession { state: Box::new(state), pools, force: false });
-            }
+            b.offer_saved_session();
         });
+    }
+
+    /// Reads the session files and hands them to the engine as a startup (non-forced) restore. The engine ignores
+    /// it once anything is queued, loading or playing, so offering it twice is harmless.
+    fn offer_saved_session(&self) {
+        if let Some((state, pools)) = sonix_core::audio::session::load(&self.0.dir) {
+            self.0.engine.send(EngineCommand::RestoreSession { state: Box::new(state), pools, force: false });
+        }
+    }
+
+    /// Native deviation from the reference (which restores only once, at 300 ms): the restore resolves ids against
+    /// the local library only, so a library that is behind the server (the session was saved by another client, or
+    /// the app was not opened for a while) skips the whole session ("none of the saved tracks is in the local
+    /// library") although the startup sync adds those tracks seconds later. The first successful sync of the run
+    /// therefore offers the saved session once more, re-read from disk. The engine's own guard (nothing queued,
+    /// loading or playing, and no queue command since start: `queue_touched`) keeps it from replacing or refilling
+    /// anything the user did meanwhile; when the 300 ms restore already worked, the retry is a no-op for the same
+    /// reason. An account switch or logout disarms it (`connect`, `auth_logout`): the session is the old account's.
+    pub(crate) fn after_first_sync(&self) {
+        if self.0.restore_retry.swap(false, Ordering::SeqCst) {
+            self.offer_saved_session();
+        }
     }
 
     /// Exit hook: final session write (+ `savePlayQueue` only when "Sync play queue with server" is on), bounded to 4 s.

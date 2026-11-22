@@ -79,6 +79,9 @@ struct Inner {
     store: Arc<sonix_core::audio::SessionStore>,
     /// Track id + status of the last `PlayerState` event (`emit` drops position-only ticks while suspended).
     last_ui_state: Mutex<Option<(Option<String>, PlaybackStatus)>>,
+    /// True until the first successful library sync of this run has re-offered the saved session to the engine
+    /// (`settings.rs: after_first_sync`).
+    restore_retry: std::sync::atomic::AtomicBool,
 }
 
 #[derive(Clone)]
@@ -172,6 +175,7 @@ impl RealBackend {
             scrobbling,
             store,
             last_ui_state: Mutex::new(None),
+            restore_retry: std::sync::atomic::AtomicBool::new(true),
         }));
         // Persisted service flags first (all default OFF), before any background task or the reconnect starts.
         {
@@ -274,6 +278,9 @@ impl RealBackend {
             }
             me.emit(Event::LibraryChanged);
             if res.is_ok() {
+                if me.0.epoch.load(SeqCst) == epoch {
+                    me.after_first_sync();
+                }
                 me.schedule_art_prefetch(epoch);
             }
         });
@@ -324,6 +331,10 @@ impl RealBackend {
             Ok(())
         });
         let same = previous.as_ref().is_some_and(|p| p.url == url && p.username == username);
+        if !same {
+            // The saved session belongs to the previous account: its first sync must not re-offer it to this one.
+            self.0.restore_retry.store(false, std::sync::atomic::Ordering::SeqCst);
+        }
         self.0.epoch.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
         if !same {
             // Reference `connect_account`: a different server/user (also the first login after a logout) starts clean.
@@ -361,6 +372,7 @@ impl AuthApi for RealBackend {
     /// sync, then clear everything local (profile entry, keychain, `connection.json`, library mirror, art cache) even if
     /// one step fails; the first error is reported.
     fn auth_logout(&self) -> ApiResult<()> {
+        self.0.restore_retry.store(false, std::sync::atomic::Ordering::SeqCst);
         self.flush_listen();
         *self.0.client.write().unwrap() = None;
         self.0.epoch.fetch_add(1, std::sync::atomic::Ordering::SeqCst);

@@ -7,7 +7,7 @@ use super::queue_rail::QueueRail;
 use super::tracks::{TracksEvent, TracksView};
 use crate::app::{self, PlayerModel, Services};
 use crate::perf::FrameStats;
-use crate::router::{Route, Router};
+use crate::router::{Route, Router, initial_route};
 #[cfg(not(feature = "parity"))]
 use crate::settings::{self, UiPrefs};
 use crate::theme::{MONO, Theme};
@@ -162,7 +162,10 @@ impl Shell {
         let live = cx.new(|_| crate::live::LiveLayer::new(&player, np.downgrade()));
         let mut this = Self {
             th,
-            router: Router::new(Route::Tracks),
+            router: Router::new(initial_route(
+                std::env::var("SONIX_ROUTE").ok().as_deref(),
+                ["SONIX_SCRIPT", "SONIX_PLAY", "SONIX_MENU"].iter().any(|k| std::env::var_os(k).is_some()),
+            )),
             backend: backend.clone(),
             player,
             tracks,
@@ -214,10 +217,9 @@ impl Shell {
         this.load_static(cx);
         this.startup_login_check(cx);
         this.install_minimize_hook(window, cx);
-        if let Some(r) = std::env::var("SONIX_ROUTE").ok().and_then(|r| Route::parse(&r)) {
-            this.router.navigate(r);
-            this.route_changed(cx);
-        }
+        // Mount the initial route's page (Home builds its stage here; Tracks has none).
+        crate::log(&format!("initial route {}", this.router.current().path()));
+        this.route_changed(cx);
         this.debug_hooks(window, cx);
         #[cfg(feature = "parity")]
         this.parity_attach(window, cx);
@@ -534,17 +536,23 @@ impl Shell {
     }
 
     // -------------------------------------------------------------- routing
+    /// `SONIX_LOG` names every route change with its call site (startup diagnostics: who navigated).
+    #[track_caller]
     pub fn navigate(&mut self, r: Route, cx: &mut Context<Self>) {
+        let at = std::panic::Location::caller();
+        crate::log(&format!("navigate {} -> {} ({}:{})", self.router.current().path(), r.path(), at.file(), at.line()));
         if self.router.navigate(r) {
             self.route_changed(cx);
         }
     }
     pub fn go_back(&mut self, cx: &mut Context<Self>) {
+        crate::log("navigate back");
         if self.router.back() {
             self.route_changed(cx);
         }
     }
     pub fn go_forward(&mut self, cx: &mut Context<Self>) {
+        crate::log("navigate forward");
         if self.router.forward() {
             self.route_changed(cx);
         }
@@ -747,10 +755,11 @@ impl Render for Shell {
         if !self.shown {
             self.shown = true;
             crate::log("first_render");
-            // `SONIX_NO_ACTIVATE=1`: do not pull the window to the foreground (test runs while someone works at the
-            // PC: a stolen focus routes their keystrokes and clicks into the player).
-            if std::env::var_os("SONIX_NO_ACTIVATE").is_none() {
+            // test-only guard: exactly `SONIX_NO_ACTIVATE=1` parks the window; unset (or any other value) activates as always
+            if std::env::var_os("SONIX_NO_ACTIVATE").is_none_or(|v| v != "1") {
                 window.activate_window();
+            } else if let Some(h) = crate::winffi::hwnd_of(window) {
+                crate::winffi::show_parked_no_activate(h);
             }
             #[cfg(not(feature = "parity"))]
             self.start_boot(window, cx);
