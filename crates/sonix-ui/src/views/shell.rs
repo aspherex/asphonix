@@ -87,6 +87,11 @@ pub struct Shell {
     resumed_at: Option<Instant>,
     fs: FrameStats,
     _subs: Vec<Subscription>,
+    /// CPU work (`crate::live`, `crate::part`): the animated-elements layer and the cached chrome parts
+    pub(crate) live: Entity<crate::live::LiveLayer>,
+    pub(crate) parts: Option<super::shell_cache::ShellParts>,
+    /// what the live layer's slots were recorded for (stage, rail shown, suspended): a change re-records them all
+    live_key: Option<(Route, bool, bool, bool)>,
 }
 
 impl Shell {
@@ -154,6 +159,7 @@ impl Shell {
             TracksEvent::Navigate(r) => this.navigate(r.clone(), cx),
         }));
 
+        let live = cx.new(|_| crate::live::LiveLayer::new(&player, np.downgrade()));
         let mut this = Self {
             th,
             router: Router::new(Route::Tracks),
@@ -198,6 +204,9 @@ impl Shell {
             resumed_at: None,
             fs: FrameStats::new(std::env::var("SONIX_FPSLOG").is_ok() || std::env::var("SONIX_SCRIPT").is_ok()),
             _subs: subs,
+            live,
+            parts: None,
+            live_key: None,
         };
         this.lists_init(cx);
         this.load_backdrop();
@@ -439,7 +448,8 @@ impl Shell {
                 if !self.suspended {
                     self.player.update(cx, |p, _| p.apply_spectrum(f));
                     if self.spectrum_on && *self.router.current() != Route::NowPlaying {
-                        self.queue.update(cx, |_, cx| cx.notify());
+                        // the rail spectrum is painted by the live layer (`crate::live`): only it re-renders
+                        self.live.update(cx, |l, cx| l.poke(cx));
                     }
                 }
             }
@@ -587,6 +597,8 @@ impl Shell {
         self.search.update(cx, |i, _| i.set_theme(&th));
         self.menu.update(cx, |m, _| m.set_theme(th));
         self.tracks.update(cx, |t, _| t.set_theme(&th));
+        // cached views (`crate::part`) repaint only on their own notify: the theme reaches them through a full refresh
+        cx.refresh_windows();
         if !self.suspended {
             self.load_backdrop();
         }
@@ -749,18 +761,25 @@ impl Render for Shell {
         }
 
         let stage: AnyElement = match &route {
-            Route::Tracks => self.tracks.clone().into_any_element(),
-            Route::NowPlaying => self.np.clone().into_any_element(),
+            Route::Tracks => Self::stage_view(self.tracks.clone()),
+            Route::NowPlaying => Self::stage_view(self.np.clone()),
             r if super::lists::ListsHost::handles(r) => self.lists_stage(r, window, cx),
             other => match &self.lib_stage {
-                Some(v) => v.clone().into_any_element(),
+                Some(v) => Self::stage_view(v.clone()),
                 None => self.placeholder(other, window),
             },
         };
 
-        let title = crate::probe::pid("titlebar", self.title_bar(window, cx));
-        let top = crate::probe::pid("topbar", self.top_bar(window, cx));
-        let side = crate::probe::pid("sidebar", self.sidebar(vw, &route, window, cx));
+        // cached parts (`shell_cache.rs`): re-rendered when the shell notifies, reused on live-layer frames
+        let [title, top, side] = self.chrome_views(vw, cx);
+        let live_key = (route.clone(), docked, !docked && !on_np && self.queue_drawer, self.suspended);
+        if self.live_key.as_ref() != Some(&live_key) {
+            // pages that left the screen keep no animated slots; the next frame re-renders everything uncached, so the
+            // views still on screen record theirs again
+            crate::live::clear_all();
+            cx.refresh_windows();
+            self.live_key = Some(live_key);
+        }
 
         // `App.svelte`: the login route has only the title bar and its own stage (no top bar, sidebar, rail, dock)
         let is_login = route == Route::Login;
@@ -773,9 +792,9 @@ impl Render for Shell {
             .relative()
             .children((!is_login).then_some(side))
             .child(crate::probe::pid(stage_id, div().flex_1().min_w_0().h_full().overflow_hidden().relative().child(stage_probe()).child(stage)))
-            .when(docked, |d| d.child(self.queue.clone()))
+            .when(docked, |d| d.child(self.rail_view()))
             .when(!docked && !on_np && self.queue_drawer, |d| {
-                d.child(div().absolute().top_0().right_0().bottom_0().child(self.queue.clone()))
+                d.child(div().absolute().top_0().right_0().bottom_0().child(self.rail_view()))
             });
 
         let root = div()
@@ -869,8 +888,9 @@ impl Render for Shell {
                         div().absolute().top(px(if is_login { crate::metrics::topbar::H } else { 0.0 })).left_0().right_0().bottom_0().child(img(ImageSource::Render(b)).size_full().object_fit(ObjectFit::Fill))
                     }))
                     .child(crate::probe::pid(if is_login { "login.body" } else { "shell.body" }, body))
-                    .when(!on_np && !is_login, |d| d.child(self.dock.clone())),
+                    .when(!on_np && !is_login, |d| d.child(self.dock_view())),
             )
+            .child(self.live_view())
             .child(self.menu.clone())
             .children(self.lists_editor_overlay())
             .child(self.overlays.clone())

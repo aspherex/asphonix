@@ -587,6 +587,7 @@ impl Focusable for Table {
 impl Render for Table {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         crate::rcount::hit("table");
+        crate::live::begin_view(window);
         let th = app::theme(cx);
         let cols = self.cols(window);
         let total = self.total();
@@ -653,7 +654,7 @@ impl Render for Table {
                             let old = bounds_for_canvas.get();
                             bounds_for_canvas.set(b);
                             if (f32::from(old.size.height) - f32::from(b.size.height)).abs() > 0.5 {
-                                window.refresh();
+                                window.request_animation_frame(); // prepaint: `refresh()` is a no-op while drawing
                             }
                         },
                         |_, _, _, _| (),

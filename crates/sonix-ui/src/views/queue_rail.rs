@@ -63,6 +63,9 @@ pub struct QueueRail {
     /// multi-select over absolute queue indices (`QueueRail.svelte`: Ctrl/Shift click, remove acts on the selection)
     sel: Selection,
     _sub: Subscription,
+    /// cached view (`crate::part`): the deck shows the position as whole seconds
+    pos_gate: crate::app::PosGate,
+    _pos_sub: Subscription,
 }
 
 /// Per-row layout flags of `queue_row`: distance from the playing row, playing, Flow source (3-line rows).
@@ -135,7 +138,11 @@ fn drop_frame(th: &Theme) -> gpui::Div {
 impl QueueRail {
     pub fn new(backend: Arc<dyn Backend>, art: ArtHandle, player: &Entity<PlayerModel>, menu: &Entity<ContextMenu>, cx: &mut Context<Self>) -> Self {
         let sub = cx.subscribe(player, |this: &mut Self, _, _: &PlayerEvent, cx| this.refresh(cx));
-        let mut s = Self { backend, art, player: player.clone(), state: None, scroll: gpui::ScrollHandle::new(), scroll_key: None, menu: menu.clone(), focus: cx.focus_handle().tab_stop(true), drag_dy: 0.0, drag: None, base: 0, top_pending: None, rows: Default::default(), ph_bounds: Default::default(), deck_b: Default::default(), user_b: Default::default(), list_b: Default::default(), drag_pos: Point::default(), sel: Selection::default(), _sub: sub };
+        let mut s = Self { backend, art, player: player.clone(), state: None, scroll: gpui::ScrollHandle::new(), scroll_key: None, menu: menu.clone(), focus: cx.focus_handle().tab_stop(true), drag_dy: 0.0, drag: None, base: 0, top_pending: None, rows: Default::default(), ph_bounds: Default::default(), deck_b: Default::default(), user_b: Default::default(), list_b: Default::default(), drag_pos: Point::default(), sel: Selection::default(), _sub: sub, pos_gate: Default::default(), _pos_sub: cx.observe(player, |this: &mut Self, p, cx| {
+            if this.pos_gate.changed(&p.read(cx).state, 0.0) {
+                cx.notify();
+            }
+        }) };
         s.refresh(cx);
         s
     }
@@ -225,6 +232,7 @@ fn header(th: &Theme, id: &'static str, label: String, right: Option<String>) ->
 impl Render for QueueRail {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         crate::rcount::hit("rail");
+        crate::live::begin_view(window);
         if self.top_pending.is_some() {
             match take_pending_top(&mut self.top_pending, f32::from(self.scroll.bounds().size.height)) {
                 Some(pos) => self.scroll.scroll_to_top_of_item(pos),
@@ -252,10 +260,7 @@ impl Render for QueueRail {
         self.ph_bounds.set(None);
         self.user_b.set(Bounds::default());
         let th: Theme = app::theme(cx);
-        let (ps, frame) = {
-            let m = self.player.read(cx);
-            (m.state.clone(), m.spectrum.clone())
-        };
+        let ps = self.player.read(cx).state.clone();
         let backend = self.backend.clone();
         let vw = f32::from(window.viewport_size().width);
         let drawer = vw < crate::metrics::bp::RAIL_DOCKED_FROM;
@@ -272,7 +277,6 @@ impl Render for QueueRail {
         let deck_body = match &ps.track {
             Some(t) => {
                 let cover = art::cover(&self.art, &backend, t.cover_art.as_deref(), 56.0, window, cx);
-                let bands: Option<Vec<u8>> = if ps.status == PlaybackStatus::Stopped { None } else { frame.map(|f| f.bands) };
                 div()
                     .flex()
                     .flex_col()
@@ -294,7 +298,7 @@ impl Render for QueueRail {
                                     .child(pid("rail.deck.artist", div().flex().child(entity_link(&th, (LinkKind::Artist, t.artist_id.as_deref()), &t.artist, MONO_DATA, th.muted, "deck", window)))),
                             ),
                     )
-                    .child(pid("rail.deck.spectrum", div().h(px(64.)).px(px(space::MD)).child(rail_spectrum(th, bands))))
+                    .child(pid("rail.deck.spectrum", div().h(px(64.)).px(px(space::MD)).child(crate::live::slot(crate::live::Kind::RailSpectrum).size_full())))
                     .child(
                         div()
                             .flex()
@@ -496,21 +500,14 @@ impl Render for QueueRail {
 
 /// `QueueRail.svelte: draw()`: bars of `barW = w / n` with a 1 px gap, `max(1, v * h)` tall, on a canvas whose bitmap
 /// is the CSS size (so Chromium upsamples it by the device scale factor).
-fn rail_spectrum(th: Theme, bands: Option<Vec<u8>>) -> impl IntoElement {
-    canvas(
-        |_, _, _| (),
-        move |b, _, window, _| {
-            let Some(bands) = &bands else { return };
-            let (w, h) = (f32::from(b.size.width), f32::from(b.size.height));
-            let n = bands.len().max(1);
-            let bar_w = w / n as f32;
-            for (i, v) in bands.iter().enumerate() {
-                let bh = (*v as f32 / 255.0 * h).max(1.0);
-                window.paint_quad(fill(Bounds::new(point(b.origin.x + px(i as f32 * bar_w), b.origin.y + px(h - bh)), size(px(bar_w - 1.0), px(bh))), th.meter));
-            }
-        },
-    )
-    .size_full()
+pub(crate) fn paint_rail_spectrum(window: &mut gpui::Window, b: Bounds<Pixels>, th: Theme, bands: &[u8]) {
+    let (w, h) = (f32::from(b.size.width), f32::from(b.size.height));
+    let n = bands.len().max(1);
+    let bar_w = w / n as f32;
+    for (i, v) in bands.iter().enumerate() {
+        let bh = (*v as f32 / 255.0 * h).max(1.0);
+        window.paint_quad(fill(Bounds::new(point(b.origin.x + px(i as f32 * bar_w), b.origin.y + px(h - bh)), size(px(bar_w - 1.0), px(bh))), th.meter));
+    }
 }
 
 impl QueueRail {

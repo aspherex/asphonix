@@ -37,12 +37,19 @@ pub struct DockView {
     art_hover: bool,
     title_hover: bool,
     _sub: Subscription,
+    pos_gate: crate::app::PosGate,
 }
 
 impl DockView {
     pub fn new(backend: Arc<dyn Backend>, art: ArtHandle, player: &Entity<PlayerModel>, cx: &mut Context<Self>) -> Self {
-        let sub = cx.observe(player, |_, _, cx| cx.notify());
-        Self { backend, art, player: player.clone(), seek: slider::new_handle(), seek_preview: None, vol: slider::new_handle(), last_audible: 0.5, art_hover: false, title_hover: false, _sub: sub }
+        // cached view (`crate::part`): repaint when the shown second or the seek bar's pixel changes, not on every tick
+        let sub = cx.observe(player, |this: &mut Self, p, cx| {
+            let steps = f32::from(this.seek.bounds.get().size.width) * 2.0;
+            if this.pos_gate.changed(&p.read(cx).state, steps) {
+                cx.notify();
+            }
+        });
+        Self { backend, art, player: player.clone(), seek: slider::new_handle(), seek_preview: None, vol: slider::new_handle(), last_audible: 0.5, art_hover: false, title_hover: false, _sub: sub, pos_gate: Default::default() }
     }
 }
 

@@ -56,6 +56,8 @@ pub struct NowPlayingView {
     np_scroll: gpui::ScrollHandle,
     last_audible: f64,
     _sub: Subscription,
+    /// cached view (`crate::part`): every player state (position, volume, lyrics line) re-renders the page
+    _state_sub: Subscription,
 }
 
 impl NowPlayingView {
@@ -92,6 +94,7 @@ impl NowPlayingView {
             np_scroll: gpui::ScrollHandle::new(),
             last_audible: 2.0 / 3.0,
             _sub: sub,
+            _state_sub: cx.observe(player, |_, _, cx| cx.notify()),
         };
         s.fetch_device(cx);
         s
@@ -111,6 +114,37 @@ impl NowPlayingView {
 
     fn spectrum_wanted(&self) -> bool {
         self.visible && !self.suspended
+    }
+
+    /// The live layer's FFT frame (`FftPanel.frame`): take a new engine frame, run the release step, and say whether
+    /// the panel still moves (playing, or caps / meters falling) so the layer draws again after `MIN_DRAW_MS`.
+    pub(crate) fn fft_step(&mut self, cx: &mut Context<Self>) -> crate::live::FftDraw {
+        let (status, has_track, frame, seq) = {
+            let m = self.player.read(cx);
+            (m.state.status, m.state.track.is_some(), m.spectrum.clone(), m.spectrum_seq)
+        };
+        let playing = status == PlaybackStatus::Playing;
+        let now = crate::clock::now();
+        let mut moving = false;
+        if self.spectrum_wanted() {
+            if (!playing || !has_track) && !self.fft.bands.is_empty() && status == PlaybackStatus::Stopped {
+                self.fft.clear();
+            }
+            if seq != self.fft.seen_seq {
+                self.fft.seen_seq = seq;
+                if let Some(f) = frame.as_ref() {
+                    self.fft.on_frame(f, now);
+                }
+            }
+            moving = self.fft.frame(now);
+        }
+        crate::live::FftDraw {
+            bands: self.fft.bands.clone(),
+            caps: self.fft.caps.clone(),
+            level: self.fft.level,
+            hold: self.fft.hold,
+            animate: self.spectrum_wanted() && (playing || moving),
+        }
     }
 
     /// The shell owns `player_set_spectrum_active` (Now Playing or the rail needs frames).
@@ -264,33 +298,27 @@ impl Fft {
 
 /// `FftPanel.drawSpectrum` on a canvas of the element's device-pixel size: bar gap `max(1, round(dpr))` device px,
 /// bar edges rounded to whole device px, cap line `round(2 * dpr)` px thick.
-fn spectrum_canvas(th: Theme, bands: Vec<f32>, caps: Vec<f32>) -> impl IntoElement {
-    canvas(
-        |_, _, _| (),
-        move |b, _, window, _| {
-            let s = window.scale_factor();
-            let (ox, oy) = (f32::from(b.origin.x) * s, f32::from(b.origin.y) * s);
-            let (w, h) = ((f32::from(b.size.width) * s).round(), (f32::from(b.size.height) * s).round());
-            let n = caps.len();
-            if n == 0 {
-                return;
-            }
-            let gap = s.round().max(1.0);
-            let cap_h = (2.0 * s).round().max(1.0);
-            let bar_w = w / n as f32;
-            let dev = |x: f32, y: f32, ww: f32, hh: f32| Bounds::new(point(px((ox + x) / s), px((oy + y) / s)), size(px(ww / s), px(hh / s)));
-            for (i, cap) in caps.iter().enumerate().take(n) {
-                let x = (i as f32 * bar_w).round();
-                let bw = ((i as f32 + 1.0) * bar_w).round() - x - gap;
-                let v = (bands.get(i).copied().unwrap_or(0.0) / 255.0).clamp(0.0, 1.0);
-                let bh = (v * h).round().max(1.0);
-                window.paint_quad(fill(dev(x, h - bh, bw, bh), th.meter));
-                let ch = (cap * h).round().max(1.0);
-                window.paint_quad(fill(dev(x, (h - ch - (2.0 * s).round()).max(0.0), bw, cap_h), th.text));
-            }
-        },
-    )
-    .size_full()
+pub(crate) fn paint_spectrum(window: &mut Window, b: Bounds<gpui::Pixels>, th: Theme, bands: &[f32], caps: &[f32]) {
+    let s = window.scale_factor();
+    let (ox, oy) = (f32::from(b.origin.x) * s, f32::from(b.origin.y) * s);
+    let (w, h) = ((f32::from(b.size.width) * s).round(), (f32::from(b.size.height) * s).round());
+    let n = caps.len();
+    if n == 0 {
+        return;
+    }
+    let gap = s.round().max(1.0);
+    let cap_h = (2.0 * s).round().max(1.0);
+    let bar_w = w / n as f32;
+    let dev = |x: f32, y: f32, ww: f32, hh: f32| Bounds::new(point(px((ox + x) / s), px((oy + y) / s)), size(px(ww / s), px(hh / s)));
+    for (i, cap) in caps.iter().enumerate().take(n) {
+        let x = (i as f32 * bar_w).round();
+        let bw = ((i as f32 + 1.0) * bar_w).round() - x - gap;
+        let v = (bands.get(i).copied().unwrap_or(0.0) / 255.0).clamp(0.0, 1.0);
+        let bh = (v * h).round().max(1.0);
+        window.paint_quad(fill(dev(x, h - bh, bw, bh), th.meter));
+        let ch = (cap * h).round().max(1.0);
+        window.paint_quad(fill(dev(x, (h - ch - (2.0 * s).round()).max(0.0), bw, cap_h), th.text));
+    }
 }
 
 // ===================================================================== Now Playing layout (web `NowPlaying.svelte`)
@@ -328,47 +356,41 @@ fn canvas_text(window: &mut Window, cx: &mut gpui::App, s: &str, size: f32, weig
 }
 
 /// `FftPanel.drawMeters` on the canvas' device-pixel box: `L`/`R` labels, 20 segments, held-peak value.
-fn meter_canvas(th: Theme, level: [f32; 2], hold: [f32; 2]) -> impl IntoElement {
-    canvas(
-        |_, _, _| (),
-        move |b, _, window, cx| {
-            let s = window.scale_factor();
-            let (ox, oy) = (f32::from(b.origin.x) * s, f32::from(b.origin.y) * s);
-            let (w, h) = ((f32::from(b.size.width) * s).round(), (f32::from(b.size.height) * s).round());
-            let label_w = (12.0 * s).round();
-            let value_w = (38.0 * s).round();
-            let row_gap = (4.0 * s).round();
-            let row_h = 2f32.max(((14.0 * s).round()).min(((h - row_gap) / 2.0).floor()));
-            let top = ((h - (row_h * 2.0 + row_gap)) / 2.0).round();
-            let bar_w = w - label_w - value_w;
-            let seg_gap = s.round().max(1.0);
-            let seg_w = (bar_w - seg_gap * (sp::SEGMENTS as f32 - 1.0)) / sp::SEGMENTS as f32;
-            let dev = |x: f32, y: f32, ww: f32, hh: f32| Bounds::new(point(px((ox + x) / s), px((oy + y) / s)), size(px(ww / s), px(hh / s)));
-            for ch in 0..2 {
-                let y = top + ch as f32 * (row_h + row_gap);
-                let mid = y + row_h / 2.0;
-                canvas_text(window, cx, if ch == 0 { "L" } else { "R" }, 9.0, 400.0, th.muted, ox / s, (oy + mid) / s, false);
-                let lit = (((level[ch] - sp::FLOOR_DB) / -sp::FLOOR_DB) * sp::SEGMENTS as f32).round() as i32;
-                let hold_seg = (((hold[ch] - sp::FLOOR_DB) / -sp::FLOOR_DB) * sp::SEGMENTS as f32).round() as i32 - 1;
-                for i in 0..sp::SEGMENTS as i32 {
-                    let x = (label_w + i as f32 * (seg_w + seg_gap)).round();
-                    let seg_db = sp::FLOOR_DB + ((i + 1) as f32 / sp::SEGMENTS as f32) * -sp::FLOOR_DB;
-                    let hot = seg_db > sp::CLIP_FROM_DB;
-                    let col = if i < lit {
-                        if hot { th.clip } else { th.meter }
-                    } else if i == hold_seg && hold[ch] > sp::FLOOR_DB {
-                        if hot { th.clip } else { th.text }
-                    } else {
-                        th.highest
-                    };
-                    window.paint_quad(fill(dev(x, y, seg_w.round().max(1.0), row_h), col));
-                }
-                let val = if hold[ch] <= sp::FLOOR_DB { "-INF".to_string() } else { format!("{:.1}", hold[ch]) };
-                canvas_text(window, cx, &val, 9.0, 400.0, if hold[ch] > sp::CLIP_FROM_DB { th.clip } else { th.muted }, (ox + w) / s, (oy + mid) / s, true);
-            }
-        },
-    )
-    .size_full()
+pub(crate) fn paint_meters(window: &mut Window, cx: &mut gpui::App, b: Bounds<gpui::Pixels>, th: Theme, level: [f32; 2], hold: [f32; 2]) {
+    let s = window.scale_factor();
+    let (ox, oy) = (f32::from(b.origin.x) * s, f32::from(b.origin.y) * s);
+    let (w, h) = ((f32::from(b.size.width) * s).round(), (f32::from(b.size.height) * s).round());
+    let label_w = (12.0 * s).round();
+    let value_w = (38.0 * s).round();
+    let row_gap = (4.0 * s).round();
+    let row_h = 2f32.max(((14.0 * s).round()).min(((h - row_gap) / 2.0).floor()));
+    let top = ((h - (row_h * 2.0 + row_gap)) / 2.0).round();
+    let bar_w = w - label_w - value_w;
+    let seg_gap = s.round().max(1.0);
+    let seg_w = (bar_w - seg_gap * (sp::SEGMENTS as f32 - 1.0)) / sp::SEGMENTS as f32;
+    let dev = |x: f32, y: f32, ww: f32, hh: f32| Bounds::new(point(px((ox + x) / s), px((oy + y) / s)), size(px(ww / s), px(hh / s)));
+    for ch in 0..2 {
+        let y = top + ch as f32 * (row_h + row_gap);
+        let mid = y + row_h / 2.0;
+        canvas_text(window, cx, if ch == 0 { "L" } else { "R" }, 9.0, 400.0, th.muted, ox / s, (oy + mid) / s, false);
+        let lit = (((level[ch] - sp::FLOOR_DB) / -sp::FLOOR_DB) * sp::SEGMENTS as f32).round() as i32;
+        let hold_seg = (((hold[ch] - sp::FLOOR_DB) / -sp::FLOOR_DB) * sp::SEGMENTS as f32).round() as i32 - 1;
+        for i in 0..sp::SEGMENTS as i32 {
+            let x = (label_w + i as f32 * (seg_w + seg_gap)).round();
+            let seg_db = sp::FLOOR_DB + ((i + 1) as f32 / sp::SEGMENTS as f32) * -sp::FLOOR_DB;
+            let hot = seg_db > sp::CLIP_FROM_DB;
+            let col = if i < lit {
+                if hot { th.clip } else { th.meter }
+            } else if i == hold_seg && hold[ch] > sp::FLOOR_DB {
+                if hot { th.clip } else { th.text }
+            } else {
+                th.highest
+            };
+            window.paint_quad(fill(dev(x, y, seg_w.round().max(1.0), row_h), col));
+        }
+        let val = if hold[ch] <= sp::FLOOR_DB { "-INF".to_string() } else { format!("{:.1}", hold[ch]) };
+        canvas_text(window, cx, &val, 9.0, 400.0, if hold[ch] > sp::CLIP_FROM_DB { th.clip } else { th.muted }, (ox + w) / s, (oy + mid) / s, true);
+    }
 }
 
 /// Everything `Waveform.svelte draw()` needs, in one value so the canvas closure owns it.
@@ -635,31 +657,11 @@ impl gpui::EventEmitter<NpEvent> for NowPlayingView {}
 impl Render for NowPlayingView {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         crate::rcount::hit("np");
+        crate::live::begin_view(window);
         let th: Theme = app::theme(cx);
-        let (ps, frame) = {
-            let m = self.player.read(cx);
-            (m.state.clone(), m.spectrum.clone())
-        };
+        // the FFT bars and meters animate in the live layer (`crate::live`, `fft_step`), not here
+        let ps = self.player.read(cx).state.clone();
         let playing = ps.status == PlaybackStatus::Playing;
-        let now = crate::clock::now();
-        let seq = self.player.read(cx).spectrum_seq;
-        let idle = !playing || ps.track.is_none();
-        let mut moving = false;
-        if self.spectrum_wanted() {
-            if idle && !self.fft.bands.is_empty() && ps.status == PlaybackStatus::Stopped {
-                self.fft.clear();
-            }
-            if seq != self.fft.seen_seq {
-                self.fft.seen_seq = seq;
-                if let Some(f) = frame.as_ref() {
-                    self.fft.on_frame(f, now);
-                }
-            }
-            moving = self.fft.frame(now);
-        }
-        if self.spectrum_wanted() && (playing || moving) && !crate::clock::frozen() {
-            window.request_animation_frame();
-        }
         if ps.volume > 0.0 {
             self.last_audible = ps.volume;
         }
@@ -735,7 +737,7 @@ impl Render for NowPlayingView {
                     move |_, h, window, _| {
                         if (cell.get() - h).abs() > 1.0 {
                             cell.set(h);
-                            window.refresh();
+                            window.request_animation_frame(); // in paint: `refresh()` is a no-op while drawing
                         }
                     },
                 )
@@ -923,7 +925,7 @@ impl Render for NowPlayingView {
                         .child(
                             div().flex_1().min_w_0().flex().flex_col().child(axis).child(pid(
                                 "np.fft.spec",
-                                div().flex_1().min_h_0().w_full().bg(th.base).border_1().border_color(th.border).child(spectrum_canvas(th, self.fft.bands.clone(), self.fft.caps.clone())),
+                                div().flex_1().min_h_0().w_full().bg(th.base).border_1().border_color(th.border).child(crate::live::slot(crate::live::Kind::NpSpectrum).size_full()),
                             )),
                         )
                         .child(pid(
@@ -946,7 +948,7 @@ impl Render for NowPlayingView {
                                         .child(txt(&th, LABEL_CAPS, "STEREO").color(th.muted))
                                         .child(txt(&th, LABEL_CAPS, "PEAK").color(th.accent_fg))
                                 }))
-                                .child(div().flex_1().min_h_0().w_full().child(meter_canvas(th, self.fft.level, self.fft.hold))),
+                                .child(div().flex_1().min_h_0().w_full().child(crate::live::slot(crate::live::Kind::NpMeters).size_full())),
                         )),
                 ),
         );

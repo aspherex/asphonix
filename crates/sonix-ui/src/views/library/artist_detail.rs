@@ -542,6 +542,7 @@ impl Focusable for ArtistDetailView {
 
 impl Render for ArtistDetailView {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        crate::live::begin_view(window);
         let th = app::theme(cx);
         let content: AnyElement = if self.loading {
             div().p(px(crate::metrics::space::XL)).child(txt(&th, MONO_CODE, "LOADING ARTIST…").color(th.muted)).into_any_element()

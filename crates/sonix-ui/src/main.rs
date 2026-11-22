@@ -17,6 +17,8 @@ mod memprof;
 mod pager;
 mod playback;
 mod playerkeys;
+mod live;
+mod part;
 mod rail_dnd;
 mod rcount;
 #[cfg(feature = "parity")]

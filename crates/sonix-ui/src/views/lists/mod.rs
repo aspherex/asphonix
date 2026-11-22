@@ -143,7 +143,7 @@ impl Shell {
                     self.lists.subs.push(cx.subscribe(&page, |sh: &mut Shell, _, ev: &ListsEvent, cx| sh.lists_event(ev, cx)));
                     self.lists.track_page = Some(page);
                 }
-                self.lists.track_page.clone().unwrap().into_any_element()
+                Self::stage_view(self.lists.track_page.clone().unwrap())
             }
             Route::History => {
                 if self.lists.history.is_none() {
@@ -151,7 +151,7 @@ impl Shell {
                     self.lists.subs.push(cx.subscribe(&v, |sh: &mut Shell, _, ev: &ListsEvent, cx| sh.lists_event(ev, cx)));
                     self.lists.history = Some(v);
                 }
-                self.lists.history.clone().unwrap().into_any_element()
+                Self::stage_view(self.lists.history.clone().unwrap())
             }
             Route::Favorites => {
                 if self.lists.favorites.is_none() {
@@ -160,7 +160,7 @@ impl Shell {
                     self.lists.subs.push(cx.subscribe(&v, |sh: &mut Shell, _, ev: &ListsEvent, cx| sh.lists_event(ev, cx)));
                     self.lists.favorites = Some(v);
                 }
-                self.lists.favorites.clone().unwrap().into_any_element()
+                Self::stage_view(self.lists.favorites.clone().unwrap())
             }
             Route::Login => {
                 // a fresh form on every visit (dropped again in `route_changed`)
@@ -169,7 +169,7 @@ impl Shell {
                     self.lists.subs.push(cx.subscribe(&v, |sh: &mut Shell, _, ev: &ListsEvent, cx| sh.lists_event(ev, cx)));
                     self.lists.login = Some(v);
                 }
-                self.lists.login.clone().unwrap().into_any_element()
+                Self::stage_view(self.lists.login.clone().unwrap())
             }
             Route::Settings => {
                 if self.lists.settings.is_none() {
@@ -177,7 +177,7 @@ impl Shell {
                     self.lists.subs.push(cx.subscribe(&v, |sh: &mut Shell, _, ev: &ListsEvent, cx| sh.lists_event(ev, cx)));
                     self.lists.settings = Some(v);
                 }
-                self.lists.settings.clone().unwrap().into_any_element()
+                Self::stage_view(self.lists.settings.clone().unwrap())
             }
             Route::Search => {
                 if self.lists.search.is_none() {
@@ -187,7 +187,7 @@ impl Shell {
                     self.lists.subs.push(cx.subscribe(&v, |sh: &mut Shell, _, ev: &ListsEvent, cx| sh.lists_event(ev, cx)));
                     self.lists.search = Some(v);
                 }
-                self.lists.search.clone().unwrap().into_any_element()
+                Self::stage_view(self.lists.search.clone().unwrap())
             }
             _ => {
                 if self.lists.playlists.is_none() {
@@ -196,7 +196,7 @@ impl Shell {
                     self.lists.subs.push(cx.subscribe(&v, |sh: &mut Shell, _, ev: &ListsEvent, cx| sh.lists_event(ev, cx)));
                     self.lists.playlists = Some(v);
                 }
-                self.lists.playlists.clone().unwrap().into_any_element()
+                Self::stage_view(self.lists.playlists.clone().unwrap())
             }
         }
     }

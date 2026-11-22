@@ -606,6 +606,7 @@ impl Focusable for AlbumDetailView {
 
 impl Render for AlbumDetailView {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        crate::live::begin_view(window);
         let th = app::theme(cx);
         let content: AnyElement = if self.loading {
             div().p(px(crate::metrics::space::XL)).child(txt(&th, MONO_CODE, "LOADING ALBUM…").color(th.muted)).into_any_element()

@@ -616,21 +616,10 @@ pub(crate) fn flex_cell(grow: f32) -> Div {
 
 /// The three "now playing" bars of an active row (`TrackRow.svelte:.now-playing`): `scaleY` keyframes on the
 /// shared clock (0.9 s ease-in-out infinite, delays -0.6/-0.3 s) while playing, static `scaleY(.33)` when paused.
-/// Repaints every frame only while playing, visible and not suspended (the row exists only while on screen).
-pub(crate) fn now_playing_bars(th: &Theme, playing: bool) -> impl IntoElement {
-    let color = th.accent;
-    gpui::canvas(
-        |_, _, _| (),
-        move |b, _, window, _| {
-            let heights = anim::bar_heights(playing, crate::clock::now() as f32);
-            anim::paint_bars(window, b.origin, color, heights);
-            if playing && !crate::clock::frozen() {
-                window.request_animation_frame();
-            }
-        },
-    )
-    .w(px(tr::BAR_W * 3.0 + tr::BARS_GAP * 2.0))
-    .h(px(tr::BARS_H))
+/// Painted by the live layer (`crate::live`): the row only reserves the box, so the bars animate without re-rendering
+/// the table (the owning view calls `live::begin_view` in its render).
+pub(crate) fn now_playing_bars(_th: &Theme, playing: bool) -> impl IntoElement {
+    crate::live::slot(crate::live::Kind::Bars { playing }).w(px(tr::BAR_W * 3.0 + tr::BARS_GAP * 2.0)).h(px(tr::BARS_H))
 }
 
 impl Focusable for TracksView {
@@ -642,6 +631,7 @@ impl Focusable for TracksView {
 impl Render for TracksView {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         crate::rcount::hit("tracks");
+        crate::live::begin_view(window);
         let th = self.th;
         let cols = self.cols(window);
         let total = self.pager.total;

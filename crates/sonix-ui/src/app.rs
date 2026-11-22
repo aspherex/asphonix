@@ -155,6 +155,28 @@ impl PlayerModel {
     }
 }
 
+/// Gate for a cached view that shows the player position (`crate::part`): the player notifies 4x a second, but a
+/// readout only changes with the whole second (`format_duration` floors) and a progress bar only with its pixel.
+/// `changed` is true when anything else in the state changed, the second changed, or the progress moved by one of
+/// `steps` positions (the bar width in device px; 0 = no bar).
+#[derive(Default)]
+pub struct PosGate(Option<(PlayerState, u64, i64)>);
+
+impl PosGate {
+    pub fn changed(&mut self, s: &PlayerState, steps: f32) -> bool {
+        let mut rest = s.clone();
+        rest.position_sec = 0.0;
+        let sec = if s.position_sec.is_finite() && s.position_sec >= 0.0 { s.position_sec.floor() as u64 } else { u64::MAX };
+        let step = if steps > 0.0 && s.duration_sec > 0.0 { ((s.position_sec / s.duration_sec).clamp(0.0, 1.0) * steps as f64).round() as i64 } else { 0 };
+        let key = (rest, sec, step);
+        if self.0.as_ref() == Some(&key) {
+            return false;
+        }
+        self.0 = Some(key);
+        true
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
