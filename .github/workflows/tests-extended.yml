@@ -7,7 +7,7 @@ name: Tests (extended)
 
 on:
   push:
-    branches: [master]
+    branches: [main, master]
     paths-ignore: ["**.md", "docs/**"]
   schedule:
     - cron: "17 3 * * *"
