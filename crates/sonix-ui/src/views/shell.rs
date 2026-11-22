@@ -7,7 +7,7 @@ use super::queue_rail::QueueRail;
 use super::tracks::{TracksEvent, TracksView};
 use crate::app::{self, PlayerModel, Services};
 use crate::perf::FrameStats;
-use crate::router::{Route, Router};
+use crate::router::{Route, Router, initial_route};
 #[cfg(not(feature = "parity"))]
 use crate::settings::{self, UiPrefs};
 use crate::theme::{MONO, Theme};
@@ -156,7 +156,10 @@ impl Shell {
 
         let mut this = Self {
             th,
-            router: Router::new(Route::Tracks),
+            router: Router::new(initial_route(
+                std::env::var("SONIX_ROUTE").ok().as_deref(),
+                ["SONIX_SCRIPT", "SONIX_PLAY", "SONIX_MENU"].iter().any(|k| std::env::var_os(k).is_some()),
+            )),
             backend: backend.clone(),
             player,
             tracks,
@@ -205,10 +208,9 @@ impl Shell {
         this.load_static(cx);
         this.startup_login_check(cx);
         this.install_minimize_hook(window, cx);
-        if let Some(r) = std::env::var("SONIX_ROUTE").ok().and_then(|r| Route::parse(&r)) {
-            this.router.navigate(r);
-            this.route_changed(cx);
-        }
+        // Mount the initial route's page (Home builds its stage here; Tracks has none).
+        crate::log(&format!("initial route {}", this.router.current().path()));
+        this.route_changed(cx);
         this.debug_hooks(window, cx);
         #[cfg(feature = "parity")]
         this.parity_attach(window, cx);
