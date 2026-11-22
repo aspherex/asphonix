@@ -860,9 +860,9 @@ impl Engine {
                             | EngineCommand::LoopCycle
                             | EngineCommand::RestoreSession { force: false, .. }
                     );
-                    if log::log_enabled!(log::Level::Info)
+                    if tracing::enabled!(tracing::Level::INFO)
                         && let Some(what) = describe_queue_command(&cmd) {
-                            log::info!("engine: {what}");
+                            tracing::info!("engine: {what}");
                         }
                     self.handle(cmd);
                     if mutates {
@@ -949,7 +949,7 @@ impl Engine {
         if !sync {
             let _ = tx.send(WriterMsg::Session(s));
         } else if let Err(e) = crate::listen::insert_session(&self.db, &s) {
-            log::warn!("failed to record listen event: {}", e.message);
+            tracing::warn!(error = %e.message, "failed to record listen event");
         }
     }
 
@@ -1157,7 +1157,7 @@ impl Engine {
                     // One batched read of the pool's features (tens of ms
                     // at most, even for the whole library) before drawing.
                     let features = library::flow::load_flow_features(&self.db, &track_ids).unwrap_or_else(|e| {
-                        log::warn!("flow: feature read failed, sequencing blind: {}", e.message);
+                        tracing::warn!(error = %e.message, "flow: feature read failed, sequencing blind");
                         Default::default()
                     });
                     self.queue.set_source_flow(kind, label, arc, track_ids, features, start_track_id.as_deref());
@@ -1588,14 +1588,14 @@ impl Engine {
                     });
                 }
                 Err(reason) if negotiated.mode == OutputMode::Exclusive => {
-                    log::warn!("exclusive open failed ({reason}); falling back to shared mode");
+                    tracing::warn!(error = %reason, "exclusive open failed; falling back to shared mode");
                     self.exclusive_error = Some(format!(
                         "Exclusive mode could not start ({reason}), so this track plays in shared mode."
                     ));
                     negotiated = output::shared_format(source);
                 }
                 Err(reason) => {
-                    log::error!("output open failed: {reason}");
+                    tracing::error!(error = %reason, "output open failed");
                     if self.exclusive_error.is_none()
                         && self.output_mode_pref == OutputMode::Exclusive
                     {
@@ -1839,7 +1839,7 @@ impl Engine {
     /// `MAX_CONSECUTIVE_FAILURES` in a row - repeat one/all or an offline
     /// session would otherwise skip forever.
     fn fail_current_track(&mut self, reason: &str) {
-        log::error!("playback error: {reason}");
+        tracing::error!(error = %reason, "playback error");
         self.listen_sample();
         self.listen.note(EndReason::Error);
         self.last_error = Some(reason.to_string());
@@ -1936,7 +1936,7 @@ impl Engine {
         self.prefetched = None;
         match self.source.open(&next_id) {
             Ok(ms) => self.prefetched = Some((next_id, ms)),
-            Err(e) => log::warn!("prefetch of {next_id} failed: {e}"),
+            Err(e) => tracing::warn!(track_id = %next_id, error = %e, "prefetch failed"),
         }
     }
 
@@ -2011,7 +2011,7 @@ impl Engine {
         let Ok(RenderEvent::DeviceLost(reason)) = pb.render_events.try_recv() else {
             return;
         };
-        log::warn!("output device lost: {reason}");
+        tracing::warn!(error = %reason, "output device lost");
         self.device_name_cache.take();
         let at = pb.position_sec();
         self.teardown_playback();
@@ -2036,7 +2036,7 @@ impl Engine {
                     producer,
                     frames_pushed,
                 }) => self.handle_track_eof(producer, frames_pushed),
-                Ok(DecodeEvent::Error(e)) => log::error!("decode error for {}: {e}", pb.current.id),
+                Ok(DecodeEvent::Error(e)) => tracing::error!(track_id = %pb.current.id, error = %e, "decode error"),
                 Ok(DecodeEvent::FormatReady(_)) => {}
                 Err(_) => return,
             }
@@ -2087,7 +2087,7 @@ impl Engine {
                             start_offset: 0.0,
                         });
                     } else {
-                        log::info!(
+                        tracing::info!(
                             "format change {} Hz {} -> {} Hz {:?}: device reopens after the current track",
                             pb.negotiated.sample_rate,
                             pb.negotiated.container.label(),
@@ -2105,7 +2105,7 @@ impl Engine {
                     }
                 }
                 Err(e) => {
-                    log::error!("could not open next track: {e}");
+                    tracing::error!(error = %e, "could not open next track");
                     drop(producer);
                 }
             }
@@ -2169,11 +2169,12 @@ impl Engine {
 
         match pending.reopen {
             None => {
-                log::info!(
-                    "gapless track change to {} at ring frame {} (underrun gap frames in this stream: {})",
-                    next.id,
-                    pending.boundary,
-                    pb.render.gap_frames.load(Ordering::Relaxed)
+                tracing::info!(
+                    track_id = %next.id,
+                    ring_frame = pending.boundary,
+                    gap_frames = pb.render.gap_frames.load(Ordering::Relaxed),
+                    stream_parks = pb.render.stream_parks.load(Ordering::Relaxed),
+                    "gapless track change (gap_frames: underrun silence in this stream; stream_parks: long-pause stops)"
                 );
                 pb.current = next;
                 self.playback = Some(pb);
@@ -2196,11 +2197,11 @@ impl Engine {
                     container: out.negotiated.container,
                     producer: out.producer,
                 });
-                log::info!(
-                    "format change to {}: output reopened as {} in {:?}",
-                    next.id,
-                    out.negotiated.format_label(""),
-                    reopen_started.elapsed()
+                tracing::info!(
+                    track_id = %next.id,
+                    format = %out.negotiated.format_label(""),
+                    duration_ms = reopen_started.elapsed().as_millis() as u64,
+                    "format change: output reopened"
                 );
                 self.playback = Some(Playback {
                     negotiated: out.negotiated,
@@ -2344,7 +2345,7 @@ impl Engine {
                     self.track_cache.insert(t.id.clone(), t);
                 }
             }
-            Err(e) => log::warn!("track metadata lookup failed: {}", e.message),
+            Err(e) => tracing::warn!(error = %e.message, "track metadata lookup failed"),
         }
     }
 
@@ -2521,7 +2522,7 @@ impl Engine {
         });
         match spawned {
             Ok(_) => self.autoplay.inflight = Some(InflightAutoplay { seed, rx }),
-            Err(e) => log::warn!("autoplay lookup thread not started: {e}"),
+            Err(e) => tracing::warn!(error = %e, "autoplay lookup thread not started"),
         }
     }
 
@@ -2551,7 +2552,7 @@ impl Engine {
         let queued: std::collections::HashSet<String> = self.queue.ids().map(str::to_string).collect();
         let (ids, artists) = autoplay::filter_candidates(items, &self.recent_played, &|id| queued.contains(id));
         if !self.prefs.autoplay() || ids.is_empty() {
-            log::info!("autoplay: nothing to continue with after {seed}");
+            tracing::info!(track_id = %seed, "autoplay: nothing to continue with");
             if waiting {
                 self.status = PlaybackStatus::Stopped;
             }
@@ -2577,7 +2578,7 @@ impl Engine {
             // probe in `handle_track_eof` doesn't wait on a cold stream.
             let queue = self.queue.clone();
             self.prefetch_after(&queue);
-            log::info!("autoplay: queued similar tracks after {seed}");
+            tracing::info!(track_id = %seed, "autoplay: queued similar tracks");
         } else if waiting && self.queue.reopen_last(seed) {
             // The last track already ended (or Next was pressed on it) before
             // the answer arrived: start the radio now, with a gap.
@@ -2698,12 +2699,12 @@ impl Engine {
         let known = match library::track_artists_for_ids(&self.db, &wanted) {
             Ok(set) => set,
             Err(e) => {
-                log::warn!("session restore: library read failed: {}", e.message);
+                tracing::warn!(error = %e.message, "session restore: library read failed");
                 return;
             }
         };
         if known.is_empty() {
-            log::info!("session restore skipped: none of the saved tracks is in the local library");
+            tracing::info!("session restore skipped: none of the saved tracks is in the local library");
             return;
         }
         let from_server = state.volume.is_none();
@@ -2728,11 +2729,11 @@ impl Engine {
         if !flow_ids.is_empty() {
             match library::flow::load_flow_features(&self.db, &flow_ids) {
                 Ok(f) => restored.queue.set_flow_features(f),
-                Err(e) => log::warn!("session restore: flow data read failed: {}", e.message),
+                Err(e) => tracing::warn!(error = %e.message, "session restore: flow data read failed"),
             }
         }
         if restored.dropped > 0 {
-            log::info!("session restore: dropped {} unknown track(s)", restored.dropped);
+            tracing::info!(count = restored.dropped, "session restore: dropped unknown tracks");
         }
         self.consecutive_failures = 0;
         self.teardown_playback();
@@ -2841,7 +2842,7 @@ fn spawn_spectrum_thread(
             }
         });
     if let Err(e) = spawned {
-        log::warn!("spectrum thread not started: {e}");
+        tracing::warn!(error = %e, "spectrum thread not started");
     }
 }
 
@@ -2919,6 +2920,7 @@ mod tests {
             paused: Arc::new(AtomicBool::new(false)),
             played_frames: played_frames.clone(),
             gap_frames: Arc::new(AtomicU64::new(0)),
+            stream_parks: Arc::new(AtomicU64::new(0)),
             volume_bits: Arc::new(AtomicU32::new(1.0f32.to_bits())),
             seek_tx,
             seeks_applied: seeks_applied.clone(),
@@ -3788,6 +3790,7 @@ mod tests {
             paused: paused.clone(),
             played_frames: Arc::new(AtomicU64::new(0)),
             gap_frames: Arc::new(AtomicU64::new(0)),
+            stream_parks: Arc::new(AtomicU64::new(0)),
             volume_bits: Arc::new(AtomicU32::new(1.0f32.to_bits())),
             seek_tx,
             seeks_applied: Arc::new(AtomicU64::new(0)),

@@ -280,7 +280,7 @@ pub async fn serve<L: Listener>(
                 });
             }
             Err(e) => {
-                log::warn!("mcp bridge accept failed: {e}");
+                tracing::warn!(error = %e, "mcp bridge accept failed");
                 tokio::select! {
                     _ = shutdown.changed() => break,
                     _ = tokio::time::sleep(backoff) => {}
@@ -381,7 +381,7 @@ impl McpBridge {
         let (tx, rx) = watch::channel(false);
         crate::rt::spawn(serve(listener, keys, dispatch, Limits::default(), rx));
         *slot = Some(Running { shutdown: tx });
-        log::info!("Claude (MCP) bridge listening");
+        tracing::info!("Claude (MCP) bridge listening");
         Ok(())
     }
 
@@ -390,7 +390,7 @@ impl McpBridge {
         let mut guard = self.running.lock().await;
         if let Some(r) = guard.take() {
             let _ = r.shutdown.send(true);
-            log::info!("Claude (MCP) bridge stopped");
+            tracing::info!("Claude (MCP) bridge stopped");
         }
         let _ = std::fs::remove_file(Discovery::path(config_dir));
         self.set_error(None);

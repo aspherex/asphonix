@@ -671,7 +671,7 @@ async fn download_with_retries(
                 }
                 offset = stalled_at;
                 let backoff = (RETRY_BACKOFF_BASE * 2u32.pow(attempt - 1)).min(RETRY_BACKOFF_MAX);
-                log::warn!(
+                tracing::warn!(
                     "stream download stalled/dropped at byte {offset}; retrying with Range resume in {backoff:?} (attempt {attempt}/{MAX_RETRIES})"
                 );
                 tokio::time::sleep(backoff).await;
@@ -739,7 +739,7 @@ async fn download_once(
         Ok(r) => r,
         Err(e) => {
             // `without_url`: the stream URL carries Subsonic auth params (u/t/s).
-            log::warn!("stream connect failed at byte {offset}: {}", e.without_url());
+            tracing::warn!(offset, error = %e.without_url(), "stream connect failed");
             return Err(offset); // resumable: caller retries with backoff
         }
     };

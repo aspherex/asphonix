@@ -245,7 +245,7 @@ impl RealBackend {
             if b.0.svc.mcp_enabled.load(Ordering::Relaxed)
                 && let Err(e) = b.set_mcp_enabled(true)
             {
-                log::warn!("Claude (MCP) bridge not started: {}", e.message);
+                tracing::warn!(error = %e.message, "Claude (MCP) bridge not started");
             }
         });
     }

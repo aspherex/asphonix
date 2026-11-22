@@ -630,7 +630,7 @@ impl SmartStore {
             Ok(b) => b,
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Vec::new(),
             Err(e) => {
-                log::warn!("smart playlists: cannot read {}: {e}", self.path.display());
+                tracing::warn!("smart playlists: cannot read {}: {e}", self.path.display());
                 return Vec::new();
             }
         };
@@ -638,9 +638,9 @@ impl SmartStore {
             Ok(f) => f.items,
             Err(e) => {
                 let aside = self.path.with_extension(format!("json.bad-{}", chrono::Utc::now().timestamp()));
-                log::warn!("smart playlists: {} is unreadable ({e}); moved to {}", self.path.display(), aside.display());
+                tracing::warn!("smart playlists: {} is unreadable ({e}); moved to {}", self.path.display(), aside.display());
                 if let Err(e) = std::fs::rename(&self.path, &aside) {
-                    log::warn!("smart playlists: could not move the unreadable file aside: {e}");
+                    tracing::warn!(error = %e, "smart playlists: could not move the unreadable file aside");
                 }
                 Vec::new()
             }

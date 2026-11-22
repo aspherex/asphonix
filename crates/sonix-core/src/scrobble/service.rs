@@ -36,7 +36,7 @@ pub fn spawn(ctx: ScrobbleCtx, rx: tokio::sync::watch::Receiver<PlayerState>) {
     let queue = match ScrobbleQueue::open(&ctx.data_dir) {
         Ok(q) => Some(Arc::new(q)),
         Err(e) => {
-            log::warn!("scrobble retry queue unavailable ({}); failed submissions will not be retried", e.message);
+            tracing::warn!("scrobble retry queue unavailable ({}); failed submissions will not be retried", e.message);
             None
         }
     };
@@ -133,7 +133,7 @@ fn spawn_counter(ctx: ScrobbleCtx, queue: Option<Arc<ScrobbleQueue>>, mut rx: to
             let history_id = hit.track_id.clone();
             crate::rt::spawn_blocking(move || {
                 if let Err(e) = crate::library::discovery::history_record(&db, &history_id, played_at, scrobbling) {
-                    log::warn!("failed to record listening history: {}", e.message);
+                    tracing::warn!(error = %e.message, "failed to record listening history");
                 }
             });
             if scrobbling {
@@ -143,7 +143,7 @@ fn spawn_counter(ctx: ScrobbleCtx, queue: Option<Arc<ScrobbleQueue>>, mut rx: to
                     let client = ctx.client.read().unwrap_or_else(|p| p.into_inner()).clone();
                     match client {
                         Some(client) => submit_classic_scrobble(&client, queue.as_deref(), &hit.track_id, hit.started_at_ms).await,
-                        None => log::debug!("scrobble for {} dropped: no account connected", hit.track_id),
+                        None => tracing::debug!(track_id = %hit.track_id, "scrobble dropped: no account connected"),
                     }
                     mirror_play_locally(&ctx, &hit.track_id, hit.started_at_ms);
                 });
@@ -194,10 +194,10 @@ impl Service {
             if let Some(client) = &client {
                 if play.playback_report == Some(true) {
                     if let Err(e) = client.report_playback(&track.id, PlaybackReportState::Starting, 0, true).await {
-                        log::debug!("reportPlayback(starting) failed: {}", e.message);
+                        tracing::debug!(error = %e.message, "reportPlayback(starting) failed");
                     }
                 } else if let Err(e) = client.scrobble(&track.id, false, None).await {
-                    log::debug!("scrobble now-playing failed: {}", e.message);
+                    tracing::debug!(error = %e.message, "scrobble now-playing failed");
                 }
             }
             self.current = Some(play);
@@ -214,7 +214,7 @@ impl Service {
             if let (Some(rs), Some(client)) = (report_state, client) {
                 let position_ms = (state.position_sec.max(0.0) * 1000.0) as u64;
                 if let Err(e) = client.report_playback(&track.id, rs, position_ms, true).await {
-                    log::debug!("reportPlayback failed: {}", e.message);
+                    tracing::debug!(error = %e.message, "reportPlayback failed");
                 }
             }
         }
@@ -230,7 +230,7 @@ impl Service {
         let Some(client) = client else { return };
         let position_ms = (play.last_position_sec.max(0.0) * 1000.0) as u64;
         if let Err(e) = client.report_playback(&play.track_id, PlaybackReportState::Stopped, position_ms, true).await {
-            log::debug!("reportPlayback(stopped) failed: {}", e.message);
+            tracing::debug!(error = %e.message, "reportPlayback(stopped) failed");
         }
     }
 }
@@ -239,7 +239,7 @@ impl Service {
 fn mirror_play_locally(ctx: &ScrobbleCtx, track_id: &str, started_at_ms: i64) {
     let played_at = chrono::DateTime::from_timestamp_millis(started_at_ms).unwrap_or_else(chrono::Utc::now).to_rfc3339_opts(chrono::SecondsFormat::Millis, true);
     if let Err(e) = crate::library::record_local_play(&ctx.db, track_id, &played_at) {
-        log::debug!("local play-stat update for {track_id} failed: {}", e.message);
+        tracing::debug!(track_id, error = %e.message, "local play-stat update failed");
     }
 }
 
@@ -248,7 +248,7 @@ async fn probe_playback_report(client: Option<&Client>) -> Option<bool> {
     match client.get_open_subsonic_extensions().await {
         Ok(extensions) => Some(extensions.iter().any(|e| e == "playbackReport")),
         Err(e) => {
-            log::debug!("getOpenSubsonicExtensions probe failed: {}", e.message);
+            tracing::debug!(error = %e.message, "getOpenSubsonicExtensions probe failed");
             None
         }
     }
@@ -256,7 +256,7 @@ async fn probe_playback_report(client: Option<&Client>) -> Option<bool> {
 
 async fn submit_classic_scrobble(client: &Client, queue: Option<&ScrobbleQueue>, track_id: &str, started_at_ms: i64) {
     if let Err(e) = client.scrobble(track_id, true, Some(started_at_ms)).await {
-        log::debug!("scrobble submission failed, queueing for retry: {}", e.message);
+        tracing::debug!(error = %e.message, "scrobble submission failed, queueing for retry");
         queue_or_warn(queue, &account_of(client), track_id, started_at_ms);
     }
 }
@@ -270,10 +270,10 @@ fn queue_or_warn(queue: Option<&ScrobbleQueue>, account: &str, track_id: &str, s
     match queue {
         Some(q) => {
             if let Err(e) = q.enqueue_for(account, track_id, started_at_ms) {
-                log::warn!("failed to queue scrobble retry for {track_id}: {}", e.message);
+                tracing::warn!(track_id, error = %e.message, "failed to queue scrobble retry");
             }
         }
-        None => log::warn!("scrobble for {track_id} lost: no retry queue available"),
+        None => tracing::warn!(track_id, "scrobble lost: no retry queue available"),
     }
 }
 
@@ -290,14 +290,14 @@ pub async fn drain_for(client: &Client, queue: &ScrobbleQueue) {
     let account = account_of(client);
     match queue.purge_other_accounts(&account) {
         Ok(0) => {}
-        Ok(n) => log::info!("dropped {n} queued scrobble(s) of another account"),
-        Err(e) => log::warn!("failed to purge scrobble retry queue: {}", e.message),
+        Ok(n) => tracing::info!(count = n, "dropped queued scrobbles of another account"),
+        Err(e) => tracing::warn!(error = %e.message, "failed to purge scrobble retry queue"),
     }
     let pending = match queue.pending_for(&account) {
         Ok(p) if !p.is_empty() => p,
         Ok(_) => return,
         Err(e) => {
-            log::warn!("failed to read scrobble retry queue: {}", e.message);
+            tracing::warn!(error = %e.message, "failed to read scrobble retry queue");
             return;
         }
     };

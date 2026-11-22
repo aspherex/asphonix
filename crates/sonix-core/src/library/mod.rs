@@ -72,7 +72,7 @@ impl Db {
         match Self::open_at(&path) {
             Ok(db) => Ok(db),
             Err(e) => {
-                log::warn!("library DB at {} unusable ({}); recreating", path.display(), e.message);
+                tracing::warn!("library DB at {} unusable ({}); recreating", path.display(), e.message);
                 remove_db_files(&path);
                 Self::open_at(&path)
             }

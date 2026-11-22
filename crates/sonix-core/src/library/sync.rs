@@ -177,7 +177,7 @@ async fn sync_inner(
     // Best-effort: home section caching failing shouldn't fail the whole
     // sync (the UI keeps the previous lists until the next sync).
     if let Err(e) = refresh_home_sections(client, db, progress).await {
-        log::warn!("home section refresh failed: {}", e.message);
+        tracing::warn!(error = %e.message, "home section refresh failed");
     }
 
     let now = chrono::Utc::now().to_rfc3339();
@@ -232,7 +232,7 @@ async fn refresh_user_state(client: &Client, db: &Db, progress: &dyn SyncProgres
     stars?;
     playlists?;
     if let Err(e) = home {
-        log::warn!("home section refresh failed: {}", e.message);
+        tracing::warn!(error = %e.message, "home section refresh failed");
     }
     Ok(())
 }

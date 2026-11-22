@@ -270,10 +270,10 @@ pub fn load_profile_password(url: &str, username: &str) -> Result<Option<String>
     match save_profile_password(url, username, &pw) {
         Ok(()) => {
             if let Err(e) = delete_password(username) {
-                log::warn!("migrated keychain entry but could not delete the legacy one: {}", e.message);
+                tracing::warn!(error = %e.message, "migrated keychain entry but could not delete the legacy one");
             }
         }
-        Err(e) => log::warn!("could not migrate legacy keychain entry: {}", e.message),
+        Err(e) => tracing::warn!(error = %e.message, "could not migrate legacy keychain entry"),
     }
     Ok(Some(pw))
 }

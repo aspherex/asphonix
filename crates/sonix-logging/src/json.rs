@@ -3,7 +3,7 @@
 //!
 //! Written by hand instead of `tracing_subscriber::fmt::json` so the schema is ours (top-level `ts`/`message`,
 //! structured `fields`, `run_id` on every line: the root span is per thread, the run id is per process).
-use serde_json::{Map, Number, Value};
+use serde_json::{Number, Value};
 use std::fmt::{self, Write as _};
 use std::io::Write;
 use std::sync::Mutex;
@@ -18,7 +18,8 @@ use tracing_subscriber::registry::LookupSpan;
 #[derive(Default)]
 pub(crate) struct Fields {
     pub message: Option<String>,
-    pub map: Map<String, Value>,
+    /// In recording order (not a `serde_json::Map`: its order depends on a feature another crate may enable).
+    pub map: Vec<(String, Value)>,
 }
 
 impl Fields {
@@ -30,7 +31,7 @@ impl Fields {
                 other => other.to_string(),
             });
         } else if !name.starts_with("log.") {
-            self.map.insert(name.to_string(), v);
+            set(&mut self.map, name, v);
         }
     }
 }
@@ -60,7 +61,31 @@ impl Visit for Fields {
 }
 
 /// A span's recorded fields, kept in the registry's span extensions.
-struct SpanFields(Map<String, Value>);
+struct SpanFields(Vec<(String, Value)>);
+
+/// Inserts or replaces `k` (a span field recorded again later).
+fn set(map: &mut Vec<(String, Value)>, k: &str, v: Value) {
+    match map.iter_mut().find(|(n, _)| n == k) {
+        Some(slot) => slot.1 = v,
+        None => map.push((k.to_string(), v)),
+    }
+}
+
+/// `{"k":v,...}` in order.
+fn object(name: Option<&str>, fields: &[(String, Value)]) -> String {
+    let mut s = String::from("{");
+    if let Some(n) = name {
+        let _ = write!(s, "\"name\":{}", json_str(n));
+    }
+    for (i, (k, v)) in fields.iter().enumerate() {
+        if i > 0 || name.is_some() {
+            s.push(',');
+        }
+        let _ = write!(s, "{}:{v}", json_str(k));
+    }
+    s.push('}');
+    s
+}
 
 pub(crate) struct JsonLayer {
     out: Mutex<Box<dyn Write + Send>>,
@@ -110,7 +135,11 @@ where
         values.record(&mut f);
         let mut ext = span.extensions_mut();
         match ext.get_mut::<SpanFields>() {
-            Some(SpanFields(m)) => m.extend(f.map),
+            Some(SpanFields(m)) => {
+                for (k, v) in f.map {
+                    set(m, &k, v);
+                }
+            }
             None => ext.insert(SpanFields(f.map)),
         }
     }
@@ -128,20 +157,17 @@ where
             meta.level(),
             json_str(meta.target()),
             json_str(f.message.as_deref().unwrap_or("")),
-            Value::Object(f.map)
+            object(None, &f.map)
         );
         if let Some(scope) = ctx.event_scope(event) {
             let mut spans = Vec::new();
             for span in scope.from_root() {
-                let mut m = Map::new();
-                m.insert("name".into(), Value::String(span.name().into()));
-                if let Some(SpanFields(sf)) = span.extensions().get::<SpanFields>() {
-                    m.extend(sf.iter().map(|(k, v)| (k.clone(), v.clone())));
-                }
-                spans.push(Value::Object(m));
+                let ext = span.extensions();
+                let fields = ext.get::<SpanFields>().map(|SpanFields(sf)| sf.as_slice()).unwrap_or(&[]);
+                spans.push(object(Some(span.name()), fields));
             }
             if !spans.is_empty() {
-                let _ = write!(line, ",\"spans\":{}", Value::Array(spans));
+                let _ = write!(line, ",\"spans\":[{}]", spans.join(","));
             }
         }
         let _ = write!(line, ",\"run_id\":{}", json_str(&self.run_id));

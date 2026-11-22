@@ -126,7 +126,7 @@ fn forwarding_sends_info_and_up_from_our_crates_regardless_of_the_file_filter() 
         tracing::error!(target: "sonix_real", "boom");
     });
     let got = lines.lock().unwrap().clone();
-    assert_eq!(got, ["[sonix_core::audio::engine] engine: play gain=1.5 track_id=42", "[sonix_real] boom"]);
+    assert_eq!(got, ["[sonix_core::audio::engine] engine: play track_id=42 gain=1.5", "[sonix_real] boom"]);
     assert!(buf.lock().unwrap().is_empty(), "file filter off");
 }
 
