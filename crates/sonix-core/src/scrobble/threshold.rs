@@ -32,10 +32,7 @@ const MAX_NATURAL_DELTA_SEC: f64 = 2.0;
 /// much of them was played.
 pub const MIN_COUNTABLE_DURATION_SEC: f64 = 30.0;
 
-/// "Count a play after" setting range and default, in seconds.
-pub const MIN_PLAY_THRESHOLD_SEC: u32 = 10;
-pub const MAX_PLAY_THRESHOLD_SEC: u32 = 300;
-pub const DEFAULT_PLAY_THRESHOLD_SEC: u32 = 30;
+pub use crate::config::{DEFAULT_PLAY_THRESHOLD_SEC, MAX_PLAY_THRESHOLD_SEC, MIN_PLAY_THRESHOLD_SEC};
 
 /// A track shorter than the setting counts once this share of it was heard
 /// (position ticks stop a little before the real end, so not 100%).

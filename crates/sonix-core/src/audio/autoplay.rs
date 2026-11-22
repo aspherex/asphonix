@@ -27,7 +27,7 @@ pub const RECENT_LIMIT: usize = 50;
 
 /// Label prefix of the autoplay radio source (`Autoplay · <seed title>`);
 /// `listen::` recognizes autoplay-origin plays by it.
-pub const LABEL_PREFIX: &str = "Autoplay · ";
+pub use crate::config::AUTOPLAY_LABEL_PREFIX as LABEL_PREFIX;
 
 /// Inputs of the trigger decision, kept as plain data so it is unit-testable
 /// without a device.

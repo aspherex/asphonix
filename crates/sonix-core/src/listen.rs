@@ -244,7 +244,7 @@ impl ListenTracker {
                 };
                 let origin = if std::mem::take(&mut self.explicit_start) || s.entry_origin == Some(QueueItemOrigin::User) {
                     ListenOrigin::User
-                } else if matches!(label, Some((SourceKind::Radio, l)) if l.starts_with(crate::audio::autoplay::LABEL_PREFIX)) {
+                } else if matches!(label, Some((SourceKind::Radio, l)) if l.starts_with(crate::config::AUTOPLAY_LABEL_PREFIX)) {
                     ListenOrigin::Autoplay
                 } else {
                     ListenOrigin::Source

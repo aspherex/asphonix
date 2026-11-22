@@ -14,7 +14,7 @@ use std::sync::Arc;
 
 use rusqlite::{params, Connection};
 
-use crate::audio::sequence::{Camelot, FlowTrack};
+use crate::sequence::{Camelot, FlowTrack};
 use crate::ipc::IpcError;
 use crate::subsonic::RawSong;
 

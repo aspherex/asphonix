@@ -9,7 +9,7 @@ use std::time::Duration;
 use super::is_new_play;
 use super::queue::ScrobbleQueue;
 use super::threshold::PlayThresholdTracker;
-use crate::audio::Prefs;
+use crate::prefs::Prefs;
 use crate::ipc::{PlaybackStatus, PlayerState};
 use crate::library::Db;
 use crate::subsonic::{Client, PlaybackReportState};

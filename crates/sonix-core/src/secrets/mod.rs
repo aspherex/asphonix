@@ -77,7 +77,7 @@ pub struct Settings {
     pub sync_play_queue: bool,
     /// "Volume normalization (ReplayGain)". Defaults off.
     #[serde(default)]
-    pub replay_gain_mode: crate::audio::replaygain::ReplayGainMode,
+    pub replay_gain_mode: crate::config::ReplayGainMode,
     /// "Check for updates automatically" (`updates::`). Defaults OFF.
     #[serde(default)]
     pub auto_check_updates: bool,
@@ -95,7 +95,7 @@ pub struct Settings {
     pub free_memory_when_minimized: bool,
     /// Corner of the screen for that card. Defaults to top left.
     #[serde(default)]
-    pub track_overlay_corner: crate::overlay::OverlayCorner,
+    pub track_overlay_corner: crate::config::OverlayCorner,
     // --- mcp-bridge block ---
     /// "Claude (MCP)": the local bridge listener (`mcp_bridge`). Defaults off.
     #[serde(default)]
@@ -110,16 +110,16 @@ fn default_true() -> bool {
 }
 
 fn default_queue_window_size() -> u32 {
-    crate::audio::queue::DEFAULT_WINDOW_SIZE as u32
+    crate::config::DEFAULT_WINDOW_SIZE as u32
 }
 
 fn default_play_threshold_sec() -> u32 {
-    crate::scrobble::threshold::DEFAULT_PLAY_THRESHOLD_SEC
+    crate::config::DEFAULT_PLAY_THRESHOLD_SEC
 }
 
 /// Clamps a "count a play after" value to the setting's range.
 pub fn clamp_play_threshold_sec(sec: u32) -> u32 {
-    use crate::scrobble::threshold::{MAX_PLAY_THRESHOLD_SEC, MIN_PLAY_THRESHOLD_SEC};
+    use crate::config::{MAX_PLAY_THRESHOLD_SEC, MIN_PLAY_THRESHOLD_SEC};
     sec.clamp(MIN_PLAY_THRESHOLD_SEC, MAX_PLAY_THRESHOLD_SEC)
 }
 
@@ -159,8 +159,8 @@ pub fn load_settings(config_dir: &Path) -> Settings {
     // reports what the engine actually uses (`Queue::set_window_size`
     // clamps the same way).
     settings.queue_window_size = settings.queue_window_size.clamp(
-        crate::audio::queue::MIN_WINDOW_SIZE as u32,
-        crate::audio::queue::MAX_WINDOW_SIZE as u32,
+        crate::config::MIN_WINDOW_SIZE as u32,
+        crate::config::MAX_WINDOW_SIZE as u32,
     );
     settings.play_threshold_sec = clamp_play_threshold_sec(settings.play_threshold_sec);
     settings

@@ -6,36 +6,10 @@
 //! already applies in place (`output::apply_gain_in_place`) — so unity (no tag,
 //! mode off, or a 0 dB tag) still never touches a sample.
 
-use serde::{Deserialize, Serialize};
 
 use crate::ipc::ReplayGain;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub enum ReplayGainMode {
-    #[default]
-    Off,
-    Track,
-    Album,
-}
-
-impl ReplayGainMode {
-    pub fn to_u8(self) -> u8 {
-        match self {
-            ReplayGainMode::Off => 0,
-            ReplayGainMode::Track => 1,
-            ReplayGainMode::Album => 2,
-        }
-    }
-
-    pub fn from_u8(v: u8) -> Self {
-        match v {
-            1 => ReplayGainMode::Track,
-            2 => ReplayGainMode::Album,
-            _ => ReplayGainMode::Off,
-        }
-    }
-}
+pub use crate::config::ReplayGainMode;
 
 /// The ReplayGain adjustment to apply for one track, as a linear factor.
 /// `None` = unity (mode off, or the track carries no usable tag — honest, we

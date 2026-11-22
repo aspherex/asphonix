@@ -6,7 +6,7 @@
 use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU8, Ordering};
 use std::sync::Arc;
 
-use super::replaygain::ReplayGainMode;
+use crate::config::ReplayGainMode;
 
 pub struct Prefs {
     autoplay: AtomicBool,
@@ -37,7 +37,7 @@ impl Prefs {
             sync_play_queue: AtomicBool::new(sync_play_queue),
             replay_gain: AtomicU8::new(replay_gain.to_u8()),
             spectrum_active: Arc::new(AtomicBool::new(false)),
-            play_threshold_sec: AtomicU32::new(crate::scrobble::threshold::DEFAULT_PLAY_THRESHOLD_SEC),
+            play_threshold_sec: AtomicU32::new(crate::config::DEFAULT_PLAY_THRESHOLD_SEC),
         }
     }
 

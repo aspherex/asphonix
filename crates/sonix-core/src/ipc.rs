@@ -1072,7 +1072,7 @@ pub struct Settings {
     /// "Sync play queue with server" (`savePlayQueue`/`getPlayQueue`, default on).
     pub sync_play_queue: bool,
     /// "Volume normalization (ReplayGain)": off (default) / track / album.
-    pub replay_gain_mode: crate::audio::replaygain::ReplayGainMode,
+    pub replay_gain_mode: crate::config::ReplayGainMode,
     /// "Check for updates automatically" (default on): the background
     /// 10 s / 6 h update check in `updates::`. Never installs by itself.
     pub auto_check_updates: bool,
@@ -1086,7 +1086,7 @@ pub struct Settings {
     /// resources after 30 s minimized and rebuild them on restore.
     pub free_memory_when_minimized: bool,
     /// Corner of the work area for that card (default top left).
-    pub track_overlay_corner: crate::overlay::OverlayCorner,
+    pub track_overlay_corner: crate::config::OverlayCorner,
     /// "Claude (MCP)" (default off): the local bridge for `sonix-mcp` (`mcp_bridge::`).
     pub mcp_enabled: bool,
     /// "Allow playback control" for MCP clients (default off).

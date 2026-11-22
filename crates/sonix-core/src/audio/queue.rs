@@ -61,10 +61,7 @@ use serde::{Deserialize, Serialize};
 use super::sequence::{self, FlowTrack, Quota};
 use crate::ipc::{FlowArc, FlowCoverage, FlowReason, QueueItemOrigin, RepeatMode, SourceKind, SourceMode};
 
-/// Default `queueWindowSize` (`Settings`), before any user override.
-pub const DEFAULT_WINDOW_SIZE: usize = 20;
-pub const MIN_WINDOW_SIZE: usize = 10;
-pub const MAX_WINDOW_SIZE: usize = 100;
+pub use crate::config::{DEFAULT_WINDOW_SIZE, MAX_WINDOW_SIZE, MIN_WINDOW_SIZE};
 
 fn fresh_rng() -> SmallRng {
     SmallRng::from_entropy()
