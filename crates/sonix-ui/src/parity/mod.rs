@@ -9,7 +9,7 @@
 //! | cmd | args | effect |
 //! |---|---|---|
 //! | `hello` | | scale factor, viewport (logical px), route, theme |
-//! | `route` | `route` | navigate (hash-router names) |
+//! | `route` | `route`, `fresh` | navigate (hash-router names); `fresh`: the history restarts there (a scenario start) |
 //! | `size` | `w`,`h` | resize the window (logical px) |
 //! | `theme` | `light` | set the theme |
 //! | `mouse` | `type` move/down/up/click/dblclick/wheel, `x`,`y`, `button`, `mods`, `dx`,`dy` | input |
@@ -274,6 +274,12 @@ impl Shell {
             "route" => match Route::parse(&s("route")) {
                 Some(r) => {
                     self.navigate(r, cx);
+                    // `fresh`: the scenario's start route, like the web's page load at `#/<route>` (history index 0:
+                    // Back disabled), not a navigation from the native cold-start route (Home).
+                    if c.get("fresh").and_then(Value::as_bool).unwrap_or(false) {
+                        self.router = crate::router::Router::new(self.router.current().clone());
+                        cx.notify();
+                    }
                     window.refresh();
                     json!({"ok": true})
                 }
