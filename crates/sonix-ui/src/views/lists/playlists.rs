@@ -97,7 +97,7 @@ impl PlaylistsView {
         if smart {
             let sp = self.smart[ix].clone();
             title = sp.input.name.clone();
-            sub = format!("{} TRACKS · {}", fmt::fmt_int(sp.track_count as u64), fmt::format_total_duration(sp.duration));
+            sub = format!("{} TRACKS · {}", fmt::fmt_int(sp.track_count as u64), crate::views::library::fmtx::total_duration(sp.duration));
             rules = Some(describe_smart(&sp.input));
             id = sp.id.clone();
             art_el = icon("bolt", 20., th.accent_fg).into_any_element();
@@ -105,7 +105,7 @@ impl PlaylistsView {
         } else {
             let pl = self.lists[ix].clone();
             title = pl.name.clone();
-            sub = format!("{} TRACKS · {}", pl.song_count, fmt::format_total_duration(pl.duration));
+            sub = format!("{} TRACKS · {}", pl.song_count, crate::views::library::fmtx::total_duration(pl.duration));
             rules = None;
             id = pl.id.clone();
             art_el = if pl.song_count > 0 { art::cover_bucket(&self.art, &self.backend, Some(&art::mosaic_key(&pl)), lm::CARD_ART, bucket_for((64.0 * window.scale_factor()).ceil() as u32), window, cx) } else { icon("queue", 20., th.muted).into_any_element() };

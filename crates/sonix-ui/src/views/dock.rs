@@ -69,7 +69,7 @@ impl Render for DockView {
         let seek_ratio = self.seek_preview.unwrap_or(if ps.duration_sec > 0.0 { (ps.position_sec / ps.duration_sec) as f32 } else { 0.0 });
         let readout = fmt::output_readout(&ps, "OUTPUT: —");
         let short = fmt::output_short(&ps, "—");
-        let vol_label = fmt::volume_label(&ps);
+        let vol_label = crate::views::library::fmtx::volume_label(&ps);
         let rg = ps.replay_gain_db.map(|g| format!("RG {}{g:.1}", if g > 0.0 { "+" } else { "" }));
         let backend_for_art = self.backend.clone();
         let cover = art::cover(&self.art, &backend_for_art, track.as_ref().and_then(|t| t.cover_art.as_deref()), dk::ART, window, cx);

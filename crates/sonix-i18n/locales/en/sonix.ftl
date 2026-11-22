@@ -278,3 +278,112 @@ error-output-unavailable = The audio output is not available.
 error-unimplemented = Not supported by this server.
 error-invalid-request = The request was invalid.
 error-unknown = Something went wrong.
+
+## Durations, dates, relative times (shown upper-cased)
+
+dur-hours-minutes = { $h } hr { $m } min
+dur-minutes = { $m } min
+formats-mixed-rates = { $format } · mixed rates
+volume-mute = Mute
+date-invalid = Invalid date
+time-just-now = Just now
+time-seconds-ago = { $n }s ago
+time-minutes-ago = { $n }min ago
+time-hours-ago = { $n }h ago
+time-days-ago = { $n }d ago
+day-today = Today
+day-yesterday = Yesterday
+# history day header; $day and $year are plain digits
+day-header = { $weekday } { $day } { $month } { $year }
+weekday-sun = Sun
+weekday-mon = Mon
+weekday-tue = Tue
+weekday-wed = Wed
+weekday-thu = Thu
+weekday-fri = Fri
+weekday-sat = Sat
+month-jan = Jan
+month-feb = Feb
+month-mar = Mar
+month-apr = Apr
+month-may = May
+month-jun = Jun
+month-jul = Jul
+month-aug = Aug
+month-sep = Sept
+month-oct = Oct
+month-nov = Nov
+month-dec = Dec
+
+## Library: album and artist pages
+
+album-play = Play album
+album-track-vectors = Track Vectors
+album-telemetry = Album Telemetry
+album-meta-tracks = Tracks
+album-meta-plays = Plays
+album-meta-added = Added
+album-more-by-artist = { $artist } in Vault
+album-unavailable = Album unavailable.
+artist-play-discography = Play discography
+flow-button-tip = Order by tempo, key and genre, keeping bit-perfect playback
+artist-most-played = Most played
+artist-popular = Popular
+artist-from-history = From your listening history
+artist-no-tracks = No tracks.
+artist-about = About
+artist-show-less = Show less
+artist-show-more = Show more
+artist-no-bio = No biography.
+artist-core-releases = Core Releases
+artist-fans-also-like = Fans also like
+artist-unavailable = Artist unavailable.
+
+## Library: grids, genres, columns
+
+sort-artist = Artist
+sort-newest = Newest
+sort-year = Year
+sort-random = Random
+albums-starred-only = Starred only
+genres-sort-most-tracks = Most tracks
+genres-unavailable = Genres unavailable.
+genres-empty = No genre tags in your library yet.
+genre-no-tracks = No tracks tagged “{ $genre }”.
+genre-no-albums = No albums are tagged with this genre (tracks may still be).
+col-title = Title
+col-artist = Artist
+col-album = Album
+col-year = Year
+col-added = Added
+col-format = Format
+col-time = Time
+
+## Home
+
+home-welcome-back = Welcome back
+home-welcome-back-name = Welcome back, { $name }
+home-tracks-indexed = { $count ->
+    [one] { $count } track indexed
+   *[other] { $count } tracks indexed
+}
+home-synced = Synced { $when }
+home-not-connected = Not connected — head to Settings to add a server
+home-server-unreachable = Server unreachable — browsing local library
+kbd-space = Space
+kbd-enter = Enter
+home-key-play-pause = Play/Pause
+home-key-scroll = Scroll
+home-key-or = or
+home-key-search = Search
+home-last-played-on = Last played on { $device }
+home-queue-on-server = Queue on server
+home-resume-from-server = Resume from server
+home-dismiss = Dismiss
+home-recently-ingested = Recently Ingested // Server Pipeline
+home-unavailable = Unavailable until a server is connected.
+home-jump-back-in = Jump Back In // Sessions
+home-view-history = View history
+home-recently-played = Recently Played Tracks
+home-heavy-rotation = Heavy Rotation
+home-playlists-vectors = Playlists // Vectors

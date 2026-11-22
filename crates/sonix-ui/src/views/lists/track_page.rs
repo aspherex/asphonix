@@ -642,22 +642,22 @@ impl Render for TrackPage {
         match &self.kind {
             PageKind::Playlist(_) => {
                 let d = self.detail.as_ref().unwrap();
-                stats = stats.child(stat(format!("{} TRACKS", d.playlist.song_count))).child(dot()).child(stat(fmt::format_total_duration(d.playlist.duration)));
+                stats = stats.child(stat(format!("{} TRACKS", d.playlist.song_count))).child(dot()).child(stat(crate::views::library::fmtx::total_duration(d.playlist.duration)));
                 if !d.tracks.is_empty() {
-                    stats = stats.child(dot()).child(stat(fmt::summarize_formats(&d.tracks)));
+                    stats = stats.child(dot()).child(stat(crate::views::library::fmtx::summarize_formats(&d.tracks)));
                 }
             }
             PageKind::Liked => {
                 let n = self.liked.as_ref().map(|s| s.count).unwrap_or(total);
                 stats = stats.child(stat(format!("{} TRACKS", int(n))));
                 if let Some(s) = &self.liked {
-                    stats = stats.child(dot()).child(stat(fmt::format_total_duration(s.duration)));
+                    stats = stats.child(dot()).child(stat(crate::views::library::fmtx::total_duration(s.duration)));
                 }
                 stats = stats.child(dot()).child(stat(if selected > 1 { format!("{} SELECTED", int(selected)) } else { "NEWEST FIRST".into() }));
             }
             PageKind::Smart(_) => {
                 let s = self.smart.as_ref().unwrap();
-                stats = stats.child(stat(format!("{} TRACKS", int(s.track_count)))).child(dot()).child(stat(fmt::format_total_duration(s.duration)));
+                stats = stats.child(stat(format!("{} TRACKS", int(s.track_count)))).child(dot()).child(stat(crate::views::library::fmtx::total_duration(s.duration)));
                 if selected > 1 {
                     stats = stats.child(dot()).child(stat(format!("{} SELECTED", int(selected))));
                 }

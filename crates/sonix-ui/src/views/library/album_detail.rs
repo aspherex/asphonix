@@ -25,6 +25,7 @@ use sonix_api::*;
 use std::cell::Cell;
 use std::collections::BTreeSet;
 use std::ops::Range;
+use sonix_i18n::tr;
 use std::rc::Rc;
 
 /// Row selection (set + anchor) plus the keyboard cursor; the two are tracked separately.
@@ -283,7 +284,7 @@ impl AlbumDetailView {
         let art = art_slot(&th, &self.ctx.art, &self.ctx.backend, album.cover_art.as_deref(), m::ALBUM_ART, true, 320, "album", 40.0, window, cx);
         let sep = |th: &Theme| txt(th, MONO_DATA, "·").color(th.muted);
         let mut stats = div().flex().flex_row().gap(px(crate::metrics::space::XS)).child(txt(&th, MONO_DATA, album.year.map(|y| y.to_string()).unwrap_or_else(|| "—".into())).color(th.muted));
-        stats = stats.child(sep(&th)).child(txt(&th, MONO_DATA, format!("{} TRACKS", album.song_count)).color(th.muted)).child(sep(&th)).child(txt(&th, MONO_DATA, fmtx::total_duration(album.duration)).color(th.muted));
+        stats = stats.child(sep(&th)).child(txt(&th, MONO_DATA, tr!(CountTracks, count = album.song_count).to_uppercase()).color(th.muted)).child(sep(&th)).child(txt(&th, MONO_DATA, fmtx::total_duration(album.duration)).color(th.muted));
         if let Some(g) = genre.clone() {
             let g2 = g.clone();
             stats = stats.child(sep(&th)).child(text_link(&th, "stat-genre", g, MONO_DATA, (th.muted, th.accent_fg), true, move |_, cx| navigate(cx, Route::Genre(g2.clone()))));
@@ -317,7 +318,7 @@ impl AlbumDetailView {
             .hover(move |s| s.bg(if pst.active() { th.high } else { th.accent_hover }))
             .active(|s| s.top(px(2.)).left(px(2.)).shadow(vec![]))
             .child(icon(pst.icon(), 16.0, fg))
-            .child(txt(&th, HEADLINE_SM, "PLAY ALBUM").color(fg))
+            .child(txt(&th, HEADLINE_SM, tr!(AlbumPlay).to_uppercase()).color(fg))
             .on_click(move |_, _, cx| {
                 if pst.active() {
                     crate::playback::toggle(cx);
@@ -340,7 +341,7 @@ impl AlbumDetailView {
             .cursor(CursorStyle::PointingHand)
             .hover(move |s| s.border_color(th.focus))
             .child(icon("shuffle", 15.0, th.text))
-            .child(txt(&th, BODY_MD, "SHUFFLE").color(th.text))
+            .child(txt(&th, BODY_MD, tr!(MenuShuffle).to_uppercase()).color(th.text))
             .on_click(move |_, _, cx| {
                 let _ = t_shuf.update(cx, |t, cx| menus::play_album(cx, t.id.clone(), true));
             });
@@ -414,8 +415,8 @@ impl AlbumDetailView {
             .items_center()
             .gap(px(crate::metrics::space::SM))
             .mt(px(crate::metrics::space::SM))
-            .child(btn(crate::metrics::space::LG, 16.0, false, HEADLINE_SM, "PLAY ALBUM"))
-            .child(btn(crate::metrics::space::MD, 15.0, true, BODY_MD, "SHUFFLE"))
+            .child(btn(crate::metrics::space::LG, 16.0, false, HEADLINE_SM, &tr!(AlbumPlay).to_uppercase()))
+            .child(btn(crate::metrics::space::MD, 15.0, true, BODY_MD, &tr!(MenuShuffle).to_uppercase()))
             .child(sk::block(&th, m::BTN_H, m::BTN_H))
             .child(sk::block(&th, m::BTN_H, m::BTN_H));
         let info = div()
@@ -443,7 +444,7 @@ impl AlbumDetailView {
             .bg(th.mid)
             .border_b_1()
             .border_color(th.border)
-            .child(txt(&th, LABEL_CAPS, "Track Vectors").color(th.muted))
+            .child(txt(&th, LABEL_CAPS, tr!(AlbumTrackVectors)).color(th.muted))
             .child(txt(&th, MONO_CODE, "").color(th.muted));
         let mut body = div().flex().flex_col().size_full().overflow_hidden();
         for _ in 0..(m::TRACKS_PANEL_H / tr::ROW_H) as usize {
@@ -466,7 +467,7 @@ impl AlbumDetailView {
         let vw = f32::from(window.viewport_size().width);
         let w = if vw < crate::metrics::bp::COMPACT_BELOW { m::META_PANEL_W_COMPACT } else { m::META_PANEL_W };
         let mut b = div().flex().flex_col().gap(px(crate::metrics::space::SM)).p(px(crate::metrics::space::MD)).bg(th.low).border_1().border_color(th.border);
-        b = b.child(div().flex().child(txt(&th, LABEL_CAPS, "Album Telemetry").color(th.muted)));
+        b = b.child(div().flex().child(txt(&th, LABEL_CAPS, tr!(AlbumTelemetry)).color(th.muted)));
         let mut dl = div().flex().flex_col().gap(px(crate::metrics::space::XS));
         for _ in 0..7 {
             dl = dl.child(sk::text_slot(&th, MONO_DATA.line, 11.0, 1.0));
@@ -488,7 +489,7 @@ impl AlbumDetailView {
         let th = *th;
         let total = self.tracks().len();
         let selecting = self.sel.len() > 1;
-        let count = if selecting { format!("{} SELECTED", self.sel.len()) } else { format!("{total} TOTAL") };
+        let count = if selecting { tr!(CountSelected, count = self.sel.len()) } else { tr!(CountTotal, count = total) }.to_uppercase();
         let head = div()
             .flex()
             .flex_row()
@@ -500,7 +501,7 @@ impl AlbumDetailView {
             .bg(th.mid)
             .border_b_1()
             .border_color(th.border)
-            .child(txt(&th, LABEL_CAPS, "Track Vectors").color(th.muted))
+            .child(txt(&th, LABEL_CAPS, tr!(AlbumTrackVectors)).color(th.muted))
             .child(txt(&th, MONO_CODE, count).color(th.muted));
         let overflow = crate::widgets::scrollbar::overflow_or_last("album-tracks", super::grid::list_overflows(&self.list).filter(|_| total > 0));
         let list = uniform_list(
@@ -572,12 +573,12 @@ impl AlbumDetailView {
         let fsum = fmtx::summarize_formats(&d.tracks);
         let mut rows_v: Vec<(&'static str, AnyElement)> = Vec::new();
         // two columns: the label column is as wide as the widest label; a value too long for the rest wraps
-        let mut labels = vec!["Format", "Genre", "Year", "Tracks", "Duration"];
+        let mut labels = vec![tr!(InfoFormat), tr!(InfoGenre), tr!(InfoYear), tr!(AlbumMetaTracks), tr!(InfoDuration)];
         if album.play_count.is_some() {
-            labels.push("Plays");
+            labels.push(tr!(AlbumMetaPlays));
         }
         if album.created.is_some() {
-            labels.push("Added");
+            labels.push(tr!(AlbumMetaAdded));
         }
         let dt_w = labels.iter().map(|l| natural_width(window, l, MONO, MONO_DATA.size, MONO_DATA.weight, MONO_DATA.tracking_px())).fold(0.0, f32::max);
         let avail = w - 2.0 - 2.0 * crate::metrics::space::MD - dt_w - crate::metrics::space::MD;
@@ -589,9 +590,9 @@ impl AlbumDetailView {
                 div().w_full().text_right().font_family(MONO).font_weight(gpui::FontWeight(MONO_DATA.weight)).text_size(px(MONO_DATA.size)).line_height(px(MONO_DATA.line)).text_color(th.text).child(gpui::SharedString::from(s)).into_any_element()
             }
         };
-        rows_v.push(("Format", val(fsum)));
+        rows_v.push((tr!(InfoFormat), val(fsum)));
         rows_v.push((
-            "Genre",
+            tr!(InfoGenre),
             match album.genre.clone() {
                 Some(g) => {
                     let g2 = g.clone();
@@ -600,14 +601,14 @@ impl AlbumDetailView {
                 None => val("—".into()),
             },
         ));
-        rows_v.push(("Year", val(album.year.map(|y| y.to_string()).unwrap_or_else(|| "—".into()))));
-        rows_v.push(("Tracks", val(album.song_count.to_string())));
-        rows_v.push(("Duration", val(fmtx::total_duration(album.duration))));
+        rows_v.push((tr!(InfoYear), val(album.year.map(|y| y.to_string()).unwrap_or_else(|| "—".into()))));
+        rows_v.push((tr!(AlbumMetaTracks), val(sonix_i18n::fmt::int(album.song_count as u64))));
+        rows_v.push((tr!(InfoDuration), val(fmtx::total_duration(album.duration))));
         if let Some(p) = album.play_count {
-            rows_v.push(("Plays", val(p.to_string())));
+            rows_v.push((tr!(AlbumMetaPlays), val(sonix_i18n::fmt::int(p as u64))));
         }
         if let Some(c) = &album.created {
-            rows_v.push(("Added", val(fmtx::locale_date(c))));
+            rows_v.push((tr!(AlbumMetaAdded), val(fmtx::locale_date(c))));
         }
         let mut dl = div().flex().flex_col().gap(px(crate::metrics::space::XS));
         for (label, v) in rows_v {
@@ -627,7 +628,7 @@ impl AlbumDetailView {
             }
             b
         };
-        let mut panel = div().w(px(w)).flex_none().flex().flex_col().gap(px(crate::metrics::space::MD)).child(block(vec![div().flex().child(txt(&th, LABEL_CAPS, "Album Telemetry").color(th.muted)).into_any_element(), dl.into_any_element()]));
+        let mut panel = div().w(px(w)).flex_none().flex().flex_col().gap(px(crate::metrics::space::MD)).child(block(vec![div().flex().child(txt(&th, LABEL_CAPS, tr!(AlbumTelemetry)).color(th.muted)).into_any_element(), dl.into_any_element()]));
         if !self.other.is_empty() {
             let mut list = div().flex().flex_col().gap(px(crate::metrics::space::XS));
             let others: Vec<Album> = self.other.iter().take(6).cloned().collect();
@@ -652,12 +653,12 @@ impl AlbumDetailView {
                                 .flex_col()
                                 .min_w_0()
                                 .child(div().flex().min_w_0().child(txt(&th, BODY_SM, o.name.clone()).color(th.text).ellipsis()))
-                                .child(div().flex().child(txt(&th, MONO_CODE, format!("{} · {} TRACKS", o.year.map(|y| y.to_string()).unwrap_or_else(|| "—".into()), o.song_count)).color(th.muted))),
+                                .child(div().flex().child(txt(&th, MONO_CODE, format!("{} · {}", o.year.map(|y| y.to_string()).unwrap_or_else(|| "—".into()), tr!(CountTracks, count = o.song_count).to_uppercase())).color(th.muted))),
                         )
                         .on_click(move |_, _, cx| navigate(cx, Route::Album(oid.clone()))),
                 );
             }
-            panel = panel.child(block(vec![div().flex().child(txt(&th, LABEL_CAPS, format!("{} in Vault", album.artist)).color(th.muted)).into_any_element(), list.into_any_element()]));
+            panel = panel.child(block(vec![div().flex().child(txt(&th, LABEL_CAPS, tr!(AlbumMoreByArtist, artist = album.artist.as_str())).color(th.muted)).into_any_element(), list.into_any_element()]));
         }
         panel.into_any_element()
     }
@@ -691,7 +692,7 @@ impl Render for AlbumDetailView {
                 .child(div().flex().flex_row().gap(px(m::PAGE_PAD)).child(panel).child(meta))
                 .into_any_element()
         } else {
-            div().p(px(crate::metrics::space::XL)).child(txt(&th, MONO_CODE, "ALBUM UNAVAILABLE.").color(th.clip)).into_any_element()
+            div().p(px(crate::metrics::space::XL)).child(txt(&th, MONO_CODE, tr!(AlbumUnavailable).to_uppercase()).color(th.clip)).into_any_element()
         };
         self.page.wrap(window, &th, "album-scroll", content)
     }

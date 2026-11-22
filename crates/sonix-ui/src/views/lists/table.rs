@@ -373,7 +373,7 @@ pub fn refresh_visible(&mut self, cx: &mut Context<Self>) {
     }
 
     fn day_row(&self, th: Theme, ix: usize, day: &str, count: u32, now: i64) -> AnyElement {
-        let label = fmt::format_day_header(day, now);
+        let label = crate::views::library::fmtx::day_header(day, now);
         let plays = format!("{count} {}", if count == 1 { "PLAY" } else { "PLAYS" });
         div()
             .id(("day", ix))

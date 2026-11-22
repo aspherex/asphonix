@@ -1130,7 +1130,7 @@ impl Render for NowPlayingView {
                         }))
                         .child(slider("np-vol", th, &self.vol, ps.volume as f32, None, vol_cb)),
                 )
-                .child(div().min_w(px(56.)).flex().justify_end().child(txt(&th, MONO_CODE, fmt::volume_label(&ps)).color(if muted { th.muted } else { th.accent_fg })))
+                .child(div().min_w(px(56.)).flex().justify_end().child(txt(&th, MONO_CODE, crate::views::library::fmtx::volume_label(&ps)).color(if muted { th.muted } else { th.accent_fg })))
                 .child(chip("np-mute", th, 32.0, 12.0, th.low, muted).tip("Mute (M)", th).child(txt(&th, MONO_DATA, format!("MUTE [{}]", key_lbl("m")))).on_click(cx.listener(|this, _, _, cx| this.toggle_mute(cx))));
         // up next
         let more = self.queue_total.saturating_sub(self.next_start);

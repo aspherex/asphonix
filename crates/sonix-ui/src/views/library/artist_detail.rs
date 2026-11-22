@@ -23,6 +23,7 @@ use gpui::{
 };
 use sonix_api::*;
 use std::cell::Cell;
+use sonix_i18n::tr;
 use std::rc::Rc;
 
 /// What the last visit of an artist showed (session only, newest last, at most [`CACHE_MAX`] artists): a revisit paints the
@@ -272,9 +273,9 @@ impl ArtistDetailView {
             .flex()
             .flex_row()
             .gap(px(crate::metrics::space::XS))
-            .child(txt(&th, MONO_DATA, format!("{} ALBUMS", artist.album_count)).color(th.muted))
+            .child(txt(&th, MONO_DATA, tr!(CountAlbums, count = artist.album_count).to_uppercase()).color(th.muted))
             .child(sep())
-            .child(txt(&th, MONO_DATA, format!("{total_tracks} TRACKS")).color(th.muted))
+            .child(txt(&th, MONO_DATA, tr!(CountTracks, count = total_tracks).to_uppercase()).color(th.muted))
             .child(sep())
             .child(txt(&th, MONO_DATA, fmtx::total_duration(total_duration)).color(th.muted));
         let has_albums = !d.albums.is_empty();
@@ -301,7 +302,7 @@ impl ArtistDetailView {
             .hover(move |s| s.bg(if pst.active() { th.high } else { th.accent_hover }))
             .active(|s| s.top(px(2.)).left(px(2.)).shadow(vec![]))
             .child(icon(pst.icon(), 16.0, fg))
-            .child(txt(&th, HEADLINE_SM, "PLAY DISCOGRAPHY").color(fg))
+            .child(txt(&th, HEADLINE_SM, tr!(ArtistPlayDiscography).to_uppercase()).color(fg))
             .on_click(move |_, _, cx| {
                 if pst.active() {
                     crate::playback::toggle(cx);
@@ -326,8 +327,8 @@ impl ArtistDetailView {
             .cursor(CursorStyle::PointingHand)
             .hover(move |s| s.border_color(th.focus))
             .child(icon("sliders", 15.0, th.text))
-            .child(txt(&th, LABEL_CAPS, "FLOW").color(th.text))
-            .tip("Order by tempo, key and genre, keeping bit-perfect playback", th)
+            .child(txt(&th, LABEL_CAPS, tr!(FlowMenu)).color(th.text))
+            .tip(tr!(FlowButtonTip), th)
             .relative()
             .child(crate::flow::bounds_probe(flow_cell.clone()))
             .on_click(move |_, window, cx| {
@@ -395,8 +396,8 @@ impl ArtistDetailView {
             .items_center()
             .gap(px(crate::metrics::space::SM))
             .mt(px(crate::metrics::space::SM))
-            .child(btn(crate::metrics::space::LG, 16.0, false, HEADLINE_SM, "PLAY DISCOGRAPHY"))
-            .child(btn(crate::metrics::space::MD, 15.0, true, LABEL_CAPS, "FLOW"))
+            .child(btn(crate::metrics::space::LG, 16.0, false, HEADLINE_SM, &tr!(ArtistPlayDiscography).to_uppercase()))
+            .child(btn(crate::metrics::space::MD, 15.0, true, LABEL_CAPS, tr!(FlowMenu)))
             .child(sk::block(&th, m::BTN_H, m::BTN_H))
             .child(sk::block(&th, m::BTN_H, m::BTN_H));
         let info = div()
@@ -419,9 +420,9 @@ impl ArtistDetailView {
     fn popular(&mut self, th: &Theme, window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
         let th = *th;
         let most = self.top.as_ref().map(|t| t.source == TopSource::MostPlayed).unwrap_or(false);
-        let mut title = div().flex().flex_row().items_center().child(txt(&th, LABEL_CAPS, if most { "Most played" } else { "Popular" }).color(th.muted));
+        let mut title = div().flex().flex_row().items_center().child(txt(&th, LABEL_CAPS, if most { tr!(ArtistMostPlayed) } else { tr!(ArtistPopular) }).color(th.muted));
         if most {
-            title = title.child(div().ml(px(crate::metrics::space::SM)).opacity(0.8).child(txt(&th, MONO_CODE, "FROM YOUR LISTENING HISTORY").color(th.muted)));
+            title = title.child(div().ml(px(crate::metrics::space::SM)).opacity(0.8).child(txt(&th, MONO_CODE, tr!(ArtistFromHistory).to_uppercase()).color(th.muted)));
         }
         let mut sec = div().flex().flex_col().gap(px(crate::metrics::space::SM)).min_w_0().child(title);
         if self.top_pending || self.loading {
@@ -432,7 +433,7 @@ impl ArtistDetailView {
             sec = sec.child(rows_v);
         } else if self.top_items().is_empty() {
             // keep the column so About does not jump wider when no tracks arrive
-            sec = sec.child(div().flex().items_center().h(px(m::TOP_ROW_H)).px(px(crate::metrics::space::MD)).border_1().border_color(th.border).bg(th.low).child(txt(&th, MONO_CODE, "NO TRACKS.").color(th.muted)));
+            sec = sec.child(div().flex().items_center().h(px(m::TOP_ROW_H)).px(px(crate::metrics::space::MD)).border_1().border_color(th.border).bg(th.low).child(txt(&th, MONO_CODE, tr!(ArtistNoTracks).to_uppercase()).color(th.muted)));
         } else {
             let o = RowOpts { show_artist: false, cols: visible_columns(self.top_w.get()), actions: 2 };
             let n = self.top_items().len();
@@ -485,7 +486,7 @@ impl ArtistDetailView {
 
     fn about(&mut self, th: &Theme, window: &mut Window, _cx: &mut Context<Self>) -> AnyElement {
         let th = *th;
-        let mut sec = div().relative().flex().flex_col().gap(px(crate::metrics::space::SM)).min_w_0().child(Self::section_title(&th, "About")).child(measure(&self.bio_w));
+        let mut sec = div().relative().flex().flex_col().gap(px(crate::metrics::space::SM)).min_w_0().child(Self::section_title(&th, tr!(ArtistAbout))).child(measure(&self.bio_w));
         if self.info_pending || self.loading {
             // 4 slots of the bio's 19.5 px line height = the clamped height, so the arrival keeps it
             let sk = crate::widgets::skeleton::text_slot;
@@ -514,7 +515,7 @@ impl ArtistDetailView {
             if overflows || expanded {
                 let this = _cx.entity().downgrade();
                 sec = sec.child(
-                    div().flex().child(text_link(&th, "bio-toggle", if expanded { "Show less" } else { "Show more" }.to_uppercase(), LABEL_CAPS, (th.accent_fg, th.text), true, move |_, cx| {
+                    div().flex().child(text_link(&th, "bio-toggle", if expanded { tr!(ArtistShowLess) } else { tr!(ArtistShowMore) }.to_uppercase(), LABEL_CAPS, (th.accent_fg, th.text), true, move |_, cx| {
                         let _ = this.update(cx, |t, cx| {
                             t.bio_expanded = !t.bio_expanded;
                             cx.notify();
@@ -524,7 +525,7 @@ impl ArtistDetailView {
             }
         } else {
             // the column stays without About, so Popular keeps its width
-            sec = sec.child(div().flex().child(txt(&th, BODY_SM, "No biography.").color(th.muted)));
+            sec = sec.child(div().flex().child(txt(&th, BODY_SM, tr!(ArtistNoBio)).color(th.muted)));
         }
         sec.into_any_element()
     }
@@ -630,18 +631,18 @@ impl Render for ArtistDetailView {
                     }
                 }
             }
-            page = page.child(div().flex().flex_col().gap(px(crate::metrics::space::SM)).child(Self::section_title(&th, "Core Releases")).child(grid));
+            page = page.child(div().flex().flex_col().gap(px(crate::metrics::space::SM)).child(Self::section_title(&th, tr!(ArtistCoreReleases))).child(grid));
             // Fans also like (below the albums so the network-loaded row never shifts them)
             if let Some(info) = self.info.clone().filter(|i| !i.similar.is_empty()) {
                 let mut row = div().flex().flex_row().flex_wrap().gap(px(crate::metrics::space::MD));
                 for s in &info.similar {
                     row = row.child(card(&self.ctx.clone(), &th, CardItem::Artist(s), cw, None, window, cx));
                 }
-                page = page.child(div().flex().flex_col().gap(px(crate::metrics::space::SM)).child(Self::section_title(&th, "Fans also like")).child(row));
+                page = page.child(div().flex().flex_col().gap(px(crate::metrics::space::SM)).child(Self::section_title(&th, tr!(ArtistFansAlsoLike))).child(row));
             }
             page.into_any_element()
         } else {
-            div().p(px(crate::metrics::space::XL)).child(txt(&th, MONO_CODE, "ARTIST UNAVAILABLE.").color(th.clip)).into_any_element()
+            div().p(px(crate::metrics::space::XL)).child(txt(&th, MONO_CODE, tr!(ArtistUnavailable).to_uppercase()).color(th.clip)).into_any_element()
         };
         let _ = BODY_MD;
         self.page.wrap(window, &th, "artist-scroll", content)

@@ -270,3 +270,108 @@ error-output-unavailable = Die Audioausgabe ist nicht verfügbar.
 error-unimplemented = Von diesem Server nicht unterstützt.
 error-invalid-request = Die Anfrage war ungültig.
 error-unknown = Etwas ist schiefgelaufen.
+
+## Durations, dates, relative times (shown upper-cased)
+
+dur-hours-minutes = { $h } Std. { $m } Min.
+dur-minutes = { $m } Min.
+formats-mixed-rates = { $format } · gemischte Raten
+volume-mute = Stumm
+date-invalid = Ungültiges Datum
+time-just-now = Gerade eben
+time-seconds-ago = Vor { $n } s
+time-minutes-ago = Vor { $n } Min.
+time-hours-ago = Vor { $n } Std.
+time-days-ago = Vor { $n } Tg.
+day-today = Heute
+day-yesterday = Gestern
+day-header = { $weekday }, { $day }. { $month } { $year }
+weekday-sun = So
+weekday-mon = Mo
+weekday-tue = Di
+weekday-wed = Mi
+weekday-thu = Do
+weekday-fri = Fr
+weekday-sat = Sa
+month-jan = Jan.
+month-feb = Feb.
+month-mar = März
+month-apr = Apr.
+month-may = Mai
+month-jun = Juni
+month-jul = Juli
+month-aug = Aug.
+month-sep = Sept.
+month-oct = Okt.
+month-nov = Nov.
+month-dec = Dez.
+
+## Library: album and artist pages
+
+album-play = Album abspielen
+album-track-vectors = Titelvektoren
+album-telemetry = Albumtelemetrie
+album-meta-tracks = Titel
+album-meta-plays = Wiedergaben
+album-meta-added = Hinzugefügt
+album-more-by-artist = { $artist } im Archiv
+album-unavailable = Album nicht verfügbar.
+artist-play-discography = Diskografie abspielen
+flow-button-tip = Nach Tempo, Tonart und Genre ordnen, bitgenaue Wiedergabe bleibt erhalten
+artist-most-played = Meistgespielt
+artist-popular = Beliebt
+artist-from-history = Aus dem Wiedergabeverlauf
+artist-no-tracks = Keine Titel.
+artist-about = Info
+artist-show-less = Weniger anzeigen
+artist-show-more = Mehr anzeigen
+artist-no-bio = Keine Biografie.
+artist-core-releases = Wichtigste Veröffentlichungen
+artist-fans-also-like = Fans mögen auch
+artist-unavailable = Künstler nicht verfügbar.
+
+## Library: grids, genres, columns
+
+sort-artist = Künstler
+sort-newest = Neueste
+sort-year = Jahr
+sort-random = Zufällig
+albums-starred-only = Nur Favoriten
+genres-sort-most-tracks = Meiste Titel
+genres-unavailable = Genres nicht verfügbar.
+genres-empty = Noch keine Genre-Tags in der Bibliothek.
+genre-no-tracks = Keine Titel mit dem Tag „{ $genre }“.
+genre-no-albums = Keine Alben mit diesem Genre getaggt (Titel eventuell schon).
+col-title = Titel
+col-artist = Künstler
+col-album = Album
+col-year = Jahr
+col-added = Hinzugefügt
+col-format = Format
+col-time = Zeit
+
+## Home
+
+home-welcome-back = Willkommen zurück
+home-welcome-back-name = Willkommen zurück, { $name }
+home-tracks-indexed = { $count } Titel indiziert
+home-synced = Synchronisiert { $when }
+home-not-connected = Nicht verbunden — in den Einstellungen einen Server hinzufügen
+home-server-unreachable = Server nicht erreichbar — lokale Bibliothek wird angezeigt
+kbd-space = Leertaste
+kbd-enter = Eingabe
+home-key-play-pause = Wiedergabe/Pause
+home-key-scroll = Scrollen
+home-key-or = oder
+home-key-search = Suche
+home-last-played-on = Zuletzt gespielt auf { $device }
+home-queue-on-server = Warteschlange auf dem Server
+home-resume-from-server = Vom Server fortsetzen
+home-dismiss = Verwerfen
+home-recently-ingested = Neu eingelesen // Server-Pipeline
+home-unavailable = Nicht verfügbar, bis ein Server verbunden ist.
+home-jump-back-in = Weitermachen // Sessions
+home-view-history = Verlauf anzeigen
+home-recently-played = Zuletzt gespielte Titel
+home-heavy-rotation = Heavy Rotation
+home-playlists-vectors = Wiedergabelisten // Vektoren

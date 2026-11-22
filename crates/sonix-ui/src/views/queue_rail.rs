@@ -331,7 +331,7 @@ impl Render for QueueRail {
         let label = match q.as_ref().and_then(|q| q.source.as_ref()) {
             Some(s) => format!("Next from {}{}", s.label, match s.mode {
                 SourceMode::Shuffle => " · Shuffle".to_string(),
-                SourceMode::Flow => fmt::flow_mode_label(s.arc),
+                SourceMode::Flow => flow_mode_label(s.arc),
                 SourceMode::InOrder => String::new(),
             }),
             None if ucount > 0 => "Queue".to_string(),
@@ -819,6 +819,15 @@ impl QueueRail {
             });
         })
         .detach();
+    }
+}
+
+/// " · Flow" / " · Flow · Build" after the source name (the arc label translated).
+fn flow_mode_label(arc: Option<sonix_api::FlowArc>) -> String {
+    let flow = sonix_i18n::tr!(FlowMenu);
+    match arc.and_then(|a| crate::flow::ARCS.iter().find(|x| x.0 == a && a != sonix_api::FlowArc::Steady)) {
+        Some(&(_, label, _)) => format!(" · {flow} · {}", sonix_i18n::tr(label)),
+        None => format!(" · {flow}"),
     }
 }
 
