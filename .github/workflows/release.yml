@@ -115,17 +115,23 @@ jobs:
     # runs in parallel with the gate; nothing is signed or released unless the gate passed (sign needs both)
     needs: version
     strategy:
-      fail-fast: true
+      fail-fast: false
       matrix:
         include:
           - name: windows-x64
             os: windows-latest
+            required: true
+          # optional: GitHub's macOS arm64 runners are regularly unavailable ("not acquired ... capacity
+          # constraints"); a missing DMG must not hold back the Windows installer and update feed
           - name: macos-arm64
             os: macos-15
+            required: false
           - name: linux-x64
             os: ubuntu-24.04
+            required: true
     name: build ${{ matrix.name }}
     runs-on: ${{ matrix.os }}
+    continue-on-error: ${{ !matrix.required }}
     timeout-minutes: 60
     defaults:
       run:
@@ -242,6 +248,9 @@ jobs:
   sign:
     name: sign, update feed, checksums
     needs: [version, gate, build]
+    # not `success()`: an optional (macOS) build that GitHub could not schedule must not skip the release; the step
+    # below fails if a required asset (Windows installer, Linux archive) is missing
+    if: ${{ !cancelled() && needs.version.result == 'success' && needs.gate.result == 'success' }}
     runs-on: ubuntu-24.04
     env:
       VERSION: ${{ needs.version.outputs.version }}
@@ -272,6 +281,8 @@ jobs:
           set -euo pipefail
           setup="ASPHONIX_${VERSION}_x64-setup.exe"
           [[ -f "dist/$setup" ]] || { echo "::error::dist/$setup missing"; exit 1; }
+          ls dist/asphonix-${VERSION}-linux-x64.tar.gz >/dev/null || { echo "::error::Linux archive missing"; exit 1; }
+          ls dist/asphonix-${VERSION}-macos-arm64.dmg >/dev/null 2>&1 || echo "::warning::no macOS DMG in this release (the optional macOS build did not run or failed); attach it later"
           if [[ "$GITHUB_REF_TYPE" != tag ]]; then
             echo "dry run: not signed (the release key is used for tag builds only)"
             exit 0
@@ -318,7 +329,7 @@ jobs:
 
   release:
     name: draft release
-    if: github.event_name == 'push' && github.ref_type == 'tag'
+    if: ${{ !cancelled() && needs.sign.result == 'success' && github.event_name == 'push' && github.ref_type == 'tag' }}
     needs: [version, sign]
     runs-on: ubuntu-24.04
     permissions:
@@ -342,7 +353,7 @@ jobs:
 
   mirror:
     name: mirror to the public releases repository
-    if: github.event_name == 'push' && github.ref_type == 'tag' && vars.ASPHONIX_RELEASES_REPO != ''
+    if: ${{ !cancelled() && needs.sign.result == 'success' && github.event_name == 'push' && github.ref_type == 'tag' && vars.ASPHONIX_RELEASES_REPO != '' }}
     needs: [version, sign]
     runs-on: ubuntu-24.04
     env:

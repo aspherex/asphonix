@@ -30,7 +30,7 @@ a workflow artifact, without creating a release.
 | `ASPHONIX_X.Y.Z_x64-setup.exe.sig` | minisign signature, trusted comment `version:X.Y.Z` (signed builds only) |
 | `latest.json` | update feed for the in-app updater (signed builds only) |
 | `asphonix-X.Y.Z-windows-x64.zip` | portable Windows build |
-| `asphonix-X.Y.Z-macos-arm64.dmg` | macOS app (ad-hoc signed, not notarized) |
+| `asphonix-X.Y.Z-macos-arm64.dmg` | macOS app (ad-hoc signed, not notarized). Optional: when GitHub has no macOS arm64 runner free, the release goes out without it (the run shows a warning); build it later with a dry run (Actions > Release > Run workflow on the tag) and attach it to the release |
 | `asphonix-X.Y.Z-linux-x64.tar.gz` | Linux binaries |
 | `SHA256SUMS.txt` | checksums of all of the above |
 
