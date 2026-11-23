@@ -80,6 +80,7 @@ pub mod size_hook {
         fn DefWindowProcW(h: Hwnd, m: u32, w: usize, l: isize) -> isize;
         fn PostMessageW(h: Hwnd, m: u32, w: usize, l: isize) -> i32;
         fn IsZoomed(h: Hwnd) -> i32;
+        fn ValidateRect(h: Hwnd, r: *const c_void) -> i32;
     }
     unsafe extern "system" fn sub(h: Hwnd, msg: u32, w: usize, l: isize, _id: usize, _d: usize) -> isize {
         if super::caption_passthrough(msg, w) {
@@ -89,6 +90,14 @@ pub mod size_hook {
             return unsafe { DefWindowProcW(h, msg, w, l) };
         }
         match msg {
+            // WM_PAINT while minimized: GPUI's vsync thread invalidates every window on every vsync (~120/s), so a
+            // minimized window still receives a paint per frame and GPUI runs its frame bookkeeping for nothing.
+            // Validate and return at once; restoring sends WM_SIZE and the next vsync paints normally again.
+            0x000F if MIN.with(|m| m.get()) => {
+                // SAFETY: `h` is the live window this procedure was invoked for; a null rect validates the whole client area.
+                unsafe { ValidateRect(h, std::ptr::null()) };
+                return 0;
+            }
             // WM_NCLBUTTONDOWN on a caption button: remember it (GPUI would drop it, see caption_button_command)
             0x00A1 if super::caption_button_command(w, false).is_some() => {
                 NC_PRESSED.with(|p| p.set(w));

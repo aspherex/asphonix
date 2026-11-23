@@ -9,6 +9,9 @@ pub struct UiPrefs {
     /// UI language tag (`"en"`, `"de"`); absent = follow the OS language.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub language: Option<String>,
+    /// The visualizer switch (`crate::live::visuals`); absent = on.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub visualizer: Option<bool>,
 }
 
 fn path() -> Option<PathBuf> {
@@ -51,10 +54,10 @@ mod tests {
         let p: UiPrefs = serde_json::from_str("{}").unwrap();
         assert!(!p.light);
         assert_eq!(p.language, None);
-        let s = serde_json::to_string(&UiPrefs { light: true, language: None }).unwrap();
+        let s = serde_json::to_string(&UiPrefs { light: true, language: None, visualizer: None }).unwrap();
         assert_eq!(s, r#"{"light":true}"#);
         assert!(serde_json::from_str::<UiPrefs>(&s).unwrap().light);
-        let s = serde_json::to_string(&UiPrefs { light: false, language: Some("de".into()) }).unwrap();
+        let s = serde_json::to_string(&UiPrefs { light: false, language: Some("de".into()), visualizer: None }).unwrap();
         assert_eq!(s, r#"{"light":false,"language":"de"}"#);
         assert_eq!(serde_json::from_str::<UiPrefs>(&s).unwrap().language.as_deref(), Some("de"));
     }

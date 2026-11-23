@@ -217,8 +217,8 @@ impl QueueRail {
     }
 }
 
-/// Section header: 8/12 padding, `surface-mid`, bottom rule, label caps (+ right-aligned count).
-fn header(th: &Theme, label: String, right: Option<String>) -> impl IntoElement {
+/// Section header: 8/12 padding, `surface-mid`, bottom rule, label caps (+ right-aligned count and an optional control).
+fn header(th: &Theme, label: String, right: Option<String>, control: Option<gpui::AnyElement>) -> impl IntoElement {
     div()
             .flex()
             .flex_row()
@@ -231,7 +231,39 @@ fn header(th: &Theme, label: String, right: Option<String>) -> impl IntoElement 
             .border_b_1()
             .border_color(th.border)
             .child(txt(th, LABEL_CAPS, label).color(th.text))
-            .children(right.map(|r| txt(th, MONO_CODE, r).color(th.muted)))
+            .child(
+                div()
+                    .flex()
+                    .flex_row()
+                    .items_center()
+                    .gap(px(space::SM))
+                    .children(right.map(|r| txt(th, MONO_CODE, r).color(th.muted)))
+                    .children(control),
+            )
+}
+
+/// The visualizer switch in the deck header (`crate::live::visuals`): the equalizer icon, accent while on.
+fn visualizer_toggle(th: &Theme, cx: &mut Context<QueueRail>) -> gpui::AnyElement {
+    let on = crate::live::visuals();
+    let label: String = if on { tr!(QueueVisualizerHide).into() } else { tr!(QueueVisualizerShow).into() };
+    div()
+        .id("rail-visualizer")
+        .tip(label, *th)
+        .group("hv")
+        .flex()
+        .items_center()
+        .justify_center()
+        .size(px(24.))
+        .cursor(CursorStyle::PointingHand)
+        .child(crate::widgets::icon_g("equalizer", 12., if on { th.accent_fg } else { th.muted }, th.text))
+        .on_click(cx.listener(move |_, _: &ClickEvent, _, cx| {
+            crate::live::set_visuals(!on);
+            crate::settings::update(|p| p.visualizer = Some(!on));
+            crate::live::clear_all();
+            // cached parts (row bars) and the shell (spectrum request) re-read the switch on a full refresh
+            cx.refresh_windows();
+        }))
+        .into_any_element()
 }
 
 impl Render for QueueRail {
@@ -332,7 +364,7 @@ impl Render for QueueRail {
             .border_color(th.border)
             .when(ext_zone == Some(EnqueuePosition::Next), |d| d.child(drop_frame(&th)))
             .child(bounds_probe(self.deck_b.clone()))
-            .child(header(&th, tr!(QueueDeck).into(), Some(tr!(QueueQueued, count = total).to_uppercase())))
+            .child(header(&th, tr!(QueueDeck).into(), Some(tr!(QueueQueued, count = total).to_uppercase()), Some(visualizer_toggle(&th, cx))))
             .child(deck_body);
 
         // ---- queue sections: "Next in queue" (user-queued, always ahead) and "Next from <source>" (the rolling window)
@@ -359,7 +391,7 @@ impl Render for QueueRail {
                 .min_h_0()
                 .flex()
                 .flex_col()
-                .child(header(&th, tr!(QueueNextInBuffer).into(), None))
+                .child(header(&th, tr!(QueueNextInBuffer).into(), None, None))
                 .child(div().p(px(space::MD)).child(txt(&th, BODY_SM, tr!(QueueEmpty)).color(th.muted)))
         } else {
             let (bar, overflow) = crate::widgets::scrollbar::passive(th, &self.scroll);
@@ -431,7 +463,7 @@ impl Render for QueueRail {
                     .border_color(th.border)
                     .when(ext_zone == Some(EnqueuePosition::Next), |d| d.child(drop_frame(&th)))
                     .child(bounds_probe(self.user_b.clone()))
-                    .child(header(&th, tr!(QueueNextInQueue).into(), None))
+                    .child(header(&th, tr!(QueueNextInQueue).into(), None, None))
                     .children(user_rows)
             });
             div()
@@ -440,7 +472,7 @@ impl Render for QueueRail {
                 .flex()
                 .flex_col()
                 .children(user_section)
-                .child(header(&th, label, None))
+                .child(header(&th, label, None, None))
                 .children((!flow_hint.is_empty()).then(|| div().flex_none().px(px(space::MD)).py(px(space::XS)).border_b_1().border_color(th.border).child(crate::typo::ts(&th, MONO_CODE).text_color(th.muted).child(flow_hint.clone()))))
                 .child(
                     div()

@@ -140,6 +140,7 @@ fn main() {
     #[cfg(feature = "memprof")]
     memprof::start();
     let prefs = settings::load();
+    live::set_visuals(prefs.visualizer.unwrap_or(true));
     let backend: Arc<dyn Backend> = Arc::new(asphonix_real::RealBackend::open());
     log("backend_ready");
 

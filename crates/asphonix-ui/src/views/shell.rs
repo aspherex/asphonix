@@ -702,8 +702,8 @@ impl Render for Shell {
         let on_np = route == Route::NowPlaying;
         let docked = Self::rail_docked(vw, &route) && !self.rail_collapsed;
         self.last_vw = vw;
-        // the backend computes the spectrum only while Now Playing or the rail is on screen.
-        let want_spectrum = !self.suspended && (on_np || docked || (self.queue_drawer && !on_np));
+        // the backend computes the spectrum only while Now Playing, or the rail with the visualizer on, is on screen.
+        let want_spectrum = !self.suspended && (on_np || (crate::live::visuals() && (docked || (self.queue_drawer && !on_np))));
         if want_spectrum != self.spectrum_on {
             self.spectrum_on = want_spectrum;
             app::call(cx, move |b| {

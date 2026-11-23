@@ -47,6 +47,19 @@ struct Slot {
 
 thread_local! {
     static SLOTS: RefCell<Vec<Slot>> = const { RefCell::new(Vec::new()) };
+    static VISUALS: std::cell::Cell<bool> = const { std::cell::Cell::new(true) };
+}
+
+/// The visualizer switch (button in the queue rail's deck header, stored in `ui.json`). Off, the now-playing bars of
+/// the current row are drawn static and the rail spectrum is not drawn, so nothing outside Now Playing schedules
+/// frames; Now Playing keeps its spectrum and meters. Every animation frame is a whole-window draw, so this is the
+/// main CPU lever while music plays with the window open.
+pub fn visuals() -> bool {
+    VISUALS.with(|v| v.get())
+}
+
+pub fn set_visuals(on: bool) {
+    VISUALS.with(|v| v.set(on));
 }
 
 /// Call at the top of `render` of every view that places slots: its slots of the last layout are dropped and the
@@ -165,7 +178,7 @@ impl Render for LiveLayer {
             let d = crate::metrics::spectrum::MIN_DRAW_MS as f64 / 1000.0;
             next = Some(next.map_or(d, |n: f64| n.min(d)));
         }
-        let rail: Option<Vec<u8>> = if top {
+        let rail: Option<Vec<u8>> = if top && visuals() {
             let m = self.player.read(cx);
             if m.state.status == PlaybackStatus::Stopped { None } else { m.spectrum.as_ref().map(|f| f.bands.clone()) }
         } else {
@@ -192,7 +205,7 @@ impl Render for LiveLayer {
                 for s in &slots {
                     window.with_content_mask(Some(s.mask.clone()), |window| match s.kind {
                         Kind::Bars { playing } => {
-                            crate::anim::paint_bars(window, s.bounds.origin, th.accent, crate::anim::bar_heights(playing, now as f32))
+                            crate::anim::paint_bars(window, s.bounds.origin, th.accent, crate::anim::bar_heights(playing && visuals(), now as f32))
                         }
                         Kind::RailSpectrum => {
                             if let Some(b) = &rail {
@@ -225,5 +238,5 @@ impl Render for LiveLayer {
 
 /// Playing bars that are (at least partly) inside their clip: only those keep the bar frames coming.
 fn animating_bars(s: &Slot) -> bool {
-    s.kind == (Kind::Bars { playing: true }) && s.bounds.intersects(&s.mask.bounds)
+    visuals() && s.kind == (Kind::Bars { playing: true }) && s.bounds.intersects(&s.mask.bounds)
 }
