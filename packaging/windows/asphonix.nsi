@@ -1,7 +1,7 @@
 ; ASPHONIX Windows installer (NSIS 3, Unicode).
 ;
 ; Built by .github/workflows/release.yml:
-;   makensis /DVERSION=0.2.0 /DSRCDIR=<dir with asphonix.exe, asphonix-mcp.exe, LICENSE> /DOUTFILE=<setup.exe> asphonix.nsi
+;   makensis /DVERSION=0.2.0 /DSRCDIR=<dir with asphonix.exe, LICENSE> /DOUTFILE=<setup.exe> asphonix.nsi
 ;
 ; Per-user install (no admin rights, no UAC prompt): %LOCALAPPDATA%\Programs\ASPHONIX.
 ; Switches used by the in-app updater (crates/asphonix-core/src/updates.rs, docs/UPDATES.md):
@@ -138,8 +138,9 @@ Section "${APP}" SecMain
   Call WaitForAppExit
 
   File "${SRCDIR}\${EXE}"
-  File "${SRCDIR}\asphonix-mcp.exe"
   File "${SRCDIR}\LICENSE"
+  ; asphonix-mcp.exe shipped with older builds (the MCP bridge was removed): drop it on update
+  Delete "$INSTDIR\asphonix-mcp.exe"
 
   WriteUninstaller "$INSTDIR\uninstall.exe"
 
@@ -171,7 +172,6 @@ FunctionEnd
 
 Section "Uninstall"
   Delete "$INSTDIR\${EXE}"
-  Delete "$INSTDIR\asphonix-mcp.exe"
   Delete "$INSTDIR\LICENSE"
   Delete "$INSTDIR\uninstall.exe"
   RMDir "$INSTDIR"

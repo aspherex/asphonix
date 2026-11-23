@@ -164,7 +164,14 @@ fn player_state_events_repaint_dock_and_now_playing_only_when_the_shown_state_ch
     send(&shell, cx, state_of(&t, PlaybackStatus::Playing, 10.10));
     cx.run_until_parked();
     assert_eq!(dock_n.get(), 0, "same second, same pixel");
-    assert!(np_n.get() > 0, "Now Playing observes every state");
+    // position-only updates arrive as `PositionTick`: Now Playing repaints for them only while it is shown
+    assert_eq!(np_n.get(), 0, "closed Now Playing ignores position ticks");
+    shell.update(cx, |sh, cx| sh.navigate(Route::NowPlaying, cx));
+    cx.run_until_parked();
+    np_n.set(0);
+    send(&shell, cx, state_of(&t, PlaybackStatus::Playing, 10.15));
+    cx.run_until_parked();
+    assert!(np_n.get() > 0, "shown Now Playing repaints on every position tick");
 
     send(&shell, cx, state_of(&t, PlaybackStatus::Playing, 11.0));
     cx.run_until_parked();
