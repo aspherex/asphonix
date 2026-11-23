@@ -148,7 +148,10 @@ impl Shell {
                 window.focus(&f);
             }
         }));
-        subs.push(cx.observe_window_activation(window, |this: &mut Shell, window, _cx| this.main_active = window.is_window_active()));
+        subs.push(cx.observe_window_activation(window, |this: &mut Shell, window, _cx| {
+            this.main_active = window.is_window_active();
+            crate::app::set_window_active(this.main_active);
+        }));
         subs.push(cx.subscribe(&np, |this: &mut Shell, _, ev: &NpEvent, cx| this.on_np_event(ev, cx)));
         // focusing the search box navigates to the Search route
         let search_focus = search.read(cx).focus_handle.clone();

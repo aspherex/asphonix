@@ -37,6 +37,7 @@ pub struct DockView {
     art_hover: bool,
     title_hover: bool,
     _sub: Subscription,
+    _tick: Subscription,
     pos_gate: crate::app::PosGate,
     scale: f32,
 }
@@ -44,14 +45,19 @@ pub struct DockView {
 impl DockView {
     pub fn new(backend: Arc<dyn Backend>, art: ArtHandle, player: &Entity<PlayerModel>, cx: &mut Context<Self>) -> Self {
         // cached view (`crate::part`): repaint when the shown second or the seek bar's pixel changes, not on every tick
-        let sub = cx.observe(player, |this: &mut Self, p, cx| {
-            // the seek bar width in device px (`scale`: the window scale factor at the last render)
-            let steps = f32::from(this.seek.bounds.get().size.width) * this.scale;
-            if this.pos_gate.changed(&p.read(cx).state, steps) {
-                cx.notify();
-            }
-        });
-        Self { backend, art, player: player.clone(), seek: slider::new_handle(), seek_preview: None, vol: slider::new_handle(), last_audible: 0.5, art_hover: false, title_hover: false, _sub: sub, pos_gate: Default::default(), scale: 1.0 }
+        let sub = cx.observe(player, |this: &mut Self, p, cx| this.on_position(&p, cx));
+        let tick = cx.subscribe(player, |this: &mut Self, p, _: &crate::app::PositionTick, cx| this.on_position(&p, cx));
+        Self { backend, art, player: player.clone(), seek: slider::new_handle(), seek_preview: None, vol: slider::new_handle(), last_audible: 0.5, art_hover: false, title_hover: false, _sub: sub, _tick: tick, pos_gate: Default::default(), scale: 1.0 }
+    }
+
+    /// A state change or position tick: repaint when the shown second or the seek bar's device pixel changes; in the
+    /// background only the shown second counts (one repaint per second instead of one per bar pixel).
+    fn on_position(&mut self, p: &Entity<PlayerModel>, cx: &mut Context<Self>) {
+        // `scale`: the window scale factor at the last render
+        let steps = if crate::app::window_active() { f32::from(self.seek.bounds.get().size.width) * self.scale } else { 0.0 };
+        if self.pos_gate.changed(&p.read(cx).state, steps) {
+            cx.notify();
+        }
     }
 }
 

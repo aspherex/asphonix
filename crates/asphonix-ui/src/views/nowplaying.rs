@@ -58,6 +58,7 @@ pub struct NowPlayingView {
     _sub: Subscription,
     /// cached view (`crate::part`): every player state (position, volume, lyrics line) re-renders the page
     _state_sub: Subscription,
+    _tick_sub: Subscription,
 }
 
 impl NowPlayingView {
@@ -95,6 +96,7 @@ impl NowPlayingView {
             last_audible: 2.0 / 3.0,
             _sub: sub,
             _state_sub: cx.observe(player, |_, _, cx| cx.notify()),
+            _tick_sub: cx.subscribe(player, |this: &mut Self, _, _: &crate::app::PositionTick, cx| if this.visible { cx.notify() }),
         };
         s.fetch_device(cx);
         s

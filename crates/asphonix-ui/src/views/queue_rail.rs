@@ -69,6 +69,7 @@ pub struct QueueRail {
     /// cached view (`crate::part`): the deck shows the position as whole seconds
     pos_gate: crate::app::PosGate,
     _pos_sub: Subscription,
+    _pos_tick: Subscription,
 }
 
 /// Per-row layout flags of `queue_row`: playing, Flow source (3-line rows), in the user queue.
@@ -140,7 +141,11 @@ fn drop_frame(th: &Theme) -> gpui::Div {
 impl QueueRail {
     pub fn new(backend: Arc<dyn Backend>, art: ArtHandle, player: &Entity<PlayerModel>, menu: &Entity<ContextMenu>, cx: &mut Context<Self>) -> Self {
         let sub = cx.subscribe(player, |this: &mut Self, _, _: &PlayerEvent, cx| this.refresh(cx));
-        let mut s = Self { backend, art, player: player.clone(), state: None, scroll: gpui::ScrollHandle::new(), scroll_key: None, menu: menu.clone(), focus: cx.focus_handle().tab_stop(true), drag_dy: 0.0, drag: None, base: 0, refresh_seq: 0, top_pending: None, rows: Default::default(), ph_bounds: Default::default(), deck_b: Default::default(), user_b: Default::default(), list_b: Default::default(), drag_pos: Point::default(), sel: Selection::default(), _sub: sub, pos_gate: Default::default(), _pos_sub: cx.observe(player, |this: &mut Self, p, cx| {
+        let mut s = Self { backend, art, player: player.clone(), state: None, scroll: gpui::ScrollHandle::new(), scroll_key: None, menu: menu.clone(), focus: cx.focus_handle().tab_stop(true), drag_dy: 0.0, drag: None, base: 0, refresh_seq: 0, top_pending: None, rows: Default::default(), ph_bounds: Default::default(), deck_b: Default::default(), user_b: Default::default(), list_b: Default::default(), drag_pos: Point::default(), sel: Selection::default(), _sub: sub, pos_gate: Default::default(), _pos_tick: cx.subscribe(player, |this: &mut Self, p, _: &crate::app::PositionTick, cx| {
+            if this.pos_gate.changed(&p.read(cx).state, 0.0) {
+                cx.notify();
+            }
+        }), _pos_sub: cx.observe(player, |this: &mut Self, p, cx| {
             if this.pos_gate.changed(&p.read(cx).state, 0.0) {
                 cx.notify();
             }

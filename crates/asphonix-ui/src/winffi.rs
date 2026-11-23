@@ -69,7 +69,12 @@ pub mod size_hook {
         static MIN: Cell<bool> = const { Cell::new(false) };
         /// caption button under the last WM_NCLBUTTONDOWN (0 = none)
         static NC_PRESSED: Cell<usize> = const { Cell::new(0) };
+        /// vsync paints seen while the window is in the background (see `BACKGROUND_PAINT_EVERY`)
+        static BG_PAINTS: Cell<u32> = const { Cell::new(0) };
     }
+    /// In the background (visible, not the foreground window) only every n-th vsync paint reaches GPUI: about 30 frames
+    /// per second at 120 Hz, so anything pending still shows within a few frames, at a quarter of the wake-up work.
+    const BACKGROUND_PAINT_EVERY: u32 = 4;
     #[link(name = "comctl32")]
     unsafe extern "system" {
         fn SetWindowSubclass(h: Hwnd, f: SubProc, id: usize, data: usize) -> i32;
@@ -95,6 +100,17 @@ pub mod size_hook {
             // Validate and return at once; restoring sends WM_SIZE and the next vsync paints normally again.
             0x000F if MIN.with(|m| m.get()) => {
                 // SAFETY: `h` is the live window this procedure was invoked for; a null rect validates the whole client area.
+                unsafe { ValidateRect(h, std::ptr::null()) };
+                return 0;
+            }
+            // WM_PAINT in the background: let every BACKGROUND_PAINT_EVERY-th through (the foreground window keeps every
+            // vsync, so input stays as responsive as before)
+            0x000F if !crate::app::window_active() && BG_PAINTS.with(|c| {
+                let n = c.get().wrapping_add(1);
+                c.set(n);
+                n % BACKGROUND_PAINT_EVERY != 0
+            }) => {
+                // SAFETY: as above, `h` is the live window; validating only drops this frame's paint request.
                 unsafe { ValidateRect(h, std::ptr::null()) };
                 return 0;
             }

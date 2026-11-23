@@ -6,6 +6,21 @@ use gpui::{App, Context, EventEmitter, Global};
 use asphonix_api::{Backend, PlaybackStatus, PlayerState, QueueSourceInfo, SourceKind, SpectrumFrame};
 use std::sync::Arc;
 
+thread_local! {
+    static WINDOW_ACTIVE: std::cell::Cell<bool> = const { std::cell::Cell::new(true) };
+}
+
+/// Whether the main window is the foreground window (set by the shell's activation observer). In the background the
+/// dock repaints the position once per second instead of per seek-bar pixel, and the window procedure lets only every
+/// few vsync paints through (`winffi`): every repaint is a whole-window GPUI draw.
+pub fn window_active() -> bool {
+    WINDOW_ACTIVE.with(|a| a.get())
+}
+
+pub fn set_window_active(on: bool) {
+    WINDOW_ACTIVE.with(|a| a.set(on));
+}
+
 pub struct Services {
     pub backend: Arc<dyn Backend>,
     pub art: ArtHandle,
@@ -138,14 +153,18 @@ impl PlayerModel {
     /// still kept current, but nothing is re-rendered.
     pub fn apply_state(&mut self, s: PlayerState, notify: bool, cx: &mut Context<Self>) {
         let changed = self.current_id() != s.track.as_ref().map(|t| t.id.as_str()) || self.state.status != s.status;
-        let star_changed = self.state.track.as_ref().map(|t| t.starred.is_some()) != s.track.as_ref().map(|t| t.starred.is_some());
+        let rest_changed = !same_but_position(&self.state, &s);
         self.state = s;
         if notify {
             if changed {
                 cx.emit(PlayerEvent::TrackOrStatus);
             }
-            if changed || star_changed || self.state.status != PlaybackStatus::Stopped || true {
+            // A notify re-renders every view that read the model, the shell root included (a whole-window frame), so the
+            // 4 Hz position ticks go out as `PositionTick` to the few views that show the position instead.
+            if rest_changed {
                 cx.notify();
+            } else {
+                cx.emit(PositionTick);
             }
         }
     }
@@ -155,7 +174,19 @@ impl PlayerModel {
     }
 }
 
-/// Gate for a cached view that shows the player position (`crate::part`): the player notifies 4x a second, but a
+/// A state event that only moved the playback position (4 Hz while playing). Views that show the position (dock, rail
+/// deck, Now Playing) subscribe to it; everything else only re-renders on a real change (`cx.notify`).
+pub struct PositionTick;
+impl EventEmitter<PositionTick> for PlayerModel {}
+
+/// Equal except for `position_sec`.
+fn same_but_position(a: &PlayerState, b: &PlayerState) -> bool {
+    let mut b = b.clone();
+    b.position_sec = a.position_sec;
+    *a == b
+}
+
+/// Gate for a cached view that shows the player position (`crate::part`): the player ticks 4x a second, but a
 /// readout only changes with the whole second (`format_duration` floors) and a progress bar only with its pixel.
 /// `changed` is true when anything else in the state changed, the second changed, or the progress moved by one of
 /// `steps` positions (the bar width in device px; 0 = no bar).
