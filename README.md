@@ -127,6 +127,7 @@ goes in and what stays out.
 | **Desktop** | **Track-change preview**: a small card in a screen corner of your choice when the track changes while ASPHONIX is in the background · Windows media controls and media keys · scrobbling to your server · light and dark theme · multiple server profiles |
 | **Languages** | English and German, switchable at runtime (follows the OS language by default) |
 | **Accessibility** | Text contrast meets WCAG 2.2 AA (4.5:1) for every text colour on every surface, in both the dark and the light theme, enforced by tests · visible keyboard focus on every control · keyboard shortcuts for all common actions ([status](docs/ACCESSIBILITY.md)) |
+
 <table>
   <tr>
     <td width="50%"><a href="docs/screenshots/home.png"><img src="docs/screenshots/home.png" alt="Home: recently played albums and sessions"></a><p align="center"><sub><b>Home</b>: pick up a recent session where you left it</sub></p></td>
@@ -222,6 +223,7 @@ not drawn from canned animations.
 | **Secrets** | OS keychain via the `keyring` crate |
 | **OS integration** | Windows SMTC via the `windows` crate |
 | **Updater** | Off unless configured · minisign signature verification (`minisign-verify`) |
+
 ## // Keyboard
 
 | Anywhere | | Now Playing | |
