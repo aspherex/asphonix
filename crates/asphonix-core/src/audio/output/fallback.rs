@@ -160,8 +160,7 @@ pub fn spawn_render(
                             continue;
                         }
                         let mut acc = 0f32;
-                        let mut ch = 0usize;
-                        for sample in frame.iter_mut() {
+                        for (ch, sample) in frame.iter_mut().enumerate() {
                             let mut bytes = [0u8; 4];
                             let _ = consumer.pop_partial_slice(&mut bytes);
                             *sample = f32::from_le_bytes(bytes);
@@ -181,7 +180,6 @@ pub fn spawn_render(
                                     peak_r = peak_r.max(level);
                                 }
                             }
-                            ch += 1;
                         }
                         if tap_on && frame_idx < mono_scratch.len() {
                             mono_scratch[frame_idx] = acc / channels as f32;
