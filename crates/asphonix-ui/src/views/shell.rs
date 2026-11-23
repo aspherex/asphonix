@@ -414,7 +414,10 @@ impl Shell {
                 }
             }
             Event::UpdateProgress(p) => crate::overlays::update_progress(cx, p),
-            Event::SyncProgress(_) | Event::Connection(_) => {}
+            // sign-in, sign-out, connection lost or restored: the title bar pill, the counts and the profile corner
+            // read the session (`load_static`), so they must not keep showing the state from before the change
+            Event::Connection(_) => self.load_static(cx),
+            Event::SyncProgress(_) => {}
         }
     }
 

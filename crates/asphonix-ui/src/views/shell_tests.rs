@@ -310,3 +310,25 @@ fn queue_changed_refreshes_the_rail_and_only_the_source_while_minimized(cx: &mut
     assert_eq!(fake.count("player_get_queue") - reads, 1, "minimized: the queue source only");
     assert_eq!(rail(&shell, cx), None, "the released rail stays empty");
 }
+
+/// A connection change (sign-in, sign-out, connection lost) refreshes what the chrome shows from the session: after a
+/// successful login the title bar must not keep saying "disconnected" / "not signed in" until the first sync ends.
+#[gpui::test]
+fn connection_events_refresh_the_session_shown_in_the_chrome(cx: &mut TestAppContext) {
+    use asphonix_api::{AuthApi, ConnectRequest, ConnectionState, ConnectionStatusEvent};
+    let fake = FakeBackend::new().arc();
+    let (shell, cx) = mount(cx, &fake);
+    let state = |cx: &mut VisualTestContext| shell.read_with(cx, |sh, _| sh.status.as_ref().map(|s| (s.state, s.username.clone())));
+    assert_eq!(state(cx).map(|s| s.0), Some(ConnectionState::Connected));
+
+    fake.auth_logout().unwrap(); // the backend changes state without the chrome asking
+    send(&shell, cx, Event::Connection(ConnectionStatusEvent { state: ConnectionState::Disconnected, message: None, ping_ms: None }));
+    cx.run_until_parked();
+    assert_eq!(state(cx).map(|s| s.0), Some(ConnectionState::Disconnected), "sign-out reaches the chrome");
+
+    let req = ConnectRequest { url: "https://music.example.com".into(), username: "carol".into(), password: "pw".into() };
+    fake.auth_connect(req).unwrap();
+    send(&shell, cx, Event::Connection(ConnectionStatusEvent { state: ConnectionState::Connected, message: None, ping_ms: Some(20) }));
+    cx.run_until_parked();
+    assert_eq!(state(cx), Some((ConnectionState::Connected, Some("carol".into()))), "sign-in reaches the chrome without waiting for a sync");
+}
