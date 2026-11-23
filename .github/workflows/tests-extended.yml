@@ -1,4 +1,5 @@
-# Extended test runs, informational (not a merge gate; the gate is build.yml):
+# Extended test runs, informational, nightly and on demand only (not on every push: they take ~20 minutes;
+# the 3-minute gate is build.yml):
 # - coverage: cargo-llvm-cov over the workspace on Windows, lcov + summary uploaded as an artifact and shown in the run
 #   summary. Needs no secrets (nothing is uploaded to a coverage service).
 # - deep-random: the randomized tests with many more seeds/cases than the regular run (docs/TESTING.md). A failure
@@ -6,9 +7,6 @@
 name: Tests (extended)
 
 on:
-  push:
-    branches: [main, master]
-    paths-ignore: ["**.md", "docs/**"]
   schedule:
     - cron: "17 3 * * *"
   workflow_dispatch:

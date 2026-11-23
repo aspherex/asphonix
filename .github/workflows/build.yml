@@ -1,9 +1,13 @@
-# Lint, test and build ASPHONIX on Windows, macOS and Linux.
-# Every push to main / pull request: clippy + tests + release build, binaries attached to the run as artifacts.
-# Releases (tag `v*`): .github/workflows/release.yml.
+# Checks and tests on every push to main / every pull request. Budget: 3 minutes wall clock with a warm cache.
+# Release builds and installers: .github/workflows/release.yml. Long randomized runs: tests-extended.yml (nightly).
 #
-# The binaries are unsigned: Windows SmartScreen and macOS Gatekeeper warn on first launch
-# (macOS: right-click -> Open, or `xattr -dr com.apple.quarantine ASPHONIX.app`).
+# How it stays fast:
+# - the jobs run in parallel; clippy runs once (Linux), tests on Windows (primary platform) and Linux, macOS only
+#   type-checks
+# - sccache (GitHub Actions cache backend) caches compiled crates, our own library crates included; rust-cache keeps
+#   the registry and the dependency artifacts sccache cannot cache (proc macros, build scripts)
+# - no debug info and no incremental state in CI builds (smaller, faster to link and to cache)
+# - the GPUI system libraries on Linux come from an apt cache instead of apt-get update + install
 name: Build
 
 on:
@@ -22,12 +26,19 @@ concurrency:
 
 env:
   CARGO_TERM_COLOR: always
+  CARGO_INCREMENTAL: "0"
+  CARGO_PROFILE_DEV_DEBUG: "0"
+  RUSTC_WRAPPER: sccache
+  SCCACHE_GHA_ENABLED: "true"
+  LINUX_PKGS: >-
+    pkg-config libasound2-dev libdbus-1-dev libfontconfig1-dev libfreetype6-dev libwayland-dev libxkbcommon-dev
+    libxkbcommon-x11-dev libx11-xcb-dev libxcb1-dev libvulkan-dev libzstd-dev
 
 jobs:
   deny:
-    name: cargo-deny (licenses, advisories, sources)
+    name: cargo-deny
     runs-on: ubuntu-24.04
-    timeout-minutes: 15
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
         with:
@@ -36,109 +47,77 @@ jobs:
         with:
           command: check
 
-  build:
+  clippy:
+    name: clippy
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+      - uses: awalsh128/cache-apt-pkgs-action@553a35bb8ebd9fcabcb1c9451aa4c98e1b4ca8a9 # v1.6.3
+        with:
+          packages: ${{ env.LINUX_PKGS }}
+          version: gpui-1
+      - uses: dtolnay/rust-toolchain@686976e191b89faba57d3206551f0f330d8cb249 # stable
+        with:
+          toolchain: "1.100.0" # keep in sync with rust-toolchain.toml
+          components: clippy
+      - uses: mozilla-actions/sccache-action@fc920bf0ec8de6ee65d409111f7ec508035751ba # v0.0.11
+      - uses: Swatinem/rust-cache@f13886b937689c021905a6b90929199931d60db1 # v2.8.1
+        with:
+          cache-on-failure: true
+      - run: cargo clippy --workspace --all-targets --locked -- -D warnings
+
+  test:
     strategy:
       fail-fast: false
       matrix:
         include:
           - name: windows-x64
             os: windows-latest
-          - name: macos-arm64
-            os: macos-15
           - name: linux-x64
             os: ubuntu-24.04
-    name: ${{ matrix.name }}
+    name: test ${{ matrix.name }}
     runs-on: ${{ matrix.os }}
-    timeout-minutes: 60
+    timeout-minutes: 30
     defaults:
       run:
         shell: bash
     steps:
-      # Third-party actions pinned to commit SHAs.
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
         with:
           persist-credentials: false
-
+      - if: runner.os == 'Linux'
+        uses: awalsh128/cache-apt-pkgs-action@553a35bb8ebd9fcabcb1c9451aa4c98e1b4ca8a9 # v1.6.3
+        with:
+          packages: ${{ env.LINUX_PKGS }}
+          version: gpui-1
       - uses: dtolnay/rust-toolchain@686976e191b89faba57d3206551f0f330d8cb249 # stable
         with:
           toolchain: "1.100.0" # keep in sync with rust-toolchain.toml
-          components: clippy
-
+      - uses: mozilla-actions/sccache-action@fc920bf0ec8de6ee65d409111f7ec508035751ba # v0.0.11
       - uses: Swatinem/rust-cache@f13886b937689c021905a6b90929199931d60db1 # v2.8.1
-
-      - name: Linux system libraries (GPUI, ALSA, D-Bus)
-        if: runner.os == 'Linux'
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y --no-install-recommends \
-            pkg-config libasound2-dev libdbus-1-dev libfontconfig1-dev libfreetype6-dev \
-            libwayland-dev libxkbcommon-dev libxkbcommon-x11-dev libx11-xcb-dev libxcb1-dev \
-            libvulkan-dev libzstd-dev
-
-      # macOS and Linux are newer targets: their lint/test failures are reported but do not block the build
-      # artifacts yet. Drop the continue-on-error once both are green.
-      - name: Clippy
-        continue-on-error: ${{ runner.os != 'Windows' }}
-        run: cargo clippy --workspace --all-targets --locked -- -D warnings
-
-      - name: Tests
-        continue-on-error: ${{ runner.os != 'Windows' }}
-        # short temp root: Unix socket paths are limited to ~104 bytes on macOS
-        env:
-          ASPHONIX_TEST_TMP: ${{ runner.os != 'Windows' && '/tmp/sx' || runner.temp }}
-        run: |
-          if [[ -n "${ASPHONIX_TEST_TMP:-}" ]]; then mkdir -p "$ASPHONIX_TEST_TMP"; fi
-          cargo test --workspace --locked
-
-      - name: Release build
-        run: cargo build --workspace --release --locked
-
-      - name: Package
-        run: |
-          set -euo pipefail
-          ver="${GITHUB_REF_NAME#v}"
-          [[ "$GITHUB_REF_TYPE" == tag ]] || ver="$(git rev-parse --short HEAD)"
-          out="asphonix-${ver}-${{ matrix.name }}"
-          mkdir -p dist
-          case "$RUNNER_OS" in
-            Windows)
-              mkdir "$out"
-              cp target/release/asphonix.exe LICENSE README.md "$out/"
-              7z a "dist/$out.zip" "$out" >/dev/null
-              ;;
-            macOS)
-              app="$out/ASPHONIX.app"
-              mkdir -p "$app/Contents/MacOS"
-              cp target/release/asphonix "$app/Contents/MacOS/"
-              cat > "$app/Contents/Info.plist" <<PLIST
-          <?xml version="1.0" encoding="UTF-8"?>
-          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-          <plist version="1.0"><dict>
-            <key>CFBundleName</key><string>ASPHONIX</string>
-            <key>CFBundleDisplayName</key><string>ASPHONIX</string>
-            <key>CFBundleIdentifier</key><string>dev.asphonix.app</string>
-            <key>CFBundleExecutable</key><string>asphonix</string>
-            <key>CFBundlePackageType</key><string>APPL</string>
-            <key>CFBundleShortVersionString</key><string>${ver}</string>
-            <key>LSMinimumSystemVersion</key><string>11.0</string>
-            <key>NSHighResolutionCapable</key><true/>
-          </dict></plist>
-          PLIST
-              cp LICENSE README.md "$out/"
-              # Ad-hoc signature only (Apple Silicon refuses unsigned binaries); no Developer ID, no notarization.
-              codesign --force --deep -s - "$app"
-              hdiutil create -volname ASPHONIX -srcfolder "$out" -ov -format UDZO "dist/$out.dmg"
-              ;;
-            Linux)
-              mkdir "$out"
-              cp target/release/asphonix LICENSE README.md "$out/"
-              tar -czf "dist/$out.tar.gz" "$out"
-              ;;
-          esac
-          ls -l dist
-
-      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
-          name: asphonix-${{ matrix.name }}
-          path: dist/*
-          if-no-files-found: error
+          cache-on-failure: true
+      - name: Tests
+        env:
+          ASPHONIX_TEST_TMP: ${{ runner.temp }}
+        run: cargo test --workspace --locked
+
+  check-macos:
+    name: check macos-arm64
+    runs-on: macos-15
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@686976e191b89faba57d3206551f0f330d8cb249 # stable
+        with:
+          toolchain: "1.100.0" # keep in sync with rust-toolchain.toml
+      - uses: mozilla-actions/sccache-action@fc920bf0ec8de6ee65d409111f7ec508035751ba # v0.0.11
+      - uses: Swatinem/rust-cache@f13886b937689c021905a6b90929199931d60db1 # v2.8.1
+        with:
+          cache-on-failure: true
+      - run: cargo check --workspace --all-targets --locked

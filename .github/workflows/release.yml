@@ -2,8 +2,8 @@
 #
 # Push a tag `vX.Y.Z` (must equal `version` in the root Cargo.toml) ->
 #   version   check tag == Cargo version, pick release notes (release-notes/vX.Y.Z.md if present)
-#   gate      clippy -D warnings + the full test suite on Windows (the primary platform)
-#   build     release binaries on Windows / macOS / Linux; Windows also gets the NSIS installer
+#   gate      clippy -D warnings + the full test suite on Windows (the primary platform), in parallel with build
+#   build     `dist` binaries (ThinLTO, see Cargo.toml) on Windows / macOS / Linux; Windows also gets the NSIS installer
 #             (packaging/windows/asphonix.nsi) with the update channel compiled in (repository variables)
 #   sign      minisign signature of the installer (trusted comment "version:X.Y.Z", the updater's anti-rollback),
 #             verified against the public key, latest.json update feed, SHA256SUMS.txt
@@ -40,6 +40,14 @@ concurrency:
 
 env:
   CARGO_TERM_COLOR: always
+  # same speed setup as build.yml: sccache + rust-cache, no incremental state, no debug info in the test gate
+  CARGO_INCREMENTAL: "0"
+  CARGO_PROFILE_DEV_DEBUG: "0"
+  RUSTC_WRAPPER: sccache
+  SCCACHE_GHA_ENABLED: "true"
+  LINUX_PKGS: >-
+    pkg-config libasound2-dev libdbus-1-dev libfontconfig1-dev libfreetype6-dev libwayland-dev libxkbcommon-dev
+    libxkbcommon-x11-dev libx11-xcb-dev libxcb1-dev libvulkan-dev libzstd-dev
 
 jobs:
   version:
@@ -96,12 +104,16 @@ jobs:
         with:
           toolchain: "1.100.0" # keep in sync with rust-toolchain.toml
           components: clippy
+      - uses: mozilla-actions/sccache-action@fc920bf0ec8de6ee65d409111f7ec508035751ba # v0.0.11
       - uses: Swatinem/rust-cache@f13886b937689c021905a6b90929199931d60db1 # v2.8.1
+        with:
+          cache-on-failure: true
       - run: cargo clippy --workspace --all-targets --locked -- -D warnings
       - run: cargo test --workspace --locked
 
   build:
-    needs: [version, gate]
+    # runs in parallel with the gate; nothing is signed or released unless the gate passed (sign needs both)
+    needs: version
     strategy:
       fail-fast: true
       matrix:
@@ -127,18 +139,16 @@ jobs:
       - uses: dtolnay/rust-toolchain@686976e191b89faba57d3206551f0f330d8cb249 # stable
         with:
           toolchain: "1.100.0" # keep in sync with rust-toolchain.toml
+      - uses: mozilla-actions/sccache-action@fc920bf0ec8de6ee65d409111f7ec508035751ba # v0.0.11
       - uses: Swatinem/rust-cache@f13886b937689c021905a6b90929199931d60db1 # v2.8.1
         with:
-          key: release
-
-      - name: Linux system libraries (GPUI, ALSA, D-Bus)
-        if: runner.os == 'Linux'
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y --no-install-recommends \
-            pkg-config libasound2-dev libdbus-1-dev libfontconfig1-dev libfreetype6-dev \
-            libwayland-dev libxkbcommon-dev libxkbcommon-x11-dev libx11-xcb-dev libxcb1-dev \
-            libvulkan-dev libzstd-dev
+          key: dist
+          cache-on-failure: true
+      - if: runner.os == 'Linux'
+        uses: awalsh128/cache-apt-pkgs-action@553a35bb8ebd9fcabcb1c9451aa4c98e1b4ca8a9 # v1.6.3
+        with:
+          packages: ${{ env.LINUX_PKGS }}
+          version: gpui-1
 
       - name: Release build
         env:
@@ -155,7 +165,7 @@ jobs:
               echo "::warning::no update channel configured (vars.ASPHONIX_UPDATE_ENDPOINT / ASPHONIX_UPDATE_PUBKEY): in-app updates stay off in this build"
             fi
           fi
-          cargo build --workspace --release --locked
+          cargo build --workspace --profile dist --locked
 
       - name: Package
         run: |
@@ -165,13 +175,13 @@ jobs:
           case "$RUNNER_OS" in
             Windows)
               mkdir "$out"
-              cp target/release/asphonix.exe target/release/asphonix-mcp.exe LICENSE README.md "$out/"
+              cp target/dist/asphonix.exe target/dist/asphonix-mcp.exe LICENSE README.md "$out/"
               7z a "dist/$out.zip" "$out" >/dev/null
               ;;
             macOS)
               app="$out/ASPHONIX.app"
               mkdir -p "$app/Contents/MacOS"
-              cp target/release/asphonix target/release/asphonix-mcp "$app/Contents/MacOS/"
+              cp target/dist/asphonix target/dist/asphonix-mcp "$app/Contents/MacOS/"
               cat > "$app/Contents/Info.plist" <<PLIST
           <?xml version="1.0" encoding="UTF-8"?>
           <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -193,7 +203,7 @@ jobs:
               ;;
             Linux)
               mkdir "$out"
-              cp target/release/asphonix target/release/asphonix-mcp LICENSE README.md "$out/"
+              cp target/dist/asphonix target/dist/asphonix-mcp LICENSE README.md "$out/"
               tar -czf "dist/$out.tar.gz" "$out"
               ;;
           esac
@@ -221,7 +231,7 @@ jobs:
 
   sign:
     name: sign, update feed, checksums
-    needs: [version, build]
+    needs: [version, gate, build]
     runs-on: ubuntu-24.04
     env:
       VERSION: ${{ needs.version.outputs.version }}
@@ -237,6 +247,12 @@ jobs:
           path: dist
           pattern: build-*
           merge-multiple: true
+      # rsign2 (minisign-compatible, pure Rust): the tool and version the key was created and tested with; cached
+      # because compiling it takes about a minute
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.cargo/bin/rsign
+          key: rsign2-0.6.7-${{ runner.os }}
       - name: Sign the installer and write latest.json
         env:
           # The release key signs tag builds only: dry runs (pull requests, manual runs) stay unsigned, so unreviewed
@@ -255,8 +271,7 @@ jobs:
             exit 0
           fi
           [[ -n "$PUBKEY_B64" ]] || { echo "::error::MINISIGN_SECRET_KEY is set but vars.ASPHONIX_UPDATE_PUBKEY is not"; exit 1; }
-          # rsign2 (minisign-compatible, pure Rust): the tool and version the key was created and tested with.
-          cargo install rsign2 --version 0.6.7 --locked --quiet
+          command -v rsign >/dev/null || RUSTC_WRAPPER= cargo install rsign2 --version 0.6.7 --locked --quiet
           umask 077
           key="$RUNNER_TEMP/asphonix.key"
           printf '%s\n' "$MINISIGN_SECRET_KEY" > "$key"

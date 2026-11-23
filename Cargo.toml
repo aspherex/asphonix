@@ -41,6 +41,14 @@ codegen-units = 1
 panic = "abort"
 strip = true
 
+# shipped builds (.github/workflows/release.yml): release with ThinLTO over 16 codegen units, so the release
+# pipeline fits its 3-minute budget (fat LTO + 1 codegen unit is a serial, uncacheable whole-program step of 8-10
+# minutes per platform); `release` stays the profile for perf measurements
+[profile.dist]
+inherits = "release"
+lto = "thin"
+codegen-units = 16
+
 # quick iteration only; all reported numbers come from `release`
 [profile.fast]
 inherits = "release"
