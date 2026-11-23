@@ -177,30 +177,6 @@ fn test_engine() -> Engine {
     test_engine_with(Arc::new(FailingSource))
 }
 
-#[test]
-fn side_requests_never_start_the_engine_and_are_bounded() {
-    let get = |reply| EngineCommand::GetQueue { offset: 0, limit: 10, reply };
-    let h = EngineHandle::with_events(
-        Arc::new(NullEvents),
-        Arc::new(FailingSource),
-        Arc::new(Db::open_in_memory().unwrap()),
-        false,
-        super::super::queue::DEFAULT_WINDOW_SIZE as u32,
-    );
-    assert_eq!(h.request_blocking_if_running(get, Duration::from_millis(50)).err(), Some(EngineRequestError::NotRunning));
-    assert!(!h.is_running(), "a side read must not spawn the engine thread");
-    // A running engine answers.
-    assert!(h.request_blocking(get).is_some());
-    let q = h.request_blocking_if_running(get, Duration::from_secs(2)).unwrap();
-    assert_eq!(q.total, 0);
-    // A stalled engine (commands accepted, never serviced): bounded, no hang.
-    let (tx, _stalled_rx) = std::sync::mpsc::channel();
-    *h.inner.lock().unwrap() = Some(tx);
-    let started = Instant::now();
-    assert_eq!(h.request_blocking_if_running(get, Duration::from_millis(100)).err(), Some(EngineRequestError::NoAnswer));
-    assert!(started.elapsed() < Duration::from_secs(2));
-}
-
 fn seed_track(db: &Db, id: &str, title: &str) {
     db.with_tx(|tx| {
         tx.execute(

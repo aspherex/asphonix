@@ -142,7 +142,7 @@ fn layering_rules() {
     only("subsonic", &["config", "ipc", "redact"]);
     // The audio engine never reaches up into app-level features.
     let audio = deps(&graph, "audio");
-    for forbidden in ["scrobble", "mcp_bridge", "media", "secrets", "overlay", "updates", "smartlists", "continuity", "extras"] {
+    for forbidden in ["scrobble", "media", "secrets", "overlay", "updates", "smartlists", "continuity", "extras"] {
         assert!(!audio.contains(forbidden), "`audio` must not depend on `{forbidden}`");
     }
 }

@@ -7,7 +7,7 @@ publish.workspace = true
 license.workspace = true
 repository.workspace = true
 
-# Libraries only emit `tracing` events; the two binaries (`asphonix`, `asphonix-mcp`) call `asphonix_logging::init`.
+# Libraries only emit `tracing` events; the binary (`asphonix`) calls `asphonix_logging::init`.
 # No GPUI, no asphonix-* dependencies: the caller passes the log directory.
 
 [lints]

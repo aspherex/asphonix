@@ -1,7 +1,7 @@
 //! Daily file writer with pruning, run on the non-blocking writer thread.
 //!
 //! Not `tracing_appender::rolling::RollingFileAppender`: its `max_log_files` pruning matches files by
-//! `starts_with(prefix)`, so the app's `asphonix` prefix would count (and delete) `asphonix-mcp.*.jsonl` too, and it
+//! `starts_with(prefix)`, so the app's `asphonix` prefix would count (and delete) `asphonix-other.*.jsonl` too, and it
 //! prunes only on rollover, never at startup. This one prunes its exact `<prefix>.YYYY-MM-DD.jsonl` files when
 //! it opens a file (startup and every day change), with an injectable clock for tests.
 use std::fs::{File, OpenOptions};

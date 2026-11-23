@@ -912,24 +912,10 @@ impl SettingsApi for FakeBackend {
                 SettingChange::TrackOverlay(v) => st.track_overlay = v,
                 SettingChange::TrackOverlayCorner(v) => st.track_overlay_corner = v,
                 SettingChange::FreeMemoryWhenMinimized(v) => st.free_memory_when_minimized = v,
-                SettingChange::McpEnabled(v) => st.mcp_enabled = v,
-                SettingChange::McpAllowControl(v) => st.mcp_allow_control = v,
                 SettingChange::VerboseLogging(v) => st.verbose_logging = v,
             }
         });
         Ok(())
-    }
-    fn mcp_status(&self) -> ApiResult<McpStatus> {
-        call!(self, "mcp_status");
-        Ok(self.state(|s| McpStatus {
-            enabled: s.settings.mcp_enabled,
-            allow_control: s.settings.mcp_allow_control,
-            listening: false,
-            bridge_path: None,
-            bridge_exists: false,
-            register_command: None,
-            last_error: None,
-        }))
     }
     fn art_cache_status(&self) -> ApiResult<ArtCacheStatus> {
         call!(self, "art_cache_status");

@@ -353,10 +353,6 @@ pub trait SettingsApi {
     fn settings_set(&self, _change: SettingChange) -> ApiResult<()> {
         unimpl!("settings_set")
     }
-    /// `mcp_get_status` (the `settings_set_mcp_*` commands answer with the fresh status too)
-    fn mcp_status(&self) -> ApiResult<McpStatus> {
-        unimpl!("mcp_status")
-    }
     /// `art_cache_status`
     fn art_cache_status(&self) -> ApiResult<ArtCacheStatus> {
         unimpl!("art_cache_status")

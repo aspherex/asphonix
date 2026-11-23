@@ -75,7 +75,7 @@ fn the_asphonix_directive_covers_every_crate_prefix() {
     tracing::info!(target: "probe", "not ours");
     tracing::info!(target: "asphonix_core::x", "a");
     tracing::info!(target: "asphonix_real::art", "b");
-    tracing::info!(target: "asphonix_mcp::stdio", "c");
+    tracing::info!(target: "asphonix_ui::shell", "c");
     tracing::info!(target: "asphonix::panic", "d");
     let msgs: Vec<String> = c.events().iter().map(|e| e["message"].as_str().unwrap().to_string()).collect();
     assert_eq!(msgs, ["a", "b", "c", "d"]);
@@ -139,7 +139,7 @@ fn prune_keeps_the_newest_files_of_its_own_prefix_only() {
         std::fs::write(d.join(&n), "{}\n").unwrap();
         all.push(n);
     }
-    for other in ["asphonix-mcp.2026-10-01.jsonl", "asphonix-mcp.2026-10-02.jsonl", "crash.log", "asphonix.notadate.jsonl", "asphonix.2026-11-01.json"] {
+    for other in ["asphonix-other.2026-10-01.jsonl", "asphonix-other.2026-10-02.jsonl", "crash.log", "asphonix.notadate.jsonl", "asphonix.2026-11-01.json"] {
         std::fs::write(d.join(other), "x").unwrap();
     }
     let removed = prune(&d, "asphonix", MAX_LOG_FILES).unwrap();
@@ -147,13 +147,13 @@ fn prune_keeps_the_newest_files_of_its_own_prefix_only() {
     let mut left: Vec<String> = std::fs::read_dir(&d).unwrap().map(|e| e.unwrap().file_name().into_string().unwrap()).collect();
     left.sort();
     let mut want: Vec<String> = all[3..].to_vec();
-    want.extend(["crash.log", "asphonix-mcp.2026-10-01.jsonl", "asphonix-mcp.2026-10-02.jsonl", "asphonix.2026-11-01.json", "asphonix.notadate.jsonl"].map(String::from));
+    want.extend(["crash.log", "asphonix-other.2026-10-01.jsonl", "asphonix-other.2026-10-02.jsonl", "asphonix.2026-11-01.json", "asphonix.notadate.jsonl"].map(String::from));
     want.sort();
     assert_eq!(left, want);
     // idempotent
     assert!(prune(&d, "asphonix", MAX_LOG_FILES).unwrap().is_empty());
-    // the other binary's prefix is handled independently
-    assert!(prune(&d, "asphonix-mcp", 1).unwrap().len() == 1);
+    // another prefix is handled independently
+    assert!(prune(&d, "asphonix-other", 1).unwrap().len() == 1);
     let _ = std::fs::remove_dir_all(&d);
 }
 
@@ -196,7 +196,7 @@ fn rotation_over_many_days_keeps_at_most_seven_files() {
     let d2 = day.clone();
     let clock: rolling::Clock = Box::new(move || format!("2026-03-{:02}", *d2.lock().unwrap()));
     let mut f = rolling::DailyFile::open(d.clone(), "asphonix", MAX_LOG_FILES, clock).unwrap();
-    std::fs::write(d.join("asphonix-mcp.2026-01-01.jsonl"), "x").unwrap();
+    std::fs::write(d.join("asphonix-other.2026-01-01.jsonl"), "x").unwrap();
     for n in 1..=12u32 {
         *day.lock().unwrap() = n;
         writeln!(f, "{{\"day\":{n}}}").unwrap();
@@ -208,9 +208,9 @@ fn rotation_over_many_days_keeps_at_most_seven_files() {
     let mut left: Vec<String> = std::fs::read_dir(&d).unwrap().map(|e| e.unwrap().file_name().into_string().unwrap()).collect();
     left.sort();
     let mut want: Vec<String> = (6..=12).map(|n| file_name("asphonix", &format!("2026-03-{n:02}"))).collect();
-    want.push("asphonix-mcp.2026-01-01.jsonl".into());
+    want.push("asphonix-other.2026-01-01.jsonl".into());
     want.sort();
-    assert_eq!(left, want, "the newest seven days of ours, the other binary's file untouched");
+    assert_eq!(left, want, "the newest seven days of ours, the other prefix's file untouched");
     assert_eq!(f.path(), d.join(file_name("asphonix", "2026-03-12")));
     assert_eq!(std::fs::read_to_string(f.path()).unwrap().lines().count(), 2, "both lines of the day in one file");
     drop(f);

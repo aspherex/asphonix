@@ -46,7 +46,7 @@ pub mod session;
 pub mod source;
 mod spectrum;
 
-pub use engine::{EngineCommand, EngineEvents, EngineHandle, EngineRequestError};
+pub use engine::{EngineCommand, EngineEvents, EngineHandle};
 pub use prefs::Prefs;
 pub use session::SessionStore;
 pub use source::{HttpTrackSource, SubsonicTrackSource, TrackSource};

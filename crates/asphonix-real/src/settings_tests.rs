@@ -122,7 +122,7 @@ fn defaults_are_off_and_every_field_roundtrips_and_persists() {
     let e = Env::new("settings");
     let b = e.open();
     let d = b.settings_get().unwrap();
-    assert!(!d.scrobbling_enabled && !d.autoplay_enabled && !d.sync_play_queue && !d.auto_check_updates && !d.mcp_enabled && !d.mcp_allow_control);
+    assert!(!d.scrobbling_enabled && !d.autoplay_enabled && !d.sync_play_queue && !d.auto_check_updates);
     assert_eq!((d.queue_window_size, d.play_threshold_sec, d.replay_gain_mode), (20, 30, ReplayGainMode::Off));
     // the UI sends exactly these variants; each must come back from settings_get
     let changes = [
@@ -137,17 +137,11 @@ fn defaults_are_off_and_every_field_roundtrips_and_persists() {
         SettingChange::TrackOverlay(false),
         SettingChange::TrackOverlayCorner(OverlayCorner::BottomRight),
         SettingChange::FreeMemoryWhenMinimized(false),
-        SettingChange::McpEnabled(true),
-        SettingChange::McpAllowControl(true),
         SettingChange::VerboseLogging(true),
     ];
     for c in changes {
         b.settings_set(c).unwrap();
     }
-    // MCP is live, not just stored: the bridge listens in this test's config dir
-    let st = b.mcp_status().unwrap();
-    assert!(st.enabled && st.allow_control && st.listening, "{st:?}");
-    assert!(e.cfg().join("mcp.json").exists());
     let want = Settings {
         scrobbling_enabled: true,
         auto_check_updates: true,
@@ -160,8 +154,6 @@ fn defaults_are_off_and_every_field_roundtrips_and_persists() {
         replay_gain_mode: ReplayGainMode::Album,
         track_overlay: false,
         track_overlay_corner: OverlayCorner::BottomRight,
-        mcp_enabled: true,
-        mcp_allow_control: true,
         verbose_logging: true,
     };
     assert_eq!(b.settings_get().unwrap(), want);
@@ -182,15 +174,7 @@ fn defaults_are_off_and_every_field_roundtrips_and_persists() {
     let b2 = e.open();
     assert_eq!(b2.settings_get().unwrap(), want);
     assert!(b2.0.prefs.autoplay() && b2.0.prefs.sync_play_queue() && b2.0.scrobbling.load(Ordering::Relaxed));
-    // saved-on MCP: flags at once, the listener only after the startup delay
-    let st = b2.mcp_status().unwrap();
-    assert!(st.enabled && st.allow_control && !st.listening, "{st:?}");
     assert!(b2.art_cache_status().is_ok());
-    drop(b2);
-    // turning it off stops the bridge (and drops its handle on the backend) and persists the flag
-    b.settings_set(SettingChange::McpEnabled(false)).unwrap();
-    assert!(!b.mcp_status().unwrap().listening && !e.cfg().join("mcp.json").exists());
-    assert!(!asphonix_core::secrets::load_settings(&e.cfg()).mcp_enabled);
 }
 
 #[test]
@@ -311,7 +295,7 @@ fn legacy_partial_or_broken_settings_files_leave_every_network_flag_off() {
         let b = e.open();
         let s = b.settings_get().unwrap();
         assert!(
-            !s.scrobbling_enabled && !s.autoplay_enabled && !s.sync_play_queue && !s.auto_check_updates && !s.mcp_enabled && !s.mcp_allow_control,
+            !s.scrobbling_enabled && !s.autoplay_enabled && !s.sync_play_queue && !s.auto_check_updates,
             "flags on for {f:?}: {s:?}"
         );
         assert!(!b.0.scrobbling.load(Ordering::Relaxed) && !b.0.prefs.autoplay() && !b.0.prefs.sync_play_queue(), "live flags on for {f:?}");

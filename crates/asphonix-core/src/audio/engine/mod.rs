@@ -472,49 +472,6 @@ impl EngineHandle {
         self.send(make(tx));
         rx.blocking_recv().ok()
     }
-
-    /// Blocking request for side readers (the MCP bridge) that must neither
-    /// start the engine thread nor wait on a stalled one: `NotRunning` when
-    /// the engine was never started (nothing queued, nothing to read),
-    /// `NoAnswer` when it doesn't reply within `timeout`.
-    pub fn request_blocking_if_running<T>(
-        &self,
-        make: impl FnOnce(tokio::sync::oneshot::Sender<T>) -> EngineCommand,
-        timeout: Duration,
-    ) -> Result<T, EngineRequestError> {
-        let sender = {
-            let guard = self.inner.lock().unwrap_or_else(|p| p.into_inner());
-            guard.as_ref().cloned().ok_or(EngineRequestError::NotRunning)?
-        };
-        let (tx, mut rx) = tokio::sync::oneshot::channel();
-        sender.send(make(tx)).map_err(|_| EngineRequestError::NoAnswer)?;
-        let deadline = Instant::now() + timeout;
-        loop {
-            match rx.try_recv() {
-                Ok(v) => return Ok(v),
-                Err(tokio::sync::oneshot::error::TryRecvError::Closed) => return Err(EngineRequestError::NoAnswer),
-                Err(tokio::sync::oneshot::error::TryRecvError::Empty) => {
-                    if Instant::now() >= deadline {
-                        return Err(EngineRequestError::NoAnswer);
-                    }
-                    std::thread::sleep(Duration::from_millis(5));
-                }
-            }
-        }
-    }
-
-    /// Whether the engine thread has been started (tests).
-    #[cfg(test)]
-    pub(crate) fn is_running(&self) -> bool {
-        self.inner.lock().unwrap_or_else(|p| p.into_inner()).is_some()
-    }
-}
-
-/// Why [`EngineHandle::request_blocking_if_running`] has no answer.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum EngineRequestError {
-    NotRunning,
-    NoAnswer,
 }
 
 /// (endpoint id it was resolved for, resolved name).

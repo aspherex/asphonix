@@ -104,13 +104,13 @@ jobs:
           case "$RUNNER_OS" in
             Windows)
               mkdir "$out"
-              cp target/release/asphonix.exe target/release/asphonix-mcp.exe LICENSE README.md "$out/"
+              cp target/release/asphonix.exe LICENSE README.md "$out/"
               7z a "dist/$out.zip" "$out" >/dev/null
               ;;
             macOS)
               app="$out/ASPHONIX.app"
               mkdir -p "$app/Contents/MacOS"
-              cp target/release/asphonix target/release/asphonix-mcp "$app/Contents/MacOS/"
+              cp target/release/asphonix "$app/Contents/MacOS/"
               cat > "$app/Contents/Info.plist" <<PLIST
           <?xml version="1.0" encoding="UTF-8"?>
           <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -132,7 +132,7 @@ jobs:
               ;;
             Linux)
               mkdir "$out"
-              cp target/release/asphonix target/release/asphonix-mcp LICENSE README.md "$out/"
+              cp target/release/asphonix LICENSE README.md "$out/"
               tar -czf "dist/$out.tar.gz" "$out"
               ;;
           esac

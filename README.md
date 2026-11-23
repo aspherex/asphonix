@@ -7,7 +7,7 @@
 ### The player for audio enthusiasts.
 
 A native desktop client for your **Navidrome / Subsonic** library.<br>
-Bit-perfect on Windows · light on resources · open to AI agents.
+Bit-perfect on Windows · light on resources.
 
 [![Build](https://github.com/aspherex/asphonix/actions/workflows/build.yml/badge.svg)](https://github.com/aspherex/asphonix/actions/workflows/build.yml)
 [![Release](https://img.shields.io/github/v/release/aspherex/asphonix?include_prereleases&color=d4ff00&labelColor=0a0a0c)](https://github.com/aspherex/asphonix/releases)
@@ -19,7 +19,6 @@ Bit-perfect on Windows · light on resources · open to AI agents.
 [**Philosophy**](#-philosophy) ·
 [**Features**](#-features) ·
 [**Install**](#-install) ·
-[**Agents (MCP)**](#-agentic-interaction-mcp) ·
 [**Technology**](#-technology) ·
 [**Shortcuts**](#-keyboard) ·
 [**FAQ**](#-faq)
@@ -38,7 +37,7 @@ Bit-perfect on Windows · light on resources · open to AI agents.
 - **Smart playlists and Flow**, a queue ordering by tempo, key and genre.
 - **History, artist pages and a track-change preview** that appears while the app sits in the background.
 - **Dark and light themes** with WCAG 2.2 AA text contrast; English and German UI.
-- **MCP bridge for AI agents**, opt-in and local. No telemetry.
+- **No telemetry.**
 
 | | Compatibility at a glance |
 |---|---|
@@ -46,7 +45,6 @@ Bit-perfect on Windows · light on resources · open to AI agents.
 | **Windows** 10/11 x64 | Primary platform · WASAPI exclusive or shared · media keys (SMTC) |
 | **macOS** (Apple Silicon), **Linux** (x64) | Newer, less tested · shared-mode output · no media-key integration yet |
 | **Formats** | FLAC · ALAC · WAV · AIFF · MP3 · AAC / M4A · Ogg Vorbis |
-| **Agents** | Claude Code or any MCP client over stdio |
 
 ---
 
@@ -62,19 +60,15 @@ server.
 
 <table>
   <tr>
-    <td width="33%" valign="top">
+    <td width="50%" valign="top">
       <h4>🎚️ Honest signal path</h4>
       In exclusive mode on Windows, at unity gain, the file reaches your DAC untouched. When the app has to
       fall back to shared mode, the header says so.
     </td>
-    <td width="33%" valign="top">
+    <td width="50%" valign="top">
       <h4>⚡ Native and lean</h4>
       A small Rust binary where every change is held to a memory and startup budget. Minimized, the target is
       a few MB and near-zero CPU.
-    </td>
-    <td width="33%" valign="top">
-      <h4>🤖 Open to agents</h4>
-      Ask an agent about your library and listening history and, if you allow it, let it run the queue.
     </td>
   </tr>
 </table>
@@ -83,7 +77,7 @@ server.
 
 <p align="center"><b>Play the file as it is. Show what is true. Stay out of the way.</b></p>
 
-ASPHONIX is built for people who care about *what actually reaches their ears*. Six principles decide what
+ASPHONIX is built for people who care about *what actually reaches their ears*. Five principles decide what
 goes in and what stays out.
 
 <table>
@@ -114,15 +108,9 @@ goes in and what stays out.
     </td>
   </tr>
   <tr>
-    <td width="50%" valign="top">
+    <td colspan="2" valign="top">
       <h4><code>05</code> Keyboard first, mouse welcome</h4>
       Everything you do often has a key. Everything else is one click away.
-    </td>
-    <td width="50%" valign="top">
-      <h4><code>06</code> Open to agents, on your terms</h4>
-      Your library is data, and you should be able to ask it questions. ASPHONIX exposes it to AI agents over
-      the Model Context Protocol, locally and off by default. Letting an agent control playback is a
-      separate, explicit switch.
     </td>
   </tr>
 </table>
@@ -139,8 +127,6 @@ goes in and what stays out.
 | **Desktop** | **Track-change preview**: a small card in a screen corner of your choice when the track changes while ASPHONIX is in the background · Windows media controls and media keys · scrobbling to your server · light and dark theme · multiple server profiles |
 | **Languages** | English and German, switchable at runtime (follows the OS language by default) |
 | **Accessibility** | Text contrast meets WCAG 2.2 AA (4.5:1) for every text colour on every surface, in both the dark and the light theme, enforced by tests · visible keyboard focus on every control · keyboard shortcuts for all common actions ([status](docs/ACCESSIBILITY.md)) |
-| **Agents** | MCP bridge with 17 read tools and 8 opt-in control tools ([details](#-agentic-interaction-mcp)) |
-
 <table>
   <tr>
     <td width="50%"><a href="docs/screenshots/home.png"><img src="docs/screenshots/home.png" alt="Home: recently played albums and sessions"></a><p align="center"><sub><b>Home</b>: pick up a recent session where you left it</sub></p></td>
@@ -189,7 +175,7 @@ reports from other servers are welcome.
 
 ```sh
 git clone https://github.com/aspherex/asphonix && cd asphonix
-cargo run -p asphonix-ui --release        # builds target/release/asphonix(.exe) and asphonix-mcp
+cargo run -p asphonix-ui --release        # builds target/release/asphonix(.exe)
 ```
 
 <details>
@@ -204,32 +190,6 @@ cargo run -p asphonix-ui --release        # builds target/release/asphonix(.exe)
 Development: `cargo test` and `cargo clippy --all-targets -- -D warnings`; see [CONTRIBUTING.md](CONTRIBUTING.md).
 
 </details>
-
-## // Agentic interaction (MCP)
-
-Your library and your listening history are data. ASPHONIX lets an AI agent ask questions of them and, if you
-permit it, act on the answers. It ships `asphonix-mcp`, a
-[Model Context Protocol](https://modelcontextprotocol.io/) server that connects an agent to the running player.
-Ask things like:
-
-> *"What did I listen to most this month?"* · *"Which albums have I never played?"* ·
-> *"Which tracks do I keep skipping?"* ·
-> *"Build a 40-minute focus set from my liked ambient tracks and play it."*
-
-| Access | Tools |
-|---|---|
-| **Read** (on when the bridge is enabled) | `search` `get_tracks` `get_album` `get_artist` `list_genres` `list_playlists` `get_playlist` `list_smart_playlists` `get_smart_playlist_tracks` `library_stats` `now_playing` `get_queue` `listening_history` `listen_events` `top_artists` `top_tracks` `skip_stats` |
-| **Control** (separate opt-in) | `play_tracks` `play_source` `enqueue` `play_pause` `next` `previous` `seek` `set_volume_db` |
-
-**Setup:** enable it in **Settings → Claude (MCP)**; the page shows the exact command to register it:
-
-```sh
-claude mcp add asphonix -- "C:\path\to\asphonix-mcp.exe"
-```
-
-**On your terms.** The bridge is off by default and only listens locally (a named pipe on Windows, a Unix
-socket elsewhere). The app proves its identity to the client, and every session needs a fresh token. Reading
-and controlling are two switches: an agent can look without being able to touch.
 
 ## // Technology
 
@@ -262,8 +222,6 @@ not drawn from canned animations.
 | **Secrets** | OS keychain via the `keyring` crate |
 | **OS integration** | Windows SMTC via the `windows` crate |
 | **Updater** | Off unless configured · minisign signature verification (`minisign-verify`) |
-| **MCP** | `asphonix-mcp`, a stdio MCP server that talks to the app over a local named pipe / Unix socket |
-
 ## // Keyboard
 
 | Anywhere | | Now Playing | |
@@ -327,12 +285,10 @@ Bug reports, server compatibility reports and pull requests are welcome. Please 
 
 ```
 crates/asphonix-api    the Backend trait the UI talks to (types, commands, events)
-crates/asphonix-core   Subsonic client, library DB + sync, audio engine, scrobbling, session, MCP bridge, updater
+crates/asphonix-core   Subsonic client, library DB + sync, audio engine, scrobbling, session, updater
 crates/asphonix-real   Backend implementation on top of asphonix-core (+ cover-art cache)
 crates/asphonix-ui     the GPUI app, binary `asphonix`
-crates/asphonix-mcp    MCP stdio server `asphonix-mcp` that connects to a running ASPHONIX
-crates/asphonix-mcp-protocol  bridge wire format, handshake and tool catalog shared by asphonix-core and asphonix-mcp
-crates/asphonix-logging  structured JSON-lines logging (subscriber, daily files, runtime verbosity) for both binaries
+crates/asphonix-logging  structured JSON-lines logging (subscriber, daily files, runtime verbosity) for the binary
 crates/asphonix-i18n   UI translations (Project Fluent, locales/en + locales/de) and locale-aware number/date formatting
 crates/asphonix-testkit  dev-only: FakeBackend, MockSubsonic, fixtures (docs/TESTING.md)
 docs/                  PERF (budgets and how to measure), GPUI-GAPS, UPDATES

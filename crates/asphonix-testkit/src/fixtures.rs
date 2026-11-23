@@ -135,8 +135,6 @@ pub fn settings() -> Settings {
         replay_gain_mode: ReplayGainMode::Off,
         track_overlay: true,
         track_overlay_corner: OverlayCorner::TopLeft,
-        mcp_enabled: false,
-        mcp_allow_control: false,
     }
 }
 

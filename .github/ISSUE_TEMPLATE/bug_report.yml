@@ -77,7 +77,6 @@ body:
         - Queue / Flow / autoplay
         - Scrobbling / history
         - Media keys / OS integration
-        - MCP bridge
         - UI / theme / layout
         - Performance (memory, CPU, startup)
         - Other

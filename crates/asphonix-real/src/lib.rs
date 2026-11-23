@@ -44,8 +44,7 @@ pub fn data_dir() -> PathBuf {
 }
 
 /// Profiles, settings and the session: `%APPDATA%\dev.asphonix.app` on Windows, `~/Library/Application Support/dev.asphonix.app`
-/// on macOS, `$XDG_CONFIG_HOME/dev.asphonix.app` (default `~/.config`) elsewhere. Same rule as `asphonix_mcp::wire::config_dir`,
-/// which finds the bridge's `mcp.json` here.
+/// on macOS, `$XDG_CONFIG_HOME/dev.asphonix.app` (default `~/.config`) elsewhere.
 pub fn config_dir() -> PathBuf {
     #[cfg(windows)]
     let base = env_dir("APPDATA");
@@ -66,7 +65,7 @@ struct Session {
 
 struct Inner {
     rt: tokio::runtime::Runtime,
-    /// Config dir (`connection.json`, settings, session, smart playlists, MCP discovery, scrobble queue).
+    /// Config dir (`connection.json`, settings, session, smart playlists, scrobble queue).
     dir: PathBuf,
     /// Data dir (library DB, art cache).
     data: PathBuf,
@@ -87,7 +86,7 @@ struct Inner {
     _state_rx: tokio::sync::watch::Receiver<asphonix_core::ipc::PlayerState>,
     session: Mutex<Session>,
     subs: Mutex<Vec<Sender<Event>>>,
-    /// OS integration + background services (listen flush, SMTC, MCP bridge, updater).
+    /// OS integration + background services (listen flush, SMTC, updater).
     svc: services::Services,
     /// Cover fetch state (gates, single-flight, prefetch control): `art.rs`.
     art: art::ArtState,

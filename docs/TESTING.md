@@ -11,8 +11,6 @@ engine and sync threads with a bounded wait.
 | Unit tests | next to the code (`#[cfg(test)] mod tests`) | plain `#[test]` |
 | UI logic: routing, stale answers, paging, queue rail, dock / Now Playing, suspend/resume | `crates/asphonix-ui/src/views/*_tests.rs` (`#[path]` modules of their view), harness in `crates/asphonix-ui/src/tests/` | `#[gpui::test]` + `TestAppContext` + `asphonix_testkit::FakeBackend` |
 | Queue / shuffle / Flow / A-B loop invariants | `crates/asphonix-core/tests/*_props.rs`, `crates/asphonix-core/src/audio/queue_prop_tests.rs` | `proptest` |
-| MCP tool catalog and JSON-RPC replies | `crates/asphonix-mcp/tests/snapshots.rs` | `insta` snapshots |
-| Timeouts (MCP bridge) | `crates/asphonix-core/tests/mcp_bridge_paused_time.rs` | `#[tokio::test(start_paused = true)]` |
 | Backend write/read paths over HTTP | `crates/asphonix-real/src/*_tests.rs` | `asphonix_testkit::MockSubsonic` (127.0.0.1) |
 
 ## The test kit (`crates/asphonix-testkit`, dev-dependency only)
@@ -78,20 +76,6 @@ later run replays it first.
 PROPTEST_CASES=4096 cargo test -p asphonix-core --test queue_props    # more cases (default 256)
 PROPTEST_RNG_SEED=<n> cargo test -p asphonix-core --test queue_props   # a fixed RNG seed
 ```
-
-## Snapshots (`insta`)
-
-A changed MCP catalog or reply fails `crates/asphonix-mcp/tests/snapshots.rs`. Look at the diff in the test output,
-then accept it with `cargo insta review` (needs `cargo install cargo-insta`) or with
-`INSTA_UPDATE=always cargo test -p asphonix-mcp --test snapshots`. Commit the `.snap` files. Maps are snapshotted with
-sorted keys, because a workspace build enables `serde_json/preserve_order`.
-
-## Virtual time in tokio code
-
-`#[tokio::test(start_paused = true)]` starts the test with the clock paused. Whenever every task is idle, the clock
-jumps to the next timer, so a 60 s idle timeout passes in no real time. A running `spawn_blocking` task stops
-those jumps, so advance the clock by hand with `tokio::time::advance` there. Only `tokio::time` is virtual;
-`std::time::Instant` and real sockets are not.
 
 ## CI
 

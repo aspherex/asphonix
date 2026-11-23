@@ -124,17 +124,6 @@ settings-check-now = Check now
 settings-update-available = Update { $version } available
 settings-up-to-date = You are up to date
 settings-update-check-failed = Could not check for updates
-settings-panel-mcp = Claude (MCP)
-settings-mcp-hint = Lets Claude Code or Claude Desktop read your library, listening history and play queue through a local-only connection (no network port). Everything Claude reads is sent to Claude (Anthropic) as part of your conversation: track, album and artist names, playlists, play history, what is playing. It never sees your server address, password or file paths, and this version cannot change anything on the server (no playlist edits, likes or ratings).
-settings-mcp-enable = Let Claude read my library
-settings-mcp-control = Allow playback control (play, skip, queue, volume)
-settings-mcp-connection = Connection
-settings-mcp-listening = Listening
-settings-mcp-not-listening = Not listening
-settings-mcp-register = Register it once in Claude Code:
-settings-copied = Copied
-settings-copy-command = Copy command
-settings-mcp-missing = asphonix-mcp was not found next to ASPHONIX. The Windows installer puts it there, so reinstalling or updating ASPHONIX fixes this. Development builds and macOS: build it with npm run build:mcp (or cargo build --release in tools/asphonix-mcp) and put it at that path.
 settings-logout = Log out
 
 ## Drag and drop, toasts, track-change card

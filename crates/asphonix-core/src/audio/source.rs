@@ -682,7 +682,7 @@ async fn download_with_retries(
 
 /// A temp-file I/O error without its path: `tempfile` appends the file's
 /// path (`at path "C:\Users\<name>\AppData\Local\Temp\..."`), and these messages reach
-/// `PlayerState.error` (the dock, and through MCP, Claude). Keeps the error
+/// `PlayerState.error` (the dock). Keeps the error
 /// kind and the OS error code, found anywhere in the source chain.
 fn temp_file_error(e: &io::Error) -> io::Error {
     let mut code = e.raw_os_error();

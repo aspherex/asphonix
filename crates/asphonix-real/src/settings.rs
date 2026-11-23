@@ -30,8 +30,6 @@ pub(crate) fn apply_change(s: &mut secrets::Settings, change: &SettingChange) ->
         SettingChange::TrackOverlay(v) => s.track_overlay = *v,
         SettingChange::TrackOverlayCorner(c) => s.track_overlay_corner = conv(*c)?,
         SettingChange::FreeMemoryWhenMinimized(v) => s.free_memory_when_minimized = *v,
-        SettingChange::McpEnabled(v) => s.mcp_enabled = *v,
-        SettingChange::McpAllowControl(v) => s.mcp_allow_control = *v,
         SettingChange::VerboseLogging(v) => s.verbose_logging = *v,
     }
     Ok(())
@@ -50,8 +48,6 @@ pub(crate) fn wire(s: &secrets::Settings) -> ApiResult<Settings> {
         replay_gain_mode: conv(s.replay_gain_mode)?,
         track_overlay: s.track_overlay,
         track_overlay_corner: conv(s.track_overlay_corner)?,
-        mcp_enabled: s.mcp_enabled,
-        mcp_allow_control: s.mcp_allow_control,
         verbose_logging: s.verbose_logging,
     })
 }
@@ -62,11 +58,6 @@ impl SettingsApi for RealBackend {
     }
 
     fn settings_set(&self, change: SettingChange) -> ApiResult<()> {
-        // MCP enable/disable: start/stop first (no settings lock held: it blocks on the runtime);
-        // a failed start returns the error and persists nothing.
-        if let SettingChange::McpEnabled(on) = change {
-            self.set_mcp_enabled(on)?;
-        }
         let mut s = self.0.settings.lock().unwrap_or_else(|p| p.into_inner());
         apply_change(&mut s, &change)?;
         // Live effects.
@@ -84,21 +75,11 @@ impl SettingsApi for RealBackend {
             }
             SettingChange::PlayThreshold(_) => self.0.prefs.set_play_threshold_sec(s.play_threshold_sec),
             SettingChange::AutoCheckUpdates(_) => self.set_auto_check_updates(s.auto_check_updates),
-            SettingChange::McpAllowControl(_) => {
-                self.set_mcp_allow_control(s.mcp_allow_control)?;
-            }
             SettingChange::VerboseLogging(_) => asphonix_logging::set_verbose(s.verbose_logging),
-            // Applied above, before the lock.
-            SettingChange::McpEnabled(_) => {}
             // Stored only: the overlay and background-mode services are not wired yet.
             SettingChange::TrackOverlay(_) | SettingChange::TrackOverlayCorner(_) | SettingChange::FreeMemoryWhenMinimized(_) => {}
         }
         secrets::save_settings(&self.0.dir, &s).map_err(err)
-    }
-
-    /// The live bridge status (`services.rs`).
-    fn mcp_status(&self) -> ApiResult<McpStatus> {
-        self.mcp_status_impl()
     }
 
     /// Readout as "cached / total covers - bytes": `total` = distinct album and artist covers in the library
