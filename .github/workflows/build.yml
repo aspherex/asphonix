@@ -75,15 +75,19 @@ jobs:
       fail-fast: false
       matrix:
         include:
+          # no sccache on Windows: gpui's rustc command line exceeds the 32K limit through the wrapper (os error 206);
+          # rust-cache keeps the dependencies there
           - name: windows-x64
             os: windows-latest
+            wrapper: ""
           - name: linux-x64
             os: ubuntu-24.04
+            wrapper: sccache
     name: test ${{ matrix.name }}
     runs-on: ${{ matrix.os }}
     timeout-minutes: 30
     env:
-      RUSTC_WRAPPER: sccache
+      RUSTC_WRAPPER: ${{ matrix.wrapper }}
       SCCACHE_GHA_ENABLED: "true"
     defaults:
       run:
@@ -95,8 +99,9 @@ jobs:
       - if: runner.os == 'Linux'
         uses: awalsh128/cache-apt-pkgs-action@553a35bb8ebd9fcabcb1c9451aa4c98e1b4ca8a9 # v1.6.3
         with:
-          packages: ${{ env.LINUX_PKGS }}
-          version: gpui-1
+          # + a Secret Service for the keychain tests (credentials go to the OS keychain)
+          packages: ${{ env.LINUX_PKGS }} gnome-keyring dbus-x11
+          version: gpui-keyring-1
       - uses: dtolnay/rust-toolchain@686976e191b89faba57d3206551f0f330d8cb249 # stable
         with:
           toolchain: "1.100.0" # keep in sync with rust-toolchain.toml
@@ -107,7 +112,13 @@ jobs:
       - name: Tests
         env:
           ASPHONIX_TEST_TMP: ${{ runner.temp }}
-        run: cargo test --workspace --locked
+        run: |
+          if [[ "$RUNNER_OS" == Linux ]]; then
+            # a session bus with an unlocked gnome-keyring, so the Secret Service (keyring crate) works headless
+            dbus-run-session -- bash -c 'echo -n ci | gnome-keyring-daemon --unlock --components=secrets >/dev/null && cargo test --workspace --locked'
+          else
+            cargo test --workspace --locked
+          fi
 
   check-macos:
     name: check macos-arm64
