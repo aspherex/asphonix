@@ -3,7 +3,7 @@ resolver = "2"
 members = ["crates/asphonix-api", "crates/asphonix-core", "crates/asphonix-real", "crates/asphonix-ui", "crates/asphonix-logging", "crates/asphonix-i18n", "crates/asphonix-testkit"]
 
 [workspace.package]
-version = "0.1.0"
+version = "0.2.0"
 edition = "2024"
 publish = false
 license = "MIT"
