@@ -242,6 +242,7 @@ impl Table {
             cx.notify();
         }
     }
+    #[cfg_attr(not(windows), allow(dead_code))] // only the Windows minimize path (winffi) uses it
     pub fn release(&mut self) {
         if let Data::Paged { pager, .. } = &mut self.data {
             pager.release();

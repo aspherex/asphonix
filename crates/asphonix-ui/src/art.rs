@@ -232,6 +232,7 @@ impl ArtCache {
         }
         evicted
     }
+    #[cfg_attr(not(windows), allow(dead_code))] // only the Windows minimize path (winffi) uses it
     pub fn drain_all(&mut self) -> Vec<Arc<RenderImage>> {
         self.bytes = 0;
         self.pending.clear();

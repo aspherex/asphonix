@@ -209,11 +209,13 @@ impl TracksView {
     }
 
     /// Minimize: drop the paged rows (keep total, scroll offset and selection indices).
+    #[cfg_attr(not(windows), allow(dead_code))] // only the Windows minimize path (winffi) uses it
     pub fn release(&mut self) {
         self.released = true;
         self.pager.release();
     }
 
+    #[cfg_attr(not(windows), allow(dead_code))] // only the Windows minimize path (winffi) uses it
     pub fn restore(&mut self, cx: &mut Context<Self>) {
         self.released = false;
         cx.notify(); // visible pages are re-requested by the next render

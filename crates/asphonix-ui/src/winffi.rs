@@ -8,6 +8,7 @@
 
 /// Pure decoding of a `WM_SIZE` `wParam`: `Some(true)` = minimized, `Some(false)` =
 /// restored/maximized, `None` for sizes that carry no change (SIZE_MAXHIDE/SHOW).
+#[cfg_attr(not(windows), allow(dead_code))] // only the Windows minimize path (winffi) uses it
 pub fn size_kind(wparam: usize) -> Option<bool> {
     match wparam {
         1 => Some(true),      // SIZE_MINIMIZED
@@ -27,6 +28,7 @@ pub fn empty_working_set() {
     unsafe { K32EmptyWorkingSet(GetCurrentProcess()) };
 }
 #[cfg(not(windows))]
+#[cfg_attr(not(windows), allow(dead_code))] // only the Windows minimize path (winffi) uses it
 pub fn empty_working_set() {}
 
 /// Non-client messages the main window must hand straight to `DefWindowProcW`, bypassing GPUI: a left press or

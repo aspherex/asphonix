@@ -435,6 +435,7 @@ impl Shell {
         self.load_static(cx);
     }
 
+    #[cfg_attr(not(windows), allow(dead_code))] // only the Windows minimize path (winffi) uses it
     pub(crate) fn lists_release(&mut self, cx: &mut Context<Self>) {
         if let Some(p) = self.lists.track_page.clone() {
             p.update(cx, |p, cx| p.release(cx));
@@ -444,6 +445,7 @@ impl Shell {
         }
     }
 
+    #[cfg_attr(not(windows), allow(dead_code))] // only the Windows minimize path (winffi) uses it
     pub(crate) fn lists_restore(&mut self, cx: &mut Context<Self>) {
         let _ = app::backend(cx);
         if let Some(p) = self.lists.track_page.clone() {

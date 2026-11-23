@@ -175,6 +175,7 @@ pub fn last_wheel(key: usize) -> Option<f64> {
 }
 
 /// Drop every running animation (minimize).
+#[cfg_attr(not(windows), allow(dead_code))] // only the Windows minimize path (winffi) uses it
 pub fn clear() {
     ANIMS.with(|a| a.borrow_mut().clear());
 }

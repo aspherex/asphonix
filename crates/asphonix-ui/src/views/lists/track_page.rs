@@ -240,6 +240,7 @@ impl TrackPage {
         .detach();
     }
 
+    #[cfg_attr(not(windows), allow(dead_code))] // only the Windows minimize path (winffi) uses it
     pub fn release(&mut self, cx: &mut Context<Self>) {
         self.table.update(cx, |t, _| t.release());
     }

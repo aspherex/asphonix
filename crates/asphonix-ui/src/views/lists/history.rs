@@ -68,6 +68,7 @@ impl HistoryView {
         self.table.update(cx, |t, cx| t.refresh_visible(cx));
     }
 
+    #[cfg_attr(not(windows), allow(dead_code))] // only the Windows minimize path (winffi) uses it
     pub fn release(&mut self, cx: &mut Context<Self>) {
         self.table.update(cx, |t, _| t.release());
     }

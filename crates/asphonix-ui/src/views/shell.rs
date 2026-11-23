@@ -604,6 +604,7 @@ impl Shell {
         }
     }
 
+    #[cfg_attr(not(windows), allow(dead_code))] // only the Windows minimize path (winffi) uses it
     fn on_minimize_change(&mut self, minimized: bool, window: &mut Window, cx: &mut Context<Self>) {
         crate::log(&format!("minimize change: minimized={minimized}"));
         if minimized {
@@ -616,6 +617,7 @@ impl Shell {
     /// Minimize: stop animations/timers (gated on `suspended`), tell the backend nobody
     /// listens to the spectrum, drop every cache (cover images + GPU atlas tiles, paged
     /// rows, backdrop), then trim the working set once the frees have landed.
+    #[cfg_attr(not(windows), allow(dead_code))] // only the Windows minimize path (winffi) uses it
     fn suspend(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         crate::log("suspend: releasing caches");
         self.suspended = true;
@@ -648,6 +650,7 @@ impl Shell {
         .detach();
     }
 
+    #[cfg_attr(not(windows), allow(dead_code))] // only the Windows minimize path (winffi) uses it
     fn resume(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         crate::log("resume: restore");
         self.suspended = false;

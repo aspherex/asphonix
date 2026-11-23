@@ -70,6 +70,7 @@ impl<T> Pager<T> {
 
     /// Drop all rows but keep `total` (minimize: "drop caches and paged rows"). Bumps the epoch, so pages still in
     /// flight cannot refill the released rows; `restore` re-requests what is visible.
+    #[cfg_attr(not(windows), allow(dead_code))] // only the Windows minimize path (winffi) uses it
     pub fn release(&mut self) {
         self.epoch += 1;
         self.pages.clear();

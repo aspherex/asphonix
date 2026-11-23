@@ -165,6 +165,7 @@ impl NowPlayingView {
         cx.notify();
     }
 
+    #[cfg_attr(not(windows), allow(dead_code))] // only the Windows minimize path (winffi) uses it
     pub fn set_suspended(&mut self, s: bool, cx: &mut Context<Self>) {
         self.suspended = s;
         if s {

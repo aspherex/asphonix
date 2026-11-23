@@ -128,6 +128,7 @@ impl LiveLayer {
     }
 
     /// Drop the pending redraw (minimize).
+    #[cfg_attr(not(windows), allow(dead_code))] // only the Windows minimize path (winffi) uses it
     pub fn stop(&mut self) {
         self.timer = None;
     }

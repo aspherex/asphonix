@@ -25,6 +25,7 @@ pub fn delay(d: Duration) -> impl std::future::Future<Output = ()> {
 }
 
 /// Fire the due requests, drop the cancelled ones; returns the earliest remaining due time.
+#[cfg_attr(not(windows), allow(dead_code))] // only the Windows minimize path (winffi) uses it
 fn service(q: &mut Vec<Req>) -> Option<Instant> {
     q.retain(|(_, done)| !done.is_canceled());
     let now = Instant::now();
