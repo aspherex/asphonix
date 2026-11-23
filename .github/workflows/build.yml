@@ -1,4 +1,5 @@
-# Checks and tests on every push to main / every pull request. Budget: 3 minutes wall clock with a warm cache.
+# Checks and tests on every push to main / every pull request. The Linux clippy + test jobs are the fast signal
+# (target ~3 minutes with a warm cache); Windows (2-3x slower runners), macOS and cargo-deny run in parallel.
 # Release builds and installers: .github/workflows/release.yml. Long randomized runs: tests-extended.yml (nightly).
 #
 # How it stays fast:

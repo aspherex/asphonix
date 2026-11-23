@@ -24,8 +24,8 @@ ASPHONIX is a native GPUI desktop player for Navidrome/Subsonic. See README.md f
   Re-measure with `scripts/perf.ps1` before/after anything that touches render paths.
 - Release profile stays tuned (`lto`, `codegen-units = 1`, `opt-level = 3`, `panic = "abort"`, `strip`). Use
   `--profile fast` for iteration, `--profile relsym` for crash analysis; report numbers from `release` only.
-  Shipped builds use `--profile dist` (release with ThinLTO, 16 codegen units) so the release pipeline meets its
-  3-minute budget; CI (build.yml, release.yml) must stay within 3 minutes with a warm cache.
+  Shipped builds are `release` (release.yml, ~10 min budget). CI on push/PR: the Linux clippy + test jobs are the fast
+  signal (target ~3 min warm); Windows, macOS and cargo-deny run in parallel.
 - Tests never contact a real server. `crates/asphonix-real/tests/real_server.rs` is `#[ignore]`d and only runs
   against a server you point it at.
 - Only stop processes you started, by exact PID.

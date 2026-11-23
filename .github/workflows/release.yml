@@ -3,8 +3,11 @@
 # Push a tag `vX.Y.Z` (must equal `version` in the root Cargo.toml) ->
 #   version   check tag == Cargo version, pick release notes (release-notes/vX.Y.Z.md if present)
 #   gate      clippy -D warnings + the full test suite on Windows (the primary platform), in parallel with build
-#   build     `dist` binaries (ThinLTO, see Cargo.toml) on Windows / macOS / Linux; Windows also gets the NSIS installer
-#             (packaging/windows/asphonix.nsi) with the update channel compiled in (repository variables)
+#   build     release binaries (fat LTO, the tuned `release` profile) on Windows / macOS / Linux; Windows also gets the
+#             NSIS installer
+#             (packaging/windows/asphonix.nsi) with the update channel compiled in (repository variables).
+#             Budget: ~10 minutes (the LTO link step is serial and not cacheable; a release is cut rarely, and the
+#             shipped binary is the one the perf budget in docs/PERF.md was measured with)
 #   sign      minisign signature of the installer (trusted comment "version:X.Y.Z", the updater's anti-rollback),
 #             verified against the public key, latest.json update feed, SHA256SUMS.txt
 #   release   DRAFT GitHub release with every asset (publish it by hand after checking the notes)
@@ -139,7 +142,7 @@ jobs:
       - if: runner.os != 'macOS'
         uses: Swatinem/rust-cache@f13886b937689c021905a6b90929199931d60db1 # v2.8.1
         with:
-          key: dist
+          key: release
           cache-on-failure: true
       # rust-cache stores empty archives on the macOS runners (0 MB, every run): actions/cache directly
       - if: runner.os == 'macOS'
@@ -149,8 +152,8 @@ jobs:
             ~/.cargo/registry/index
             ~/.cargo/registry/cache
             target
-          key: dist-macos-1.100.0-${{ hashFiles('Cargo.lock') }}-${{ github.sha }}
-          restore-keys: dist-macos-1.100.0-${{ hashFiles('Cargo.lock') }}-
+          key: release-macos-1.100.0-${{ hashFiles('Cargo.lock') }}-${{ github.sha }}
+          restore-keys: release-macos-1.100.0-${{ hashFiles('Cargo.lock') }}-
       - if: runner.os == 'Linux'
         uses: awalsh128/cache-apt-pkgs-action@553a35bb8ebd9fcabcb1c9451aa4c98e1b4ca8a9 # v1.6.3
         with:
@@ -172,7 +175,7 @@ jobs:
               echo "::warning::no update channel configured (vars.ASPHONIX_UPDATE_ENDPOINT / ASPHONIX_UPDATE_PUBKEY): in-app updates stay off in this build"
             fi
           fi
-          cargo build --workspace --profile dist --locked
+          cargo build --workspace --release --locked
 
       - name: Package
         run: |
@@ -182,13 +185,13 @@ jobs:
           case "$RUNNER_OS" in
             Windows)
               mkdir "$out"
-              cp target/dist/asphonix.exe target/dist/asphonix-mcp.exe LICENSE README.md "$out/"
+              cp target/release/asphonix.exe target/release/asphonix-mcp.exe LICENSE README.md "$out/"
               7z a "dist/$out.zip" "$out" >/dev/null
               ;;
             macOS)
               app="$out/ASPHONIX.app"
               mkdir -p "$app/Contents/MacOS"
-              cp target/dist/asphonix target/dist/asphonix-mcp "$app/Contents/MacOS/"
+              cp target/release/asphonix target/release/asphonix-mcp "$app/Contents/MacOS/"
               cat > "$app/Contents/Info.plist" <<PLIST
           <?xml version="1.0" encoding="UTF-8"?>
           <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -210,7 +213,7 @@ jobs:
               ;;
             Linux)
               mkdir "$out"
-              cp target/dist/asphonix target/dist/asphonix-mcp LICENSE README.md "$out/"
+              cp target/release/asphonix target/release/asphonix-mcp LICENSE README.md "$out/"
               tar -czf "dist/$out.tar.gz" "$out"
               ;;
           esac
