@@ -29,7 +29,6 @@ body:
         - Now Playing
         - Queue / Flow / autoplay
         - OS integration
-        - MCP bridge
         - UI / theme
         - Other
   - type: checkboxes

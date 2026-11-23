@@ -1,5 +1,5 @@
 //! OS integration and background services of the real backend: listen-event flush on
-//! logout/exit, Windows media controls (SMTC), the MCP bridge and the updater.
+//! logout/exit, Windows media controls (SMTC) and the updater.
 //! Inherent methods only; the `Backend` trait forwarders are one-liners in the API impls.
 use crate::{err, reads::conv, RealBackend};
 use asphonix_api::*;
@@ -13,8 +13,6 @@ use std::time::Duration;
 pub(crate) const LISTEN_FLUSH_TIMEOUT: Duration = Duration::from_secs(2);
 /// Final session write bound at exit.
 pub(crate) const EXIT_PERSIST_TIMEOUT: Duration = Duration::from_secs(4);
-/// Delay before a saved-on MCP bridge starts listening.
-const MCP_START_DELAY: Duration = Duration::from_secs(3);
 
 /// Per-service state held by `Inner`.
 pub(crate) struct Services {
@@ -25,15 +23,11 @@ pub(crate) struct Services {
     /// HWND currently registered with SMTC (0 = none) and its registration generation.
     media_hwnd: std::sync::atomic::AtomicIsize,
     media_generation: Arc<std::sync::atomic::AtomicU64>,
-    mcp: asphonix_core::mcp_bridge::McpBridge,
-    /// `Settings.mcpEnabled` / `mcpAllowControl`: both OFF by default.
-    mcp_enabled: AtomicBool,
-    mcp_allow_control: AtomicBool,
 }
 
 impl Default for Services {
     fn default() -> Self {
-        Self { updater: Arc::new(Updater::built_in()), auto_check_updates: Arc::new(AtomicBool::new(false)), checker_started: AtomicBool::new(false), media_hwnd: Default::default(), media_generation: Default::default(), mcp: Default::default(), mcp_enabled: AtomicBool::new(false), mcp_allow_control: AtomicBool::new(false) }
+        Self { updater: Arc::new(Updater::built_in()), auto_check_updates: Arc::new(AtomicBool::new(false)), checker_started: AtomicBool::new(false), media_hwnd: Default::default(), media_generation: Default::default() }
     }
 }
 
@@ -44,11 +38,9 @@ impl RealBackend {
         self.0.rt.block_on(self.0.engine.stop_and_flush_listen(LISTEN_FLUSH_TIMEOUT));
     }
 
-    /// App exit: final session write (also records the `quit` listen row), then service teardown.
+    /// App exit: final session write (also records the `quit` listen row).
     pub fn shutdown(&self) {
         self.0.engine.persist_now(EXIT_PERSIST_TIMEOUT);
-        // No stale endpoint/token once the app is gone.
-        asphonix_core::mcp_bridge::remove_discovery_on_exit(&self.0.dir);
     }
 
     // --- Windows media controls (SMTC / media keys) ---------------------------------------------
@@ -124,6 +116,11 @@ impl RealBackend {
             }
         });
     }
+
+    /// Startup: applies the persisted service flags before anything else runs.
+    pub(crate) fn apply_service_settings(&self, s: &asphonix_core::secrets::Settings) {
+        self.set_auto_check_updates(s.auto_check_updates);
+    }
 }
 
 /// What SMTC needs from the app: engine commands, the player-state watch and encoded cover bytes.
@@ -162,98 +159,6 @@ impl MediaHost for RealMedia {
             }
             Some(bytes)
         })
-    }
-}
-
-// --- Claude (MCP) bridge ---------------------------------------------------------------------------
-// OFF by default: nothing listens and no `mcp.json` exists until
-// `set_mcp_enabled(true)`; `settings_set` and `apply_service_settings` (startup) drive these methods.
-
-/// Tool calls run against the backend's own library DB / engine; both gates are re-read on every call.
-/// Weak: a running bridge never keeps the backend alive.
-struct RealDispatch(std::sync::Weak<crate::Inner>);
-
-impl asphonix_core::mcp_bridge::Dispatch for RealDispatch {
-    fn call(&self, tool: &str, args: &serde_json::Value) -> Result<serde_json::Value, String> {
-        use asphonix_core::mcp_bridge::tools;
-        let Some(b) = self.0.upgrade() else { return Err("ASPHONIX is shutting down.".into()) };
-        // Re-checked per call: a client connected a moment before "off" is refused.
-        if !b.svc.mcp_enabled.load(Ordering::Relaxed) {
-            return Err("Claude (MCP) is turned off in ASPHONIX settings.".into());
-        }
-        let me = b.session.lock().unwrap().cfg.as_ref().map(|c| c.username.clone());
-        // The backend's own store: smart-playlist edits from the UI and from MCP share one copy.
-        let ctx = tools::Ctx { db: &b.db, smart: &b.smart, player: &b.engine, me, allow_control: b.svc.mcp_allow_control.load(Ordering::Relaxed) };
-        tools::call(&ctx, tool, args)
-    }
-}
-
-impl RealBackend {
-    /// Where `asphonix-mcp` is expected: next to the running executable.
-    fn mcp_bridge_path() -> Option<std::path::PathBuf> {
-        let exe = std::env::current_exe().ok()?;
-        Some(exe.parent()?.join(if cfg!(windows) { "asphonix-mcp.exe" } else { "asphonix-mcp" }))
-    }
-
-    /// `mcp_get_status`.
-    pub(crate) fn mcp_status_impl(&self) -> ApiResult<McpStatus> {
-        let path = Self::mcp_bridge_path();
-        let s = &self.0.svc;
-        Ok(McpStatus {
-            enabled: s.mcp_enabled.load(Ordering::Relaxed),
-            allow_control: s.mcp_allow_control.load(Ordering::Relaxed),
-            listening: s.mcp.is_listening(),
-            bridge_exists: path.as_ref().is_some_and(|p| p.exists()),
-            register_command: path.as_ref().map(|p| format!("claude mcp add asphonix -- \"{}\"", p.display())),
-            bridge_path: path.map(|p| p.display().to_string()),
-            last_error: s.mcp.last_error(),
-        })
-    }
-
-    /// "Claude (MCP)" master switch (default OFF). On = a fresh token, the local named pipe and `mcp.json`
-    /// in the config dir; off = all of that torn down. Persisting the flag is the settings layer's job.
-    pub fn set_mcp_enabled(&self, enabled: bool) -> ApiResult<McpStatus> {
-        let s = &self.0.svc;
-        if enabled {
-            let dispatch: Arc<dyn asphonix_core::mcp_bridge::Dispatch> = Arc::new(RealDispatch(Arc::downgrade(&self.0)));
-            self.0.rt.block_on(s.mcp.start(dispatch, &self.0.dir)).map_err(|m| ApiError::new(ErrorCode::Unknown, m))?;
-            s.mcp_enabled.store(true, Ordering::Relaxed);
-        } else {
-            // Gate first: from here on no new tool call passes `RealDispatch`, even on a connection the shutdown
-            // below has not closed yet. A call already running on the blocking pool still finishes.
-            s.mcp_enabled.store(false, Ordering::Relaxed);
-            self.0.rt.block_on(s.mcp.stop(&self.0.dir));
-        }
-        self.mcp_status_impl()
-    }
-
-    /// Startup: applies the persisted service flags before anything else runs (the flags are
-    /// stored at once; the MCP listener starts 3 s later and only if still enabled).
-    pub(crate) fn apply_service_settings(&self, s: &asphonix_core::secrets::Settings) {
-        self.set_auto_check_updates(s.auto_check_updates);
-        self.0.svc.mcp_allow_control.store(s.mcp_allow_control, Ordering::Relaxed);
-        if !s.mcp_enabled {
-            return;
-        }
-        self.0.svc.mcp_enabled.store(true, Ordering::Relaxed);
-        // Weak: a backend dropped within the delay (tests, early exit) starts nothing.
-        let weak = Arc::downgrade(&self.0);
-        std::thread::spawn(move || {
-            std::thread::sleep(MCP_START_DELAY);
-            let Some(inner) = weak.upgrade() else { return };
-            let b = RealBackend(inner);
-            if b.0.svc.mcp_enabled.load(Ordering::Relaxed)
-                && let Err(e) = b.set_mcp_enabled(true)
-            {
-                tracing::warn!(error = %e.message, "Claude (MCP) bridge not started");
-            }
-        });
-    }
-
-    /// "Allow playback control" (default OFF, only meaningful while enabled). Read live on every tool call.
-    pub fn set_mcp_allow_control(&self, allow: bool) -> ApiResult<McpStatus> {
-        self.0.svc.mcp_allow_control.store(allow, Ordering::Relaxed);
-        self.mcp_status_impl()
     }
 }
 

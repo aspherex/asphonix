@@ -708,10 +708,6 @@ pub struct Settings {
     #[serde(default)]
     pub track_overlay_corner: crate::types_lists::OverlayCorner,
     #[serde(default)]
-    pub mcp_enabled: bool,
-    #[serde(default)]
-    pub mcp_allow_control: bool,
-    #[serde(default)]
     pub verbose_logging: bool,
 }
 

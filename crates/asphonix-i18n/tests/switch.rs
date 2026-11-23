@@ -44,7 +44,6 @@ const SAME_IN_GERMAN: &[&str] = &[
     "settings-server-url",
     "settings-ping",
     "settings-panel-updates",
-    "settings-panel-mcp",
     "flow-menu",
     "info-format",
     "info-bitrate",

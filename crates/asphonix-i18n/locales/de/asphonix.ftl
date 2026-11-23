@@ -120,17 +120,6 @@ settings-check-now = Jetzt prüfen
 settings-update-available = Update { $version } verfügbar
 settings-up-to-date = ASPHONIX ist auf dem neuesten Stand
 settings-update-check-failed = Suche nach Updates fehlgeschlagen
-settings-panel-mcp = Claude (MCP)
-settings-mcp-hint = Erlaubt Claude Code oder Claude Desktop, über eine rein lokale Verbindung (kein Netzwerkport) die Bibliothek, den Wiedergabeverlauf und die Warteschlange zu lesen. Alles, was Claude liest, wird als Teil der Unterhaltung an Claude (Anthropic) gesendet: Titel-, Album- und Künstlernamen, Wiedergabelisten, Verlauf und die aktuelle Wiedergabe. Serveradresse, Passwort und Dateipfade sieht Claude nie, und diese Version kann auf dem Server nichts ändern (keine Änderungen an Wiedergabelisten, Likes oder Bewertungen).
-settings-mcp-enable = Claude meine Bibliothek lesen lassen
-settings-mcp-control = Steuerung erlauben (Wiedergabe, Überspringen, Warteschlange, Lautstärke)
-settings-mcp-connection = Verbindung
-settings-mcp-listening = Empfangsbereit
-settings-mcp-not-listening = Nicht empfangsbereit
-settings-mcp-register = Einmalig in Claude Code registrieren:
-settings-copied = Kopiert
-settings-copy-command = Befehl kopieren
-settings-mcp-missing = asphonix-mcp wurde neben ASPHONIX nicht gefunden. Der Windows-Installer legt es dort ab; eine Neuinstallation oder ein Update von ASPHONIX behebt das. Entwicklungs-Builds und macOS: mit npm run build:mcp bauen (oder cargo build --release in tools/asphonix-mcp) und unter diesem Pfad ablegen.
 settings-logout = Abmelden
 
 ## Drag and drop, toasts, track-change card

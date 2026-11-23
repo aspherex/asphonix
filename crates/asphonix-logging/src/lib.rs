@@ -1,6 +1,6 @@
 //! Structured logging for the ASPHONIX binaries.
 //!
-//! Libraries (`asphonix-core`, `asphonix-real`, `asphonix-ui`, `asphonix-mcp`) only emit `tracing` events; the binaries call
+//! Libraries (`asphonix-core`, `asphonix-real`, `asphonix-ui`) only emit `tracing` events; the binary calls
 //! [`init`] once at startup. Events go to `<dir>/<prefix>.YYYY-MM-DD.jsonl` (one JSON object per line, see
 //! `json.rs` for the schema) through a lossy, bounded, non-blocking writer: a slow disk drops lines, it never
 //! blocks the UI or the engine. Files rotate daily; at most [`MAX_LOG_FILES`] are kept.
@@ -230,7 +230,7 @@ pub fn file_name(prefix: &str, date: &str) -> String {
     format!("{prefix}.{date}.jsonl")
 }
 
-/// The date of a `<prefix>.YYYY-MM-DD.jsonl` file name (exact prefix: `asphonix` never matches `asphonix-mcp.*`).
+/// The date of a `<prefix>.YYYY-MM-DD.jsonl` file name (exact prefix: `asphonix` never matches `asphonix-other.*`).
 fn dated<'a>(name: &'a str, prefix: &str) -> Option<&'a str> {
     let date = name.strip_prefix(prefix)?.strip_prefix('.')?.strip_suffix(".jsonl")?;
     let b = date.as_bytes();

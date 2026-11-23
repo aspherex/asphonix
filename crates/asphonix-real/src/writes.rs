@@ -27,7 +27,7 @@ impl RealBackend {
         self.0.session.lock().unwrap().cfg.as_ref().map(|c| c.username.clone())
     }
 
-    /// Smart/read-only flags (same rule as `mcp_bridge::sources::apply_playlist_access`).
+    /// Smart/read-only flags (`library::playlist_access_flags`).
     fn access(&self, p: &mut core::Playlist) {
         let me = self.current_username();
         let (smart, read_only) = library::playlist_access_flags(p.server_read_only, p.owner.as_deref(), me.as_deref());

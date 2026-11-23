@@ -175,22 +175,6 @@ pub enum OverlayCorner {
     BottomRight,
 }
 
-/// `McpStatus`
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct McpStatus {
-    pub enabled: bool,
-    pub allow_control: bool,
-    pub listening: bool,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub bridge_path: Option<String>,
-    pub bridge_exists: bool,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub register_command: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub last_error: Option<String>,
-}
-
 /// `ArtCacheStatus`
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -214,7 +198,5 @@ pub enum SettingChange {
     TrackOverlay(bool),
     TrackOverlayCorner(OverlayCorner),
     FreeMemoryWhenMinimized(bool),
-    McpEnabled(bool),
-    McpAllowControl(bool),
     VerboseLogging(bool),
 }

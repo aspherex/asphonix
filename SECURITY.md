@@ -18,7 +18,6 @@ you prefer otherwise.
 
 In scope:
 
-- The **MCP bridge** (local named pipe / Unix socket, its handshake and token, the playback-control opt-in).
 - **Credential handling** (OS keychain use, anything that could leak the server password or tokens into files,
   logs or crash reports).
 - **Network handling** towards the Subsonic server (TLS, URL handling, response parsing).

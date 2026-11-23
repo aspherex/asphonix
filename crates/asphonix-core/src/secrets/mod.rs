@@ -96,13 +96,6 @@ pub struct Settings {
     /// Corner of the screen for that card. Defaults to top left.
     #[serde(default)]
     pub track_overlay_corner: crate::config::OverlayCorner,
-    // --- mcp-bridge block ---
-    /// "Claude (MCP)": the local bridge listener (`mcp_bridge`). Defaults off.
-    #[serde(default)]
-    pub mcp_enabled: bool,
-    /// "Allow playback control" for MCP clients. Defaults off.
-    #[serde(default)]
-    pub mcp_allow_control: bool,
     // --- diagnostics ---
     /// "Verbose logging": debug-level events from ASPHONIX in the log file (`asphonix_logging::set_verbose`,
     /// applied live). Defaults off.
@@ -142,8 +135,6 @@ impl Default for Settings {
             track_overlay: true,
             free_memory_when_minimized: true,
             track_overlay_corner: Default::default(),
-            mcp_enabled: false,
-            mcp_allow_control: false,
             verbose_logging: false,
         }
     }

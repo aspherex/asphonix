@@ -1087,10 +1087,6 @@ pub struct Settings {
     pub free_memory_when_minimized: bool,
     /// Corner of the work area for that card (default top left).
     pub track_overlay_corner: crate::config::OverlayCorner,
-    /// "Claude (MCP)" (default off): the local bridge for `asphonix-mcp` (`mcp_bridge::`).
-    pub mcp_enabled: bool,
-    /// "Allow playback control" for MCP clients (default off).
-    pub mcp_allow_control: bool,
     /// "Verbose logging" (default off): debug-level events in the log file.
     pub verbose_logging: bool,
 }

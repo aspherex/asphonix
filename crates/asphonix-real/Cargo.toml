@@ -23,6 +23,5 @@ tracing.workspace = true
 
 [dev-dependencies]
 asphonix-logging = { path = "../asphonix-logging", features = ["test-support"] }
-asphonix-mcp = { path = "../asphonix-mcp" }
 asphonix-testkit = { path = "../asphonix-testkit" }
 url.workspace = true

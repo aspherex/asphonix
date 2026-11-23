@@ -1,4 +1,4 @@
-//! The settings page: Output, Scrobbling, Shuffle, Playback, Server, Updates, Claude (MCP), Log out.
+//! The settings page: Output, Scrobbling, Shuffle, Playback, Server, Updates, Log out.
 //! Every control updates its local state optimistically, then calls the backend setter.
 use super::ui::{scroll_page, wrap_text};
 use super::ListsEvent;
@@ -12,10 +12,9 @@ use crate::widgets::text_input::{InputEvent, TextInput};
 use crate::widgets::ui::segmented;
 use crate::widgets::{hard_shadow, icon};
 use crate::widgets::tooltip::Tip;
-use gpui::{AnyElement, ClickEvent, ClipboardItem, Context, CursorStyle, Entity, EventEmitter, IntoElement, Render, ScrollHandle, Subscription, Timer, WeakEntity, Window, div, prelude::*, px};
+use gpui::{AnyElement, ClickEvent, Context, CursorStyle, Entity, EventEmitter, IntoElement, Render, ScrollHandle, Subscription, WeakEntity, Window, div, prelude::*, px};
 use asphonix_api::*;
 use std::sync::Arc;
-use std::time::Duration;
 use asphonix_i18n::{Lang, tr};
 
 /// The last "Check now" result (translated at render time, so a language switch re-labels it).
@@ -31,14 +30,12 @@ pub struct SettingsView {
     backend: Arc<dyn Backend>,
     menu: Entity<ContextMenu>,
     s: Settings,
-    mcp: Option<McpStatus>,
     status: Option<SessionStatus>,
     devices: Vec<OutputDevice>,
     out: Option<OutputStatus>,
     art: Option<ArtCacheStatus>,
     update_msg: Option<UpdateMsg>,
     checking: bool,
-    copied: bool,
     threshold: Entity<TextInput>,
     window_size: Entity<TextInput>,
     /// number inputs commit on Enter or when they lose focus
@@ -111,18 +108,14 @@ impl SettingsView {
                 replay_gain_mode: ReplayGainMode::Off,
                 track_overlay: true,
                 track_overlay_corner: OverlayCorner::TopLeft,
-                mcp_enabled: false,
-                mcp_allow_control: false,
                 verbose_logging: false,
             },
-            mcp: None,
             status: None,
             devices: Vec::new(),
             out: None,
             art: None,
             update_msg: None,
             checking: false,
-            copied: false,
             threshold,
             window_size,
             focused: [false; 2],
@@ -138,7 +131,7 @@ impl SettingsView {
         cx.spawn(async move |this, cx| {
             let r = cx
                 .background_executor()
-                .spawn(async move { (b.auth_session_status(), b.output_list_devices(), b.output_get_status(), b.settings_get(), b.mcp_status(), b.art_cache_status()) })
+                .spawn(async move { (b.auth_session_status(), b.output_list_devices(), b.output_get_status(), b.settings_get(), b.art_cache_status()) })
                 .await;
             let _ = this.update(cx, |t, cx| {
                 t.status = r.0.ok();
@@ -147,8 +140,7 @@ impl SettingsView {
                 if let Ok(s) = r.3 {
                     t.s = s;
                 }
-                t.mcp = r.4.ok();
-                t.art = r.5.ok();
+                t.art = r.4.ok();
                 let (th, ws) = (t.s.play_threshold_sec.to_string(), t.s.queue_window_size.to_string());
                 t.threshold.update(cx, |i, cx| i.set_content(&th, cx));
                 t.window_size.update(cx, |i, cx| i.set_content(&ws, cx));
@@ -172,29 +164,19 @@ impl SettingsView {
             SettingChange::TrackOverlay(v) => self.s.track_overlay = *v,
             SettingChange::TrackOverlayCorner(v) => self.s.track_overlay_corner = *v,
             SettingChange::FreeMemoryWhenMinimized(v) => self.s.free_memory_when_minimized = *v,
-            SettingChange::McpEnabled(v) => self.s.mcp_enabled = *v,
-            SettingChange::McpAllowControl(v) => self.s.mcp_allow_control = *v,
             SettingChange::VerboseLogging(v) => self.s.verbose_logging = *v,
         }
         if matches!(ch, SettingChange::TrackOverlay(_) | SettingChange::TrackOverlayCorner(_)) {
             cx.emit(ListsEvent::TrackOverlay(self.s.track_overlay, self.s.track_overlay_corner));
         }
-        let mcp = matches!(ch, SettingChange::McpEnabled(_) | SettingChange::McpAllowControl(_));
         let b = self.backend.clone();
         cx.spawn(async move |this, cx| {
-            let m = cx
-                .background_executor()
+            cx.background_executor()
                 .spawn(async move {
                     let _ = b.settings_set(ch);
-                    if mcp { b.mcp_status().ok() } else { None }
                 })
                 .await;
-            let _ = this.update(cx, |t, cx| {
-                if m.is_some() {
-                    t.mcp = m;
-                }
-                cx.notify();
-            });
+            let _ = this.update(cx, |_, cx| cx.notify());
         })
         .detach();
         cx.notify();
@@ -503,54 +485,6 @@ impl Render for SettingsView {
             ];
             // ---- Diagnostics
             let diagnostics = vec![Self::row(&th, tr!(SettingsVerboseLogging), self.toggle(&th, "set-verbose-log", self.s.verbose_logging, SettingChange::VerboseLogging, cx)).into_any_element()];
-            // ---- MCP
-            let mut mcp_rows: Vec<AnyElement> = vec![
-                Self::hint(
-                    &th,
-                    window,
-                    tr!(SettingsMcpHint),
-                    false,
-                ),
-                Self::row(&th, tr!(SettingsMcpEnable), self.toggle(&th, "set-mcp", self.mcp.as_ref().map(|m| m.enabled).unwrap_or(false), SettingChange::McpEnabled, cx)).into_any_element(),
-            ];
-            if let Some(m) = self.mcp.clone().filter(|m| m.enabled) {
-                mcp_rows.push(Self::row(&th, tr!(SettingsMcpControl), self.toggle(&th, "set-mcp-ctl", m.allow_control, SettingChange::McpAllowControl, cx)).into_any_element());
-                mcp_rows.push(Self::row(&th, tr!(SettingsMcpConnection), Self::value(&th, if m.listening { tr!(SettingsMcpListening) } else { tr!(SettingsMcpNotListening) })).into_any_element());
-                if let Some(cmd) = m.register_command.clone() {
-                    mcp_rows.push(Self::hint(&th, window, tr!(SettingsMcpRegister), false));
-                    let lines = wrap_text(&th, window, &cmd, MONO_DATA, 584.0 - 2.0 - 2.0 * space::SM);
-                    mcp_rows.push(
-                        div()
-                            .flex()
-                            .flex_col()
-                            .px(px(space::SM))
-                            .py(px(space::XS))
-                            .bg(th.base)
-                            .border_1()
-                            .border_color(th.border)
-                            .children(lines.into_iter().map(|l| txt(&th, MONO_DATA, l).color(th.text)))
-                            .into_any_element(),
-                    );
-                    let cmd2 = cmd.clone();
-                    let copy = Self::select_box(&th, "set-copy", txt(&th, LABEL_CAPS, if self.copied { tr!(SettingsCopied) } else { tr!(SettingsCopyCommand) }).color(th.text).into_any_element()).on_click(cx.listener(move |t, _, _, cx| {
-                        cx.write_to_clipboard(ClipboardItem::new_string(cmd2.clone()));
-                        t.copied = true;
-                        cx.notify();
-                        cx.spawn(async move |this, cx| {
-                            Timer::after(Duration::from_millis(1500)).await;
-                            let _ = this.update(cx, |t, cx| {
-                                t.copied = false;
-                                cx.notify();
-                            });
-                        })
-                        .detach();
-                    }));
-                    mcp_rows.push(div().flex().flex_row().child(copy).into_any_element());
-                }
-                if !m.bridge_exists {
-                    mcp_rows.push(Self::hint(&th, window, tr!(SettingsMcpMissing), true));
-                }
-            }
             // ---- logout
             let logout = div()
                 .id("set-logout")
@@ -591,9 +525,7 @@ impl Render for SettingsView {
                 .child(Self::panel(&th, tr!(SettingsPanelPlayback), playback))
                 .child(Self::panel(&th, tr!(SettingsPanelServer), server))
                 .child(Self::panel(&th, tr!(SettingsPanelUpdates), updates))
-                .child(Self::panel(&th, tr!(SettingsPanelDiagnostics), diagnostics))
-                .child(Self::panel(&th, tr!(SettingsPanelMcp), mcp_rows))
-                .child(div().flex().flex_row().child(logout))
+                .child(Self::panel(&th, tr!(SettingsPanelDiagnostics), diagnostics))                .child(div().flex().flex_row().child(logout))
                 .into_any_element()
         })
     }
