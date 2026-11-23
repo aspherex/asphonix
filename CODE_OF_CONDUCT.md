@@ -37,7 +37,7 @@ This Code of Conduct applies within all community spaces, and also applies when 
 
 ## Enforcement
 
-Instances of abusive, harassing, or otherwise unacceptable behavior may be reported to the community leaders responsible for enforcement at **TODO-CONDUCT-CONTACT** (a project e-mail address; to be added before this repository goes public). All complaints will be reviewed and investigated promptly and fairly.
+Instances of abusive, harassing, or otherwise unacceptable behavior may be reported to the community leaders responsible for enforcement privately through GitHub: use **Security > Report a vulnerability** on this repository ([direct link](https://github.com/aspherex/asphonix/security/advisories/new); only the maintainers can read these reports, so it works for conduct reports too) or contact the maintainer [@aspherex](https://github.com/aspherex). All complaints will be reviewed and investigated promptly and fairly.
 
 All community leaders are obligated to respect the privacy and security of the reporter of any incident.
 
